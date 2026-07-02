@@ -99,6 +99,15 @@ impl Store {
         Ok(s)
     }
 
+    #[cfg(feature = "encryption")]
+    pub fn open_encrypted(path: &str, key: &str) -> rusqlite::Result<Self> {
+        let conn = Connection::open(path)?;
+        conn.pragma_update(None, "key", key)?;
+        let s = Store { conn };
+        s.migrate()?;
+        Ok(s)
+    }
+
     fn migrate(&self) -> rusqlite::Result<()> {
         self.conn.execute_batch(SCHEMA)
     }

@@ -24,9 +24,34 @@ categorization).
 ## Layout
 
     outflow/
-      core/            domain logic, storage, detection (this is the real code)
-      cli/             headless entrypoint            (planned)
+      core/            domain logic, storage, detection
+      cli/             headless entrypoint (pull, categorize, report, subs, fix)
       app/             Tauri desktop frontend         (planned)
+      examples/        a sample SimpleFIN response for --from-file
+
+## Using the CLI
+
+    cargo run -p outflow-cli -- --db out.db pull --from-file examples/sample-accounts.json
+    cargo run -p outflow-cli -- --db out.db categorize
+    cargo run -p outflow-cli -- --db out.db fix <txn_id> Streaming
+    cargo run -p outflow-cli -- --db out.db report --by category
+    cargo run -p outflow-cli -- --db out.db report --by merchant --top 10
+    cargo run -p outflow-cli -- --db out.db report --by monthly --since 2024-01-01
+    cargo run -p outflow-cli -- --db out.db subs
+
+The database path also reads from `OUTFLOW_DB`. Reports accept `--since` /
+`--until` (YYYY-MM-DD, since-inclusive, until-exclusive) and `--posted-only`.
+
+### Feature flags
+
+The dev build has no network, keychain, or encryption, so the whole pipeline is
+exercised via `pull --from-file`. For real use on a Mac:
+
+    cargo build --release --features "net,keychain,encryption"
+
+- `net`        live `pull` fetches the SimpleFIN access URL's `/accounts`
+- `keychain`   reads the access URL from the OS keychain (else `OUTFLOW_SFIN_URL`)
+- `encryption` opens the SQLite database with SQLCipher
 
 ## Status
 
@@ -42,14 +67,14 @@ Implemented in `core`:
 - `categorize`    `Categorizer` port and a deterministic rule engine (exact and
                   contains matching, longest-match precedence); manual
                   corrections write rules that then catch sibling transactions
-- `query`         analytics over stored data: spend by category, merchant
-                  leaderboard, monthly inflow/outflow, with date-range and
-                  pending filters
+- `query`         analytics: spend by category, merchant leaderboard, monthly
+                  inflow/outflow, with date-range and pending filters
 - `subscriptions` recurring-charge detection over accumulated history
 
-Not yet built: the SimpleFIN HTTP client (lands in the CLI, where network is
-available), the model-backed categorizer fallback, encryption-at-rest, keychain
-integration, CLI, GUI.
+`cli` wires these into a headless tool. The live SimpleFIN HTTP call, keychain
+read, and SQLCipher open are behind feature flags (above).
+
+Not yet built: the model-backed categorizer fallback, the Tauri GUI.
 
 Known limitations: with only a checking account and no transfer detection,
 transfers (to savings, credit-card payments) count as outflow, so spending

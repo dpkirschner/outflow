@@ -1,0 +1,27 @@
+{
+  "errors": [],
+  "accounts": [
+    {
+      "org": { "name": "Chase", "domain": "chase.com" },
+      "id": "ACT-checking",
+      "name": "Total Checking",
+      "currency": "USD",
+      "balance": "3812.44",
+      "balance-date": 1709251200,
+      "transactions": [
+        { "id": "c1", "posted": 1704067200, "amount": "6200.00", "description": "ACME CORP PAYROLL" },
+        { "id": "c2", "posted": 1704153600, "amount": "-15.99", "description": "NETFLIX.COM", "payee": "Netflix" },
+        { "id": "c3", "posted": 1704240000, "amount": "-11.99", "description": "SQ *SPOTIFY 8842" },
+        { "id": "c4", "posted": 1704326400, "amount": "-87.30", "description": "WHOLE FOODS MKT 102", "payee": "Whole Foods" },
+        { "id": "c5", "posted": 1704412800, "amount": "-5.75", "description": "SQ *BLUE BOTTLE 4471" },
+        { "id": "c6", "posted": 1706745600, "amount": "6200.00", "description": "ACME CORP PAYROLL" },
+        { "id": "c7", "posted": 1706832000, "amount": "-15.99", "description": "NETFLIX.COM", "payee": "Netflix" },
+        { "id": "c8", "posted": 1706918400, "amount": "-11.99", "description": "SQ *SPOTIFY 9001" },
+        { "id": "c9", "posted": 1707004800, "amount": "-112.08", "description": "WHOLE FOODS MKT 102", "payee": "Whole Foods" },
+        { "id": "c10", "posted": 1709251200, "amount": "-15.99", "description": "NETFLIX.COM", "payee": "Netflix" },
+        { "id": "c11", "posted": 1709337600, "amount": "-11.99", "description": "SQ *SPOTIFY 7710" },
+        { "id": "c12", "posted": 1709424000, "amount": "-42.10", "description": "SHELL OIL 5567", "pending": true }
+      ]
+    }
+  ]
+}

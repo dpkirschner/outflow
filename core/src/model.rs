@@ -1,0 +1,93 @@
+use crate::money::Money;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AccountKind {
+    Checking,
+    Savings,
+    Credit,
+    Other,
+}
+
+impl AccountKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AccountKind::Checking => "checking",
+            AccountKind::Savings => "savings",
+            AccountKind::Credit => "credit",
+            AccountKind::Other => "other",
+        }
+    }
+
+    pub fn from_str(s: &str) -> AccountKind {
+        match s {
+            "checking" => AccountKind::Checking,
+            "savings" => AccountKind::Savings,
+            "credit" => AccountKind::Credit,
+            _ => AccountKind::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Account {
+    pub id: String,
+    pub org: String,
+    pub name: String,
+    pub kind: AccountKind,
+    pub balance: Money,
+    pub currency: String,
+    pub last_synced: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CategorySource {
+    SimpleFin,
+    Rule,
+    Llm,
+    Manual,
+}
+
+impl CategorySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CategorySource::SimpleFin => "simplefin",
+            CategorySource::Rule => "rule",
+            CategorySource::Llm => "llm",
+            CategorySource::Manual => "manual",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<CategorySource> {
+        match s {
+            "simplefin" => Some(CategorySource::SimpleFin),
+            "rule" => Some(CategorySource::Rule),
+            "llm" => Some(CategorySource::Llm),
+            "manual" => Some(CategorySource::Manual),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Transaction {
+    pub id: String,
+    pub account_id: String,
+    pub posted: i64,
+    pub amount: Money,
+    pub description: String,
+    pub payee: Option<String>,
+    pub category: Option<String>,
+    pub category_source: Option<CategorySource>,
+    pub pending: bool,
+    pub raw: String,
+}
+
+impl Transaction {
+    pub fn merchant(&self) -> &str {
+        match &self.payee {
+            Some(p) if !p.is_empty() => p,
+            _ => &self.description,
+        }
+    }
+}

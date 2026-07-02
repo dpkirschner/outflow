@@ -36,12 +36,17 @@ Implemented in `core`:
 - `model`         accounts, transactions, category source
 - `store`         SQLite persistence; id-keyed upsert for posted transactions,
                   delete-and-replace for pending (avoids pending/posted
-                  double-counting)
+                  double-counting); rule storage and categorization passes
+- `source`        SimpleFIN parser behind the `TransactionSource` port; boundary
+                  parsing that normalizes sign, currency, and decimal amounts
+- `categorize`    `Categorizer` port and a deterministic rule engine (exact and
+                  contains matching, longest-match precedence); manual
+                  corrections write rules that then catch sibling transactions
 - `subscriptions` recurring-charge detection over accumulated history
 
-Not yet built: SimpleFIN source adapter, categorizer (rules + model fallback),
-analytics queries for the dashboards, encryption-at-rest, keychain integration,
-CLI, GUI.
+Not yet built: the SimpleFIN HTTP client (lands in the CLI, where network is
+available), the model-backed categorizer fallback, analytics queries for the
+dashboards, encryption-at-rest, keychain integration, CLI, GUI.
 
 ## Building
 

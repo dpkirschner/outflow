@@ -42,11 +42,19 @@ Implemented in `core`:
 - `categorize`    `Categorizer` port and a deterministic rule engine (exact and
                   contains matching, longest-match precedence); manual
                   corrections write rules that then catch sibling transactions
+- `query`         analytics over stored data: spend by category, merchant
+                  leaderboard, monthly inflow/outflow, with date-range and
+                  pending filters
 - `subscriptions` recurring-charge detection over accumulated history
 
 Not yet built: the SimpleFIN HTTP client (lands in the CLI, where network is
-available), the model-backed categorizer fallback, analytics queries for the
-dashboards, encryption-at-rest, keychain integration, CLI, GUI.
+available), the model-backed categorizer fallback, encryption-at-rest, keychain
+integration, CLI, GUI.
+
+Known limitations: with only a checking account and no transfer detection,
+transfers (to savings, credit-card payments) count as outflow, so spending
+totals overstate consumption until transfer classification and card accounts are
+added. Monthly buckets are UTC.
 
 ## Building
 

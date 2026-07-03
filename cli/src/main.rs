@@ -24,7 +24,12 @@ enum Cmd {
         #[arg(long)]
         from_file: Option<String>,
     },
-    Categorize,
+    Categorize {
+        /// After the rule pass, send the remaining uncategorized merchants to
+        /// an LLM (needs --features net and ANTHROPIC_API_KEY).
+        #[arg(long)]
+        llm: bool,
+    },
     Report {
         #[arg(long, value_enum, default_value_t = By::Category)]
         by: By,
@@ -304,6 +309,82 @@ fn write_secret_file(path: &str, access_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Anthropic Messages API adapter for the core `Prompter` trait. Lives in the
+/// CLI (where ureq already lives) so `core` stays network-free. Endpoint and
+/// model are env-configurable; auth is `ANTHROPIC_API_KEY`.
+#[cfg(feature = "net")]
+struct AnthropicPrompter {
+    url: String,
+    model: String,
+    api_key: String,
+}
+
+#[cfg(feature = "net")]
+impl AnthropicPrompter {
+    fn from_env() -> Result<Self, String> {
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
+        if api_key.is_empty() {
+            return Err("ANTHROPIC_API_KEY is empty".into());
+        }
+        let url = std::env::var("OUTFLOW_LLM_URL")
+            .unwrap_or_else(|_| "https://api.anthropic.com/v1/messages".into());
+        let model =
+            std::env::var("OUTFLOW_LLM_MODEL").unwrap_or_else(|_| "claude-opus-4-8".into());
+        Ok(AnthropicPrompter {
+            url,
+            model,
+            api_key,
+        })
+    }
+}
+
+#[cfg(feature = "net")]
+impl outflow_core::Prompter for AnthropicPrompter {
+    fn complete(&self, system: &str, user: &str) -> Result<String, outflow_core::LlmError> {
+        use outflow_core::LlmError;
+
+        let body = serde_json::json!({
+            "model": self.model,
+            "max_tokens": 4096,
+            "system": system,
+            "messages": [{ "role": "user", "content": user }],
+        })
+        .to_string();
+        let resp = ureq::post(&self.url)
+            .set("x-api-key", &self.api_key)
+            .set("anthropic-version", "2023-06-01")
+            .set("content-type", "application/json")
+            .send_string(&body)
+            .map_err(|e| LlmError::Transport(format!("{e}")))?;
+        let raw = resp
+            .into_string()
+            .map_err(|e| LlmError::Transport(format!("read body: {e}")))?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| LlmError::Parse(format!("response not JSON: {e}")))?;
+        // Concatenate all text blocks in content[].
+        let text: String = value
+            .get("content")
+            .and_then(|c| c.as_array())
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                    .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default();
+        if text.is_empty() {
+            return Err(LlmError::Parse(format!(
+                "no text in response: {}",
+                value
+            )));
+        }
+        Ok(text)
+    }
+}
+
 #[cfg(not(feature = "net"))]
 fn claim(_setup_token: &str) -> Result<(), String> {
     Err("claim needs --features net".into())
@@ -336,14 +417,74 @@ fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_categorize(store: &Store) -> Result<(), String> {
+fn cmd_categorize(store: &Store, llm: bool) -> Result<(), String> {
     let rules = store.ruleset().map_err(|e| format!("{e}"))?;
     let n = store
         .categorize_uncategorized(&rules, CategorySource::Rule)
         .map_err(|e| format!("{e}"))?;
+    println!("categorized {n} by rule");
+    if llm {
+        let m = categorize_llm(store)?;
+        println!("categorized {m} by llm");
+    }
     let remaining = store.uncategorized().map_err(|e| format!("{e}"))?.len();
-    println!("categorized {n} by rule; {remaining} still uncategorized");
+    println!("{remaining} still uncategorized");
     Ok(())
+}
+
+#[cfg(feature = "net")]
+fn categorize_llm(store: &Store) -> Result<usize, String> {
+    use outflow_core::{normalize_payee, LlmCategorizer, MerchantSample};
+    use std::collections::HashMap;
+
+    let uncategorized = store.uncategorized().map_err(|e| format!("{e}"))?;
+    if uncategorized.is_empty() {
+        return Ok(0);
+    }
+    // One decision per distinct merchant; keep a representative amount.
+    let mut samples: Vec<MerchantSample> = Vec::new();
+    let mut seen: HashMap<String, ()> = HashMap::new();
+    for t in &uncategorized {
+        let key = normalize_payee(t.merchant());
+        if key.is_empty() || seen.insert(key.clone(), ()).is_some() {
+            continue;
+        }
+        samples.push(MerchantSample {
+            merchant: key,
+            amount_cents: t.amount.cents(),
+        });
+    }
+
+    let categories = store.categories().map_err(|e| format!("{e}"))?;
+    if categories.is_empty() {
+        return Err("no categories in vocabulary; nothing to constrain the LLM to".into());
+    }
+    let categorizer = LlmCategorizer::new(AnthropicPrompter::from_env()?, categories);
+    let suggestions = categorizer
+        .suggest(&samples)
+        .map_err(|e| format!("llm: {e:?}"))?;
+
+    let by_merchant: HashMap<String, String> = suggestions
+        .into_iter()
+        .map(|s| (s.merchant, s.category))
+        .collect();
+
+    let mut applied = 0usize;
+    for t in &uncategorized {
+        let key = normalize_payee(t.merchant());
+        if let Some(cat) = by_merchant.get(&key) {
+            store
+                .set_category(&t.id, cat, CategorySource::Llm)
+                .map_err(|e| format!("{e}"))?;
+            applied += 1;
+        }
+    }
+    Ok(applied)
+}
+
+#[cfg(not(feature = "net"))]
+fn categorize_llm(_store: &Store) -> Result<usize, String> {
+    Err("--llm needs --features net".into())
 }
 
 fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(), String> {
@@ -420,7 +561,7 @@ fn run() -> Result<(), String> {
     match cli.cmd {
         Cmd::Claim { .. } => unreachable!("handled above"),
         Cmd::Pull { from_file } => cmd_pull(&store, from_file),
-        Cmd::Categorize => cmd_categorize(&store),
+        Cmd::Categorize { llm } => cmd_categorize(&store, llm),
         Cmd::Report {
             by,
             top,

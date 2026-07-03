@@ -1,4 +1,5 @@
 pub mod categorize;
+pub mod llm;
 pub mod model;
 pub mod money;
 pub mod query;
@@ -7,6 +8,7 @@ pub mod store;
 pub mod subscriptions;
 
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
+pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{Account, AccountKind, CategorySource, Transaction};
 pub use money::{Money, MoneyParseError};
 pub use query::{

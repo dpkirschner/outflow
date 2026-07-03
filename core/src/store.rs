@@ -39,6 +39,35 @@ pub struct UpsertResult {
     pub updated: usize,
 }
 
+/// Default category vocabulary, seeded on first open and used to constrain the
+/// LLM categorizer's output. Users can add to it via `add_category`.
+const DEFAULT_CATEGORIES: &[&str] = &[
+    "Groceries",
+    "Dining",
+    "Coffee",
+    "Transport",
+    "Fuel",
+    "Shopping",
+    "Entertainment",
+    "Streaming",
+    "Subscriptions",
+    "Utilities",
+    "Rent",
+    "Insurance",
+    "Health",
+    "Fitness",
+    "Travel",
+    "Income",
+    "Transfers",
+    "Fees",
+    "Education",
+    "Personal Care",
+    "Home",
+    "Gifts",
+    "Taxes",
+    "Other",
+];
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
@@ -109,7 +138,44 @@ impl Store {
     }
 
     fn migrate(&self) -> rusqlite::Result<()> {
-        self.conn.execute_batch(SCHEMA)
+        self.conn.execute_batch(SCHEMA)?;
+        self.seed_default_categories()
+    }
+
+    /// Populate the category vocabulary with a sensible default set on first
+    /// open. Only seeds when the table is empty, so user edits (adds/removes)
+    /// are never clobbered on subsequent opens.
+    fn seed_default_categories(&self) -> rusqlite::Result<()> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))?;
+        if count > 0 {
+            return Ok(());
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        for name in DEFAULT_CATEGORIES {
+            tx.execute(
+                "INSERT OR IGNORE INTO categories (name) VALUES (?1)",
+                params![name],
+            )?;
+        }
+        tx.commit()
+    }
+
+    pub fn add_category(&self, name: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO categories (name) VALUES (?1)",
+            params![name],
+        )?;
+        Ok(())
+    }
+
+    pub fn categories(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT name FROM categories ORDER BY name")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect()
     }
 
     pub fn upsert_accounts(&self, accounts: &[Account]) -> rusqlite::Result<()> {
@@ -365,6 +431,21 @@ mod tests {
         let all = s.all_transactions().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, "posted1");
+    }
+
+    #[test]
+    fn seeds_default_categories_and_respects_edits() {
+        let s = Store::open_in_memory().unwrap();
+        let seeded = s.categories().unwrap();
+        assert!(seeded.contains(&"Groceries".to_string()));
+        assert!(seeded.contains(&"Streaming".to_string()));
+
+        // add_category is idempotent; a new name shows up sorted.
+        s.add_category("Groceries").unwrap();
+        s.add_category("Charity").unwrap();
+        let after = s.categories().unwrap();
+        assert_eq!(after.iter().filter(|c| *c == "Groceries").count(), 1);
+        assert!(after.contains(&"Charity".to_string()));
     }
 
     #[test]

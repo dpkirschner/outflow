@@ -100,19 +100,56 @@ fn open_store(db: &str) -> Result<Store, String> {
 
 #[cfg(feature = "net")]
 fn access_url() -> Result<String, String> {
+    // 1. Explicit value in the environment (never logged, never in argv).
     if let Ok(u) = std::env::var("OUTFLOW_SFIN_URL") {
         if !u.is_empty() {
             return Ok(u);
         }
     }
+    // 2. A 0600 secret file. This is the headless-cron path: unlike the login
+    //    keychain, a file does not require an unlocked GUI session, so a
+    //    launchd/cron job on a headless Mac can read it.
+    if let Ok(p) = std::env::var("OUTFLOW_SFIN_URL_FILE") {
+        if !p.is_empty() {
+            return read_secret_file(&p);
+        }
+    }
+    // 3. OS keychain — the default for an interactive machine (written by `claim`).
     #[cfg(feature = "keychain")]
     {
         let entry = keyring::Entry::new("outflow", "simplefin-access-url")
             .map_err(|e| format!("keychain: {e}"))?;
-        return entry.get_password().map_err(|e| format!("keychain: {e}"));
+        return entry.get_password().map_err(|e| {
+            format!("keychain: {e} (headless? set OUTFLOW_SFIN_URL_FILE to a 0600 file instead)")
+        });
     }
     #[cfg(not(feature = "keychain"))]
-    Err("no OUTFLOW_SFIN_URL set and keychain feature disabled".into())
+    Err("no access URL: set OUTFLOW_SFIN_URL, or OUTFLOW_SFIN_URL_FILE to a 0600 file".into())
+}
+
+/// Read an access URL from a file, refusing it if group/other can read it.
+#[cfg(feature = "net")]
+fn read_secret_file(path: &str) -> Result<String, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)
+            .map_err(|e| format!("stat {path}: {e}"))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err(format!(
+                "{path} is group/other-accessible (mode {:o}); run `chmod 600 {path}`",
+                mode & 0o777
+            ));
+        }
+    }
+    let contents = std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
+    let url = contents.trim();
+    if url.is_empty() {
+        return Err(format!("{path} is empty"));
+    }
+    Ok(url.to_string())
 }
 
 #[cfg(feature = "net")]
@@ -225,9 +262,16 @@ fn claim(setup_token: &str) -> Result<(), String> {
     store_access_url(&access_url)
 }
 
-/// Persist the access URL: keychain if available, otherwise print an export line.
+/// Persist the access URL. Precedence mirrors `access_url` reads:
+/// an explicit `OUTFLOW_SFIN_URL_FILE` wins (the headless path), else the
+/// keychain, else we just print an export line for the user to place.
 #[cfg(feature = "net")]
 fn store_access_url(access_url: &str) -> Result<(), String> {
+    if let Ok(p) = std::env::var("OUTFLOW_SFIN_URL_FILE") {
+        if !p.is_empty() {
+            return write_secret_file(&p, access_url);
+        }
+    }
     #[cfg(feature = "keychain")]
     {
         let entry = keyring::Entry::new("outflow", "simplefin-access-url")
@@ -236,14 +280,28 @@ fn store_access_url(access_url: &str) -> Result<(), String> {
             .set_password(access_url)
             .map_err(|e| format!("keychain store: {e}"))?;
         println!("stored access URL in keychain (service=outflow); `pull` will use it");
-        Ok(())
+        return Ok(());
     }
     #[cfg(not(feature = "keychain"))]
     {
-        println!("access URL obtained. Set it for future pulls:");
+        println!("access URL obtained. Persist it for future pulls, e.g.:");
         println!("  export OUTFLOW_SFIN_URL='{access_url}'");
         Ok(())
     }
+}
+
+/// Write the access URL to a file with 0600 permissions (owner-only).
+#[cfg(feature = "net")]
+fn write_secret_file(path: &str, access_url: &str) -> Result<(), String> {
+    std::fs::write(path, format!("{access_url}\n")).map_err(|e| format!("write {path}: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("chmod {path}: {e}"))?;
+    }
+    println!("wrote access URL to {path} (0600); `pull` will read it via OUTFLOW_SFIN_URL_FILE");
+    Ok(())
 }
 
 #[cfg(not(feature = "net"))]

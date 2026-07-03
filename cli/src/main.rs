@@ -16,6 +16,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Exchange a SimpleFIN setup token for a durable access URL.
+    Claim {
+        setup_token: String,
+    },
     Pull {
         #[arg(long)]
         from_file: Option<String>,
@@ -121,7 +125,7 @@ fn fetch_live() -> Result<String, String> {
         },
         None => (None, url.clone()),
     };
-    let since = (now_secs() - 120 * 86400).max(0);
+    let since = (now_secs() - 90 * 86400).max(0);
     let endpoint = format!("{base}/accounts?pending=1&start-date={since}");
     let mut req = ureq::get(&endpoint);
     if let Some(c) = creds {
@@ -163,6 +167,90 @@ fn base64_basic(user: &str, pass: &str) -> String {
     out
 }
 
+#[cfg(feature = "net")]
+fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+    fn val(c: u8) -> Option<u32> {
+        match c {
+            b'A'..=b'Z' => Some((c - b'A') as u32),
+            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
+            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let clean: Vec<u8> = s
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+        .collect();
+    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
+    for chunk in clean.chunks(4) {
+        let mut acc = 0u32;
+        let mut bits = 0;
+        for &c in chunk {
+            let v = val(c).ok_or_else(|| format!("invalid base64 char {:?}", c as char))?;
+            acc = (acc << 6) | v;
+            bits += 6;
+        }
+        // Emit the high-order full bytes gathered from this chunk.
+        for shift in (0..bits / 8).map(|i| bits - 8 * (i + 1)) {
+            out.push(((acc >> shift) & 0xff) as u8);
+        }
+    }
+    Ok(out)
+}
+
+/// Exchange a base64 setup token for an access URL and persist it.
+#[cfg(feature = "net")]
+fn claim(setup_token: &str) -> Result<(), String> {
+    let decoded = base64_decode(setup_token.trim())
+        .map_err(|e| format!("decode setup token: {e}"))?;
+    let claim_url = String::from_utf8(decoded)
+        .map_err(|_| "setup token did not decode to a URL".to_string())?;
+    let claim_url = claim_url.trim();
+    if !claim_url.starts_with("http") {
+        return Err(format!("decoded claim URL looks wrong: {claim_url}"));
+    }
+    let resp = ureq::post(claim_url)
+        .call()
+        .map_err(|e| format!("claim request: {e}"))?;
+    let access_url = resp
+        .into_string()
+        .map_err(|e| format!("read claim body: {e}"))?
+        .trim()
+        .to_string();
+    if !access_url.starts_with("http") {
+        return Err(format!("claim did not return an access URL: {access_url}"));
+    }
+    store_access_url(&access_url)
+}
+
+/// Persist the access URL: keychain if available, otherwise print an export line.
+#[cfg(feature = "net")]
+fn store_access_url(access_url: &str) -> Result<(), String> {
+    #[cfg(feature = "keychain")]
+    {
+        let entry = keyring::Entry::new("outflow", "simplefin-access-url")
+            .map_err(|e| format!("keychain: {e}"))?;
+        entry
+            .set_password(access_url)
+            .map_err(|e| format!("keychain store: {e}"))?;
+        println!("stored access URL in keychain (service=outflow); `pull` will use it");
+        Ok(())
+    }
+    #[cfg(not(feature = "keychain"))]
+    {
+        println!("access URL obtained. Set it for future pulls:");
+        println!("  export OUTFLOW_SFIN_URL='{access_url}'");
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "net"))]
+fn claim(_setup_token: &str) -> Result<(), String> {
+    Err("claim needs --features net".into())
+}
+
 #[cfg(not(feature = "net"))]
 fn fetch_live() -> Result<String, String> {
     Err("live pull needs --features net; use `pull --from-file <path>` here".into())
@@ -180,6 +268,9 @@ fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
     let r = store
         .upsert_transactions(&fetched.transactions)
         .map_err(|e| format!("save transactions: {e}"))?;
+    for w in &fetched.warnings {
+        eprintln!("warning: {w}");
+    }
     for a in &fetched.accounts {
         println!("  {} [{}]  {}", a.name, a.kind.as_str(), dollars(a.balance.cents()));
     }
@@ -263,8 +354,13 @@ fn cmd_fix(store: &Store, txn_id: String, category: String, no_learn: bool) -> R
 
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
+    // Claim is a bootstrap step that needs no database.
+    if let Cmd::Claim { setup_token } = &cli.cmd {
+        return claim(setup_token);
+    }
     let store = open_store(&cli.db)?;
     match cli.cmd {
+        Cmd::Claim { .. } => unreachable!("handled above"),
         Cmd::Pull { from_file } => cmd_pull(&store, from_file),
         Cmd::Categorize => cmd_categorize(&store),
         Cmd::Report {

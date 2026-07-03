@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 pub struct Fetched {
     pub accounts: Vec<Account>,
     pub transactions: Vec<Transaction>,
+    /// Non-fatal advisory messages the bridge returned alongside data
+    /// (e.g. "Requested date range exceeds limit of 90 days and was capped.").
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -96,7 +99,10 @@ fn account_kind(name: &str) -> AccountKind {
 pub fn parse_account_set(json: &str) -> Result<Fetched, SourceError> {
     let set: SfinAccountSet =
         serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
-    if !set.errors.is_empty() {
+    // SimpleFIN returns advisory messages in `errors` even on success (the demo
+    // caps the date range and says so). Treat `errors` as fatal only when the
+    // bridge returned no accounts at all; otherwise surface them as warnings.
+    if set.accounts.is_empty() && !set.errors.is_empty() {
         return Err(SourceError::Remote(set.errors));
     }
 
@@ -164,6 +170,7 @@ pub fn parse_account_set(json: &str) -> Result<Fetched, SourceError> {
     Ok(Fetched {
         accounts,
         transactions,
+        warnings: set.errors,
     })
 }
 
@@ -242,6 +249,26 @@ mod tests {
         assert_eq!(
             parse_account_set(json),
             Err(SourceError::Remote(vec!["Connection to bank failed".into()]))
+        );
+    }
+
+    #[test]
+    fn advisory_errors_with_accounts_are_warnings_not_failure() {
+        // The live SimpleFIN demo returns a date-range warning in `errors`
+        // alongside valid accounts; that must not fail the whole pull.
+        let json = r#"{
+            "errors": ["Requested date range exceeds limit of 90 days and was capped."],
+            "accounts": [
+                { "org": {}, "id": "A", "name": "Checking", "balance": "1.00",
+                  "transactions": [ { "id": "x", "posted": 1, "amount": "-1.00" } ] }
+            ]
+        }"#;
+        let f = parse_account_set(json).unwrap();
+        assert_eq!(f.accounts.len(), 1);
+        assert_eq!(f.transactions.len(), 1);
+        assert_eq!(
+            f.warnings,
+            vec!["Requested date range exceeds limit of 90 days and was capped.".to_string()]
         );
     }
 

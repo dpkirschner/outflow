@@ -100,6 +100,17 @@ fn build_filter(
 }
 
 fn open_store(db: &str) -> Result<Store, String> {
+    // With the encryption feature, an OUTFLOW_DB_KEY opens the DB via SQLCipher.
+    // The key is a secret: read from the environment only, never argv or the DB.
+    #[cfg(feature = "encryption")]
+    {
+        if let Ok(key) = std::env::var("OUTFLOW_DB_KEY") {
+            if !key.is_empty() {
+                return Store::open_encrypted(db, &key)
+                    .map_err(|e| format!("open encrypted db {db}: {e}"));
+            }
+        }
+    }
     Store::open(db).map_err(|e| format!("open db {db}: {e}"))
 }
 

@@ -513,3 +513,64 @@ mod categorize_tests {
         assert_eq!(sibling.category.as_deref(), Some("Coffee"));
     }
 }
+
+#[cfg(all(test, feature = "encryption"))]
+mod encryption_tests {
+    use super::*;
+
+    fn tmp_path(tag: &str) -> String {
+        let mut p = std::env::temp_dir();
+        // process id keeps the path unique across concurrent test binaries.
+        p.push(format!("outflow-enc-{}-{}.db", tag, std::process::id()));
+        p.to_string_lossy().into_owned()
+    }
+
+    fn txn(id: &str) -> Transaction {
+        Transaction {
+            id: id.into(),
+            account_id: "acct".into(),
+            posted: 100,
+            amount: Money::from_cents(-500),
+            description: "d".into(),
+            payee: None,
+            category: None,
+            category_source: None,
+            pending: false,
+            raw: "{}".into(),
+        }
+    }
+
+    #[test]
+    fn encrypts_and_requires_correct_key() {
+        let path = tmp_path("roundtrip");
+        let _ = std::fs::remove_file(&path);
+
+        // Write with a key.
+        {
+            let s = Store::open_encrypted(&path, "correct horse").unwrap();
+            s.upsert_transactions(&[txn("a")]).unwrap();
+        }
+
+        // Reopen with the same key -> data is readable.
+        {
+            let s = Store::open_encrypted(&path, "correct horse").unwrap();
+            assert_eq!(s.count_transactions().unwrap(), 1);
+        }
+
+        // Wrong key must fail. This also proves SQLCipher is actually compiled
+        // in: if the build silently fell back to plain SQLite, the key pragma
+        // would be ignored and this would succeed.
+        assert!(
+            Store::open_encrypted(&path, "wrong key").is_err(),
+            "wrong key must not open the encrypted db"
+        );
+
+        // A plaintext open must also fail on an encrypted file.
+        assert!(
+            Store::open(&path).is_err(),
+            "plaintext open of an encrypted db must fail"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+}

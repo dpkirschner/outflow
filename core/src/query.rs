@@ -1,6 +1,7 @@
 use crate::model::Transaction;
 use crate::store::Store;
 use crate::subscriptions::normalize_payee;
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub struct TxnFilter {
@@ -58,21 +59,21 @@ fn ym_from_epoch(secs: i64) -> (i64, u32) {
     (year, m as u32)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CategorySpend {
     pub category: Option<String>,
     pub total_cents: i64,
     pub count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MerchantSpend {
     pub merchant: String,
     pub total_cents: i64,
     pub count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MonthlyFlow {
     pub year: i64,
     pub month: u32,

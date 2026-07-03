@@ -202,6 +202,26 @@ impl Store {
         tx.commit()
     }
 
+    pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, org, name, kind, balance_cents, currency, last_synced
+             FROM accounts ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let kind: String = r.get(3)?;
+            Ok(Account {
+                id: r.get(0)?,
+                org: r.get(1)?,
+                name: r.get(2)?,
+                kind: AccountKind::from_str(&kind),
+                balance: Money::from_cents(r.get(4)?),
+                currency: r.get(5)?,
+                last_synced: r.get(6)?,
+            })
+        })?;
+        rows.collect()
+    }
+
     pub fn upsert_transactions(&self, txns: &[Transaction]) -> rusqlite::Result<UpsertResult> {
         let tx = self.conn.unchecked_transaction()?;
 
@@ -446,6 +466,23 @@ mod tests {
         let after = s.categories().unwrap();
         assert_eq!(after.iter().filter(|c| *c == "Groceries").count(), 1);
         assert!(after.contains(&"Charity".to_string()));
+    }
+
+    #[test]
+    fn accounts_round_trip() {
+        let s = Store::open_in_memory().unwrap();
+        let a = Account {
+            id: "acct1".into(),
+            org: "Demo Bank".into(),
+            name: "Checking".into(),
+            kind: AccountKind::Checking,
+            balance: Money::from_cents(123456),
+            currency: "USD".into(),
+            last_synced: 42,
+        };
+        s.upsert_accounts(&[a.clone()]).unwrap();
+        let got = s.accounts().unwrap();
+        assert_eq!(got, vec![a]);
     }
 
     #[test]

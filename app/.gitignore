@@ -1,0 +1,7 @@
+node_modules
+dist
+.vite
+
+# Tauri generated
+src-tauri/gen
+src-tauri/target

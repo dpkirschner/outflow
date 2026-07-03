@@ -1,16 +1,17 @@
 use crate::model::Transaction;
+use serde::Serialize;
 use std::collections::HashMap;
 
 const DAY: i64 = 86400;
 const MIN_OCCURRENCES: usize = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Cadence {
     Monthly,
     Yearly,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Subscription {
     pub payee: String,
     pub cadence: Cadence,

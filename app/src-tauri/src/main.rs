@@ -190,14 +190,134 @@ fn pull_from_file(state: State<AppState>, path: String) -> CmdResult<PullResult>
     })
 }
 
+/// Live SimpleFIN pull: resolve the stored access URL, fetch, parse, upsert.
+/// Needs the `net` feature and a prior `claim` (or `OUTFLOW_SFIN_URL`).
+#[tauri::command]
+fn pull_live(state: State<AppState>) -> CmdResult<PullResult> {
+    #[cfg(feature = "net")]
+    {
+        let json = outflow_net::access_url().and_then(|u| outflow_net::fetch(&u))?;
+        let fetched = parse_account_set(&json).map_err(|err| format!("parse: {err:?}"))?;
+        let store = state.store.lock().map_err(e)?;
+        store.upsert_accounts(&fetched.accounts).map_err(e)?;
+        let r = store.upsert_transactions(&fetched.transactions).map_err(e)?;
+        Ok(PullResult {
+            added: r.added,
+            updated: r.updated,
+            accounts: fetched.accounts.len(),
+            warnings: fetched.warnings,
+        })
+    }
+    #[cfg(not(feature = "net"))]
+    {
+        let _ = state;
+        Err("this build has no network support (rebuild with --features net)".into())
+    }
+}
+
+/// Exchange a SimpleFIN setup token for a durable access URL and persist it
+/// (keychain by default, or a 0600 file when `OUTFLOW_SFIN_URL_FILE` is set).
+#[tauri::command]
+fn claim(setup_token: String) -> CmdResult<String> {
+    #[cfg(feature = "net")]
+    {
+        let url = outflow_net::claim_access_url(setup_token.trim())?;
+        let placed = match outflow_net::persist_access_url(&url)? {
+            outflow_net::Persisted::File(p) => format!("saved to {p}"),
+            outflow_net::Persisted::Keychain => "saved to keychain".into(),
+            outflow_net::Persisted::Ephemeral => {
+                "obtained but not persisted (set OUTFLOW_SFIN_URL_FILE)".into()
+            }
+        };
+        Ok(format!("Connected — access URL {placed}. Now hit Pull."))
+    }
+    #[cfg(not(feature = "net"))]
+    {
+        let _ = setup_token;
+        Err("this build has no network support (rebuild with --features net)".into())
+    }
+}
+
+/// LLM pass over the merchants the rule pass couldn't match. Needs the `net`
+/// feature and `ANTHROPIC_API_KEY`. Returns the count newly categorized.
+#[tauri::command]
+fn categorize_llm(state: State<AppState>) -> CmdResult<usize> {
+    #[cfg(feature = "net")]
+    {
+        use outflow_core::{normalize_payee, LlmCategorizer, MerchantSample};
+        use outflow_net::AnthropicPrompter;
+        use std::collections::HashMap;
+
+        let store = state.store.lock().map_err(e)?;
+        let uncategorized = store.uncategorized().map_err(e)?;
+        if uncategorized.is_empty() {
+            return Ok(0);
+        }
+        // One decision per distinct merchant; keep a representative amount.
+        let mut samples: Vec<MerchantSample> = Vec::new();
+        let mut seen: HashMap<String, ()> = HashMap::new();
+        for t in &uncategorized {
+            let key = normalize_payee(t.merchant());
+            if key.is_empty() || seen.insert(key.clone(), ()).is_some() {
+                continue;
+            }
+            samples.push(MerchantSample {
+                merchant: key,
+                amount_cents: t.amount.cents(),
+            });
+        }
+        let categories = store.categories().map_err(e)?;
+        if categories.is_empty() {
+            return Err("no categories in vocabulary; nothing to constrain the LLM to".into());
+        }
+        let categorizer = LlmCategorizer::new(AnthropicPrompter::from_env()?, categories);
+        let suggestions = categorizer
+            .suggest(&samples)
+            .map_err(|err| format!("llm: {err:?}"))?;
+        let by_merchant: HashMap<String, String> = suggestions
+            .into_iter()
+            .map(|s| (s.merchant, s.category))
+            .collect();
+        let mut applied = 0usize;
+        for t in &uncategorized {
+            let key = normalize_payee(t.merchant());
+            if let Some(cat) = by_merchant.get(&key) {
+                store.set_category(&t.id, cat, CategorySource::Llm).map_err(e)?;
+                applied += 1;
+            }
+        }
+        Ok(applied)
+    }
+    #[cfg(not(feature = "net"))]
+    {
+        let _ = state;
+        Err("this build has no network support (rebuild with --features net)".into())
+    }
+}
+
 fn open_store() -> Result<Store, String> {
     let db = std::env::var("OUTFLOW_DB").unwrap_or_else(|_| "outflow.db".into());
-    let store = Store::open(&db).map_err(|err| format!("open db {db}: {err}"))?;
+    let store = open_db(&db)?;
     // Surface which DB we opened and how full it is — a fresh/empty file is the
     // usual reason "no data shows". Visible in the `tauri dev` terminal.
     let count = store.count_transactions().unwrap_or(-1);
     eprintln!("outflow: opened db {db} ({count} transactions)");
     Ok(store)
+}
+
+fn open_db(db: &str) -> Result<Store, String> {
+    // With the encryption feature, OUTFLOW_DB_KEY opens the DB via SQLCipher.
+    // The key is a secret: environment only, never argv or the DB.
+    #[cfg(feature = "encryption")]
+    {
+        if let Ok(key) = std::env::var("OUTFLOW_DB_KEY") {
+            if !key.is_empty() {
+                return Store::open_encrypted(db, &key)
+                    .map_err(|err| format!("open encrypted db {db}: {err}"));
+            }
+        }
+    }
+    Store::open(db).map_err(|err| format!("open db {db}: {err}"))
 }
 
 fn main() {
@@ -220,6 +340,9 @@ fn main() {
             categories,
             set_category,
             pull_from_file,
+            pull_live,
+            claim,
+            categorize_llm,
         ])
         .run(tauri::generate_context!())
         .expect("error while running outflow");

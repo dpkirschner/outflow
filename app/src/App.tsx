@@ -87,12 +87,63 @@ export default function App() {
     }
   }, [notify, reload]);
 
+  const onCategorizeLlm = useCallback(async () => {
+    setBusy(true);
+    try {
+      // Rule pass first (cheap), then the LLM tail over what's left.
+      const r = await api.categorize();
+      const m = await api.categorizeLlm();
+      notify({ kind: "ok", text: `Categorized ${r.rule} by rule · ${m} by AI` });
+      await reload();
+    } catch (err) {
+      notify({ kind: "err", text: `AI categorize failed: ${String(err)}` });
+    } finally {
+      setBusy(false);
+    }
+  }, [notify, reload]);
+
+  const onPull = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await api.pullLive();
+      notify({
+        kind: "ok",
+        text: `Pulled ${r.accounts} account(s): ${r.added} added, ${r.updated} updated${
+          r.warnings.length ? ` · ${r.warnings.length} warning(s)` : ""
+        }`,
+      });
+      await reload();
+    } catch (err) {
+      notify({ kind: "err", text: `Pull failed: ${String(err)}` });
+    } finally {
+      setBusy(false);
+    }
+  }, [notify, reload]);
+
+  const onClaim = useCallback(
+    async (token: string) => {
+      setBusy(true);
+      try {
+        const msg = await api.claim(token);
+        notify({ kind: "ok", text: msg });
+      } catch (err) {
+        notify({ kind: "err", text: `Connect failed: ${String(err)}` });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [notify]
+  );
+
   return (
     <div className="app">
       <TopBar
         accounts={data.accounts}
         busy={busy || loading}
+        onPull={onPull}
         onCategorize={onCategorize}
+        onCategorizeLlm={onCategorizeLlm}
+        onClaim={onClaim}
         onRefresh={reload}
       />
 

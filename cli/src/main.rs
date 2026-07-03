@@ -115,285 +115,36 @@ fn open_store(db: &str) -> Result<Store, String> {
 }
 
 #[cfg(feature = "net")]
-fn access_url() -> Result<String, String> {
-    // 1. Explicit value in the environment (never logged, never in argv).
-    if let Ok(u) = std::env::var("OUTFLOW_SFIN_URL") {
-        if !u.is_empty() {
-            return Ok(u);
-        }
-    }
-    // 2. A 0600 secret file. This is the headless-cron path: unlike the login
-    //    keychain, a file does not require an unlocked GUI session, so a
-    //    launchd/cron job on a headless Mac can read it.
-    if let Ok(p) = std::env::var("OUTFLOW_SFIN_URL_FILE") {
-        if !p.is_empty() {
-            return read_secret_file(&p);
-        }
-    }
-    // 3. OS keychain — the default for an interactive machine (written by `claim`).
-    #[cfg(feature = "keychain")]
-    {
-        let entry = keyring::Entry::new("outflow", "simplefin-access-url")
-            .map_err(|e| format!("keychain: {e}"))?;
-        return entry.get_password().map_err(|e| {
-            format!("keychain: {e} (headless? set OUTFLOW_SFIN_URL_FILE to a 0600 file instead)")
-        });
-    }
-    #[cfg(not(feature = "keychain"))]
-    Err("no access URL: set OUTFLOW_SFIN_URL, or OUTFLOW_SFIN_URL_FILE to a 0600 file".into())
-}
-
-/// Read an access URL from a file, refusing it if group/other can read it.
-#[cfg(feature = "net")]
-fn read_secret_file(path: &str) -> Result<String, String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(path)
-            .map_err(|e| format!("stat {path}: {e}"))?
-            .permissions()
-            .mode();
-        if mode & 0o077 != 0 {
-            return Err(format!(
-                "{path} is group/other-accessible (mode {:o}); run `chmod 600 {path}`",
-                mode & 0o777
-            ));
-        }
-    }
-    let contents = std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
-    let url = contents.trim();
-    if url.is_empty() {
-        return Err(format!("{path} is empty"));
-    }
-    Ok(url.to_string())
-}
-
-#[cfg(feature = "net")]
 fn fetch_live() -> Result<String, String> {
-    let url = access_url()?;
-    let (creds, base) = match url.split_once("://") {
-        Some((scheme, rest)) => match rest.split_once('@') {
-            Some((userinfo, host)) => (Some(userinfo.to_string()), format!("{scheme}://{host}")),
-            None => (None, url.clone()),
-        },
-        None => (None, url.clone()),
-    };
-    let since = (now_secs() - 90 * 86400).max(0);
-    let endpoint = format!("{base}/accounts?pending=1&start-date={since}");
-    let mut req = ureq::get(&endpoint);
-    if let Some(c) = creds {
-        if let Some((user, pass)) = c.split_once(':') {
-            let token = base64_basic(user, pass);
-            req = req.set("Authorization", &format!("Basic {token}"));
-        }
-    }
-    let resp = req.call().map_err(|e| format!("simplefin request: {e}"))?;
-    resp.into_string().map_err(|e| format!("read body: {e}"))
-}
-
-#[cfg(feature = "net")]
-fn now_secs() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-#[cfg(feature = "net")]
-fn base64_basic(user: &str, pass: &str) -> String {
-    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let raw = format!("{user}:{pass}");
-    let b = raw.as_bytes();
-    let mut out = String::new();
-    for chunk in b.chunks(3) {
-        let n = chunk.len();
-        let b0 = chunk[0] as u32;
-        let b1 = if n > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if n > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(A[((triple >> 18) & 63) as usize] as char);
-        out.push(A[((triple >> 12) & 63) as usize] as char);
-        out.push(if n > 1 { A[((triple >> 6) & 63) as usize] as char } else { '=' });
-        out.push(if n > 2 { A[(triple & 63) as usize] as char } else { '=' });
-    }
-    out
-}
-
-#[cfg(feature = "net")]
-fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    fn val(c: u8) -> Option<u32> {
-        match c {
-            b'A'..=b'Z' => Some((c - b'A') as u32),
-            b'a'..=b'z' => Some((c - b'a' + 26) as u32),
-            b'0'..=b'9' => Some((c - b'0' + 52) as u32),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let clean: Vec<u8> = s
-        .bytes()
-        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
-        .collect();
-    let mut out = Vec::with_capacity(clean.len() * 3 / 4);
-    for chunk in clean.chunks(4) {
-        let mut acc = 0u32;
-        let mut bits = 0;
-        for &c in chunk {
-            let v = val(c).ok_or_else(|| format!("invalid base64 char {:?}", c as char))?;
-            acc = (acc << 6) | v;
-            bits += 6;
-        }
-        // Emit the high-order full bytes gathered from this chunk.
-        for shift in (0..bits / 8).map(|i| bits - 8 * (i + 1)) {
-            out.push(((acc >> shift) & 0xff) as u8);
-        }
-    }
-    Ok(out)
+    let url = outflow_net::access_url()?;
+    outflow_net::fetch(&url)
 }
 
 /// Exchange a base64 setup token for an access URL and persist it.
 #[cfg(feature = "net")]
 fn claim(setup_token: &str) -> Result<(), String> {
-    let decoded = base64_decode(setup_token.trim())
-        .map_err(|e| format!("decode setup token: {e}"))?;
-    let claim_url = String::from_utf8(decoded)
-        .map_err(|_| "setup token did not decode to a URL".to_string())?;
-    let claim_url = claim_url.trim();
-    if !claim_url.starts_with("http") {
-        return Err(format!("decoded claim URL looks wrong: {claim_url}"));
-    }
-    let resp = ureq::post(claim_url)
-        .call()
-        .map_err(|e| format!("claim request: {e}"))?;
-    let access_url = resp
-        .into_string()
-        .map_err(|e| format!("read claim body: {e}"))?
-        .trim()
-        .to_string();
-    if !access_url.starts_with("http") {
-        return Err(format!("claim did not return an access URL: {access_url}"));
-    }
+    let access_url = outflow_net::claim_access_url(setup_token)?;
     store_access_url(&access_url)
 }
 
-/// Persist the access URL. Precedence mirrors `access_url` reads:
-/// an explicit `OUTFLOW_SFIN_URL_FILE` wins (the headless path), else the
-/// keychain, else we just print an export line for the user to place.
+/// Persist the access URL and tell the user where it went. Precedence lives in
+/// `outflow_net::persist_access_url`; this only maps the outcome to a message.
 #[cfg(feature = "net")]
 fn store_access_url(access_url: &str) -> Result<(), String> {
-    if let Ok(p) = std::env::var("OUTFLOW_SFIN_URL_FILE") {
-        if !p.is_empty() {
-            return write_secret_file(&p, access_url);
+    use outflow_net::Persisted;
+    match outflow_net::persist_access_url(access_url)? {
+        Persisted::File(p) => println!(
+            "wrote access URL to {p} (0600); `pull` will read it via OUTFLOW_SFIN_URL_FILE"
+        ),
+        Persisted::Keychain => {
+            println!("stored access URL in keychain (service=outflow); `pull` will use it")
+        }
+        Persisted::Ephemeral => {
+            println!("access URL obtained. Persist it for future pulls, e.g.:");
+            println!("  export OUTFLOW_SFIN_URL='{access_url}'");
         }
     }
-    #[cfg(feature = "keychain")]
-    {
-        let entry = keyring::Entry::new("outflow", "simplefin-access-url")
-            .map_err(|e| format!("keychain: {e}"))?;
-        entry
-            .set_password(access_url)
-            .map_err(|e| format!("keychain store: {e}"))?;
-        println!("stored access URL in keychain (service=outflow); `pull` will use it");
-        return Ok(());
-    }
-    #[cfg(not(feature = "keychain"))]
-    {
-        println!("access URL obtained. Persist it for future pulls, e.g.:");
-        println!("  export OUTFLOW_SFIN_URL='{access_url}'");
-        Ok(())
-    }
-}
-
-/// Write the access URL to a file with 0600 permissions (owner-only).
-#[cfg(feature = "net")]
-fn write_secret_file(path: &str, access_url: &str) -> Result<(), String> {
-    std::fs::write(path, format!("{access_url}\n")).map_err(|e| format!("write {path}: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("chmod {path}: {e}"))?;
-    }
-    println!("wrote access URL to {path} (0600); `pull` will read it via OUTFLOW_SFIN_URL_FILE");
     Ok(())
-}
-
-/// Anthropic Messages API adapter for the core `Prompter` trait. Lives in the
-/// CLI (where ureq already lives) so `core` stays network-free. Endpoint and
-/// model are env-configurable; auth is `ANTHROPIC_API_KEY`.
-#[cfg(feature = "net")]
-struct AnthropicPrompter {
-    url: String,
-    model: String,
-    api_key: String,
-}
-
-#[cfg(feature = "net")]
-impl AnthropicPrompter {
-    fn from_env() -> Result<Self, String> {
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
-        if api_key.is_empty() {
-            return Err("ANTHROPIC_API_KEY is empty".into());
-        }
-        let url = std::env::var("OUTFLOW_LLM_URL")
-            .unwrap_or_else(|_| "https://api.anthropic.com/v1/messages".into());
-        let model =
-            std::env::var("OUTFLOW_LLM_MODEL").unwrap_or_else(|_| "claude-opus-4-8".into());
-        Ok(AnthropicPrompter {
-            url,
-            model,
-            api_key,
-        })
-    }
-}
-
-#[cfg(feature = "net")]
-impl outflow_core::Prompter for AnthropicPrompter {
-    fn complete(&self, system: &str, user: &str) -> Result<String, outflow_core::LlmError> {
-        use outflow_core::LlmError;
-
-        let body = serde_json::json!({
-            "model": self.model,
-            "max_tokens": 4096,
-            "system": system,
-            "messages": [{ "role": "user", "content": user }],
-        })
-        .to_string();
-        let resp = ureq::post(&self.url)
-            .set("x-api-key", &self.api_key)
-            .set("anthropic-version", "2023-06-01")
-            .set("content-type", "application/json")
-            .send_string(&body)
-            .map_err(|e| LlmError::Transport(format!("{e}")))?;
-        let raw = resp
-            .into_string()
-            .map_err(|e| LlmError::Transport(format!("read body: {e}")))?;
-        let value: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|e| LlmError::Parse(format!("response not JSON: {e}")))?;
-        // Concatenate all text blocks in content[].
-        let text: String = value
-            .get("content")
-            .and_then(|c| c.as_array())
-            .map(|blocks| {
-                blocks
-                    .iter()
-                    .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
-                    .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("")
-            })
-            .unwrap_or_default();
-        if text.is_empty() {
-            return Err(LlmError::Parse(format!(
-                "no text in response: {}",
-                value
-            )));
-        }
-        Ok(text)
-    }
 }
 
 #[cfg(not(feature = "net"))]
@@ -446,6 +197,7 @@ fn cmd_categorize(store: &Store, llm: bool) -> Result<(), String> {
 #[cfg(feature = "net")]
 fn categorize_llm(store: &Store) -> Result<usize, String> {
     use outflow_core::{normalize_payee, LlmCategorizer, MerchantSample};
+    use outflow_net::AnthropicPrompter;
     use std::collections::HashMap;
 
     let uncategorized = store.uncategorized().map_err(|e| format!("{e}"))?;

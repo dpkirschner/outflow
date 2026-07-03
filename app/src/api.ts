@@ -27,4 +27,9 @@ export const api = {
   setCategory: (txnId: string, category: string, learn: boolean) =>
     invoke<number | null>("set_category", { txnId, category, learn }),
   pullFromFile: (path: string) => invoke<PullResult>("pull_from_file", { path }),
+
+  // networked (require the `net` feature build)
+  pullLive: () => invoke<PullResult>("pull_live"),
+  claim: (setupToken: string) => invoke<string>("claim", { setupToken }),
+  categorizeLlm: () => invoke<number>("categorize_llm"),
 };

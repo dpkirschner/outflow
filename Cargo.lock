@@ -2766,10 +2766,8 @@ name = "outflow-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "keyring",
  "outflow-core",
- "serde_json",
- "ureq",
+ "outflow-net",
 ]
 
 [[package]]
@@ -2782,10 +2780,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "outflow-net"
+version = "0.1.0"
+dependencies = [
+ "keyring",
+ "outflow-core",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "outflow-tauri"
 version = "0.1.0"
 dependencies = [
  "outflow-core",
+ "outflow-net",
  "serde",
  "serde_json",
  "tauri",

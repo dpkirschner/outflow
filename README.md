@@ -1,99 +1,133 @@
 # outflow
 
-A local, single-user spending analyzer. Pulls transactions from a bank via
-SimpleFIN, stores them in a local SQLite database, categorizes them, and
-answers questions like "where did my money go?", "how much did I spend at
-Starbucks last month?", and "what subscriptions am I paying for?".
+A **local, single-user spending analyzer** for your own bank data. It pulls
+transactions from your bank via [SimpleFIN](https://www.simplefin.org/), stores
+them in a local SQLite database, categorizes them, and answers questions like
+"where did my money go?", "how much did I spend at that coffee shop?", and "what
+subscriptions am I paying for?".
 
-Analysis, not budgeting: there are no limits or targets, just visibility.
+Analysis, not budgeting — no limits or targets, just visibility. Everything runs
+on your machine; your financial data never leaves it.
 
-## Design
+> Personal project. It targets macOS, ships as build-from-source (no notarized
+> release), and is tuned for one person analyzing their own accounts.
 
-The codebase is a Cargo workspace built around ports and adapters. The `core`
-crate holds all domain logic and is deployment-agnostic. Two thin frontends sit
-on top of it, sharing identical logic:
+## Highlights
 
-- a desktop GUI (Tauri) for interactive use
-- a CLI binary for headless use (cron, agent invocation)
+- **Local-first & private** — data lives in a local SQLite file; the desktop app
+  encrypts it at rest (SQLCipher) with a key held in your macOS keychain. Bank
+  credentials are stored in the keychain, never in the database or in argv.
+- **Two front-ends, one core** — a Tauri desktop app with a dark dashboard, and a
+  headless CLI for cron/automation. Both run identical domain logic.
+- **Dashboards** — monthly cash flow (in vs out + net), spend by category,
+  merchant leaderboard, and detected subscriptions, plus a transaction list with
+  inline re-categorization that *learns rules* from your corrections.
+- **Categorization** — a deterministic rule engine, with an optional LLM pass for
+  the merchants rules can't place (model endpoint is configurable).
+- **Durable history** — SimpleFIN returns ~90 days per pull; the local database is
+  the permanent archive and accumulates indefinitely, so trends and subscription
+  detection sharpen over time.
 
-The two volatile external dependencies — the transaction source and the
-categorizer — are behind interfaces so they can be swapped (SimpleFIN today,
-Plaid or additional card connectors later; a hosted model or a local one for
-categorization).
+## How it works
 
-## Layout
+```
+your bank ──SimpleFIN──▶ outflow (pull) ──▶ local SQLite ──▶ categorize ──▶ dashboards / reports
+```
 
-    outflow/
-      core/            domain logic, storage, detection
-      cli/             headless entrypoint (pull, categorize, report, subs, fix)
-      app/             Tauri desktop frontend         (planned)
-      examples/        a sample SimpleFIN response for --from-file
+Built as a Cargo workspace around ports-and-adapters: a pure `core` domain crate
+with zero GUI/network deps, networked adapters in `net`, and two thin front-ends
+(`cli`, `app`). The transaction source and the categorizer are traits, so
+SimpleFIN→Plaid and rules→LLM are swappable without touching the domain.
 
-## Using the CLI
+Deeper reference lives in [`docs/`](docs/):
+[architecture](docs/ARCHITECTURE.md) ·
+[data model](docs/DATA_MODEL.md) ·
+[invariants](docs/INVARIANTS.md) ·
+[development](docs/DEVELOPMENT.md) ·
+[gotchas](docs/GOTCHAS.md).
 
-    cargo run -p outflow-cli -- --db out.db pull --from-file examples/sample-accounts.json
-    cargo run -p outflow-cli -- --db out.db categorize
-    cargo run -p outflow-cli -- --db out.db fix <txn_id> Streaming
-    cargo run -p outflow-cli -- --db out.db report --by category
-    cargo run -p outflow-cli -- --db out.db report --by merchant --top 10
-    cargo run -p outflow-cli -- --db out.db report --by monthly --since 2024-01-01
-    cargo run -p outflow-cli -- --db out.db subs
+## Getting started
+
+### Prerequisites
+
+- A current stable Rust toolchain (via [rustup](https://rustup.rs/))
+- Node.js + npm (for the desktop app)
+- A [SimpleFIN Bridge](https://bridge.simplefin.org/) account to connect your
+  bank and generate a setup token (a small paid service). You can try everything
+  first against SimpleFIN's public demo bridge.
+
+### The desktop app
+
+Build the macOS `.app` and install it:
+
+```
+cd app && npm install && npm run bundle
+cp -R app/src-tauri/target/release/bundle/macos/outflow.app /Applications/
+```
+
+Open it from Launchpad/Applications. On first run it creates an encrypted
+database under `~/Library/Application Support/com.outflow.app/`. Click **Connect**,
+paste your SimpleFIN setup token, then **Pull** — your accounts and transactions
+load, and every later launch refreshes in the background.
+
+### The CLI (headless)
+
+```
+cargo run -p outflow-cli -- --db out.db pull --from-file examples/sample-accounts.json
+cargo run -p outflow-cli -- --db out.db categorize
+cargo run -p outflow-cli -- --db out.db report --by category
+cargo run -p outflow-cli -- --db out.db report --by merchant --top 10
+cargo run -p outflow-cli -- --db out.db report --by monthly --since 2024-01-01
+cargo run -p outflow-cli -- --db out.db subs
+```
 
 The database path also reads from `OUTFLOW_DB`. Reports accept `--since` /
 `--until` (YYYY-MM-DD, since-inclusive, until-exclusive) and `--posted-only`.
 
-### Feature flags
+For live use, build with feature flags:
 
-The dev build has no network, keychain, or encryption, so the whole pipeline is
-exercised via `pull --from-file`. For real use on a Mac:
+```
+cargo build --release -p outflow-cli --features "net,keychain,encryption"
+```
 
-    cargo build --release --features "net,keychain,encryption"
+| Feature | Enables |
+|---|---|
+| `net` | live SimpleFIN `pull`/`claim` and the optional LLM categorizer |
+| `keychain` | read/write the access URL (and DB key) via the OS keychain |
+| `encryption` | open the SQLite database with SQLCipher (`OUTFLOW_DB_KEY`) |
 
-- `net`        live `pull` fetches the SimpleFIN access URL's `/accounts`
-- `keychain`   reads the access URL from the OS keychain (else `OUTFLOW_SFIN_URL`)
-- `encryption` opens the SQLite database with SQLCipher
+With no features, the full pipeline still runs offline via `pull --from-file`.
 
 ## Status
 
-Implemented in `core`:
+Working: the domain core, the CLI, live SimpleFIN pull, rule + LLM
+categorization, the Tauri desktop app with all dashboards and learn-on-correct,
+and transparent at-rest encryption for the packaged app.
 
-- `money`         integer-cents money type, string parsing, no floating point
-- `model`         accounts, transactions, category source
-- `store`         SQLite persistence; id-keyed upsert for posted transactions,
-                  delete-and-replace for pending (avoids pending/posted
-                  double-counting); rule storage and categorization passes
-- `source`        SimpleFIN parser behind the `TransactionSource` port; boundary
-                  parsing that normalizes sign, currency, and decimal amounts
-- `categorize`    `Categorizer` port and a deterministic rule engine (exact and
-                  contains matching, longest-match precedence); manual
-                  corrections write rules that then catch sibling transactions
-- `query`         analytics: spend by category, merchant leaderboard, monthly
-                  inflow/outflow, with date-range and pending filters
-- `subscriptions` recurring-charge detection over accumulated history
+Roadmap: an in-app settings panel to point the categorizer at a **local** model;
+transfer detection (so moving money between your own accounts isn't counted as
+spending); local-timezone month bucketing.
 
-`cli` wires these into a headless tool. The live SimpleFIN HTTP call, keychain
-read, and SQLCipher open are behind feature flags (above).
+## Known limitations
 
-Not yet built: the model-backed categorizer fallback, the Tauri GUI.
+- With only a checking account and no transfer detection, transfers (to savings,
+  card payments) read as outflow, so totals overstate consumption until card
+  accounts and transfer matching are added.
+- Annual subscriptions are only detectable once the database holds over a year of
+  history.
+- Monthly buckets are UTC.
 
-Known limitations: with only a checking account and no transfer detection,
-transfers (to savings, credit-card payments) count as outflow, so spending
-totals overstate consumption until transfer classification and card accounts are
-added. Monthly buckets are UTC.
+## Privacy
 
-## Building
+outflow is local-first: it talks only to SimpleFIN (to fetch your data) and,
+if you enable it, an LLM endpoint you configure (for categorizing merchant
+names). There is no telemetry and no server. Your transactions stay in a local,
+optionally-encrypted SQLite file.
 
-Requires a current stable Rust toolchain (via rustup). Cargo isolates all
-dependencies into `target/`; nothing is installed system-wide.
+## License
 
-    cargo test        # run the domain test suite
-    cargo build       # compile the workspace
-
-## Notes on data
-
-- Money is stored as integer minor units (cents); never floats.
-- Transaction amount sign convention: outflows are negative.
-- SimpleFIN provides roughly 90 days of history per pull. The local database is
-  the durable archive and accumulates indefinitely, so trend and subscription
-  detection improve over time. Annual subscriptions are only detectable once the
-  database holds more than a year of history.
+[PolyForm Noncommercial 1.0.0](LICENSE). The source is public and you're welcome
+to use, modify, and share it for **noncommercial** purposes — personal use, study,
+hobby projects, nonprofits. **Commercial use requires permission** from the
+copyright holder. (This is a source-available license, not an OSI "open source"
+one.)

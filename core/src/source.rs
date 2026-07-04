@@ -1,4 +1,4 @@
-use crate::model::{Account, AccountKind, Transaction};
+use crate::model::{Account, AccountKind, Transaction, TxnFlag};
 use crate::money::Money;
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,8 @@ impl Default for SfinOrg {
 struct SfinTransaction {
     id: String,
     posted: i64,
+    #[serde(default)]
+    transacted_at: Option<i64>,
     amount: String,
     #[serde(default)]
     description: Option<String>,
@@ -156,12 +158,14 @@ pub fn parse_account_set(json: &str) -> Result<Fetched, SourceError> {
                 id: t.id.clone(),
                 account_id: a.id.clone(),
                 posted: t.posted,
+                transacted_at: t.transacted_at,
                 amount,
                 description,
                 payee,
                 category: None,
                 category_source: None,
                 pending: t.pending,
+                flag: TxnFlag::Spending,
                 raw,
             });
         }
@@ -270,6 +274,22 @@ mod tests {
             f.warnings,
             vec!["Requested date range exceeds limit of 90 days and was capped.".to_string()]
         );
+    }
+
+    #[test]
+    fn reads_transacted_at_and_falls_back_to_posted() {
+        let json = r#"{ "errors": [], "accounts": [
+            { "org": {}, "id": "A", "balance": "0.00", "transactions": [
+                { "id": "with", "posted": 200, "transacted_at": 100, "amount": "-1.00" },
+                { "id": "without", "posted": 200, "amount": "-1.00" }
+            ] } ] }"#;
+        let f = parse_account_set(json).unwrap();
+        let with = f.transactions.iter().find(|t| t.id == "with").unwrap();
+        let without = f.transactions.iter().find(|t| t.id == "without").unwrap();
+        assert_eq!(with.transacted_at, Some(100));
+        assert_eq!(with.effective_date(), 100);
+        assert_eq!(without.transacted_at, None);
+        assert_eq!(without.effective_date(), 200);
     }
 
     #[test]

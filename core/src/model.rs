@@ -69,17 +69,52 @@ impl CategorySource {
     }
 }
 
+/// How a transaction is treated by spend analytics. `Spending` is real
+/// consumption and the default; `Transfer` (money moved between the user's own
+/// accounts) and `CardPayment` (a checking→card payment whose underlying charges
+/// are the real spend) are suppressed from all aggregations so they aren't
+/// double-counted. See `query` and `subscriptions::detect`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TxnFlag {
+    Spending,
+    Transfer,
+    CardPayment,
+}
+
+impl TxnFlag {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TxnFlag::Spending => "spending",
+            TxnFlag::Transfer => "transfer",
+            TxnFlag::CardPayment => "card_payment",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<TxnFlag> {
+        match s {
+            "spending" => Some(TxnFlag::Spending),
+            "transfer" => Some(TxnFlag::Transfer),
+            "card_payment" => Some(TxnFlag::CardPayment),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: String,
     pub account_id: String,
     pub posted: i64,
+    /// When the purchase actually happened (SimpleFIN `transacted_at`), if the
+    /// bank supplied it. `None` when only the posting date is known.
+    pub transacted_at: Option<i64>,
     pub amount: Money,
     pub description: String,
     pub payee: Option<String>,
     pub category: Option<String>,
     pub category_source: Option<CategorySource>,
     pub pending: bool,
+    pub flag: TxnFlag,
     pub raw: String,
 }
 
@@ -89,5 +124,12 @@ impl Transaction {
             Some(p) if !p.is_empty() => p,
             _ => &self.description,
         }
+    }
+
+    /// Behavioral basis date: when the purchase happened, falling back to the
+    /// posting date. All month bucketing and cadence math keys off this so
+    /// analytics reflect behavior, not bookkeeping.
+    pub fn effective_date(&self) -> i64 {
+        self.transacted_at.unwrap_or(self.posted)
     }
 }

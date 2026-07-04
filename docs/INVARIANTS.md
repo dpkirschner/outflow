@@ -33,3 +33,25 @@ data integrity or the domain contract — treat them as load-bearing.
 8. **The DB key is regenerated only when the keychain entry does not exist
    (`NoEntry`)** — never on a locked/denied read, or a new key would orphan the
    existing encrypted DB permanently. (`net::secrets::db_key_get_or_create`)
+
+9. **Analytics key off `Transaction::effective_date()`, not `posted`.** That is
+   `transacted_at` when the bank supplied it, else `posted` — the behavioral
+   basis. Month bucketing and cadence detection use it; month buckets are in the
+   machine's **local timezone** (`chrono::Local`), not UTC. (`query`, `subscriptions`)
+
+10. **Non-`Spending` transactions are excluded from every aggregation** unless
+    `TxnFilter.include_non_spending` is set. Suppression lives in `query::passes`
+    so all aggregators inherit it and `monthly_flow` drops both legs. The
+    transaction list is the intentional exception (it shows every row so the user
+    can reclassify). (`query`)
+
+11. **A re-pull never resets a manual `flag`.** `upsert_transactions`' conflict
+    update omits the `flag` column; `apply_flags` only ever assigns a rule's flag,
+    never resets to `Spending`. Card-payment suppression is only correct when the
+    card account is ingested — enforce nothing, but warn
+    (`Store::has_credit_account`). (`store`)
+
+12. **Existing DBs migrate through `PRAGMA user_version`.** New columns on an
+    existing table need a guarded `ALTER TABLE` in `store::run_migrations` and a
+    `SCHEMA_VERSION` bump — `CREATE TABLE IF NOT EXISTS` alone never alters a live
+    DB, and a real encrypted production DB holds the user's data. (`store::migrate`)

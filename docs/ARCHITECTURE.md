@@ -42,7 +42,17 @@ money            i64-cents type, decimal parse, display
 ```
 
 Analysis (`query`, `subscriptions`) reads all transactions from the store and
-**aggregates in memory in Rust**, not in SQL. Months are bucketed in **UTC**.
+**aggregates in memory in Rust**, not in SQL. Months are bucketed on each
+transaction's behavioral date (`effective_date()`) in the machine's **local
+timezone** — `core` depends on `chrono` (pure computation, no network, so
+invariant #3 holds) purely for this DST-correct conversion. Aggregations exclude
+non-`Spending` transactions (transfers, card payments) by default.
+
+Schema evolution on existing DBs runs through a **`PRAGMA user_version` migration
+runner** in `store::migrate` (`run_migrations` + `SCHEMA_VERSION`): fresh DBs get
+every column from the `CREATE TABLE`s, existing DBs get guarded `ALTER TABLE ADD
+COLUMN`s. This matters because a real encrypted production DB holds the user's
+data — `CREATE TABLE IF NOT EXISTS` alone never alters it.
 
 ## Data flow
 
@@ -64,9 +74,9 @@ SimpleFIN JSON ──net::simplefin::fetch──▶ parse_account_set ──▶ 
 - **GUI backend** (`app/src-tauri/src/main.rs`) — a `Mutex<Store>` in Tauri
   managed state (rusqlite `Connection` is not `Sync`); each `#[tauri::command]`
   locks it and calls core. Commands: `accounts`, `transactions`, `categorize`,
-  `spend_categories`, `merchants`, `flow`, `subscriptions`, `categories`,
-  `set_category`, `pull_from_file`, `pull_live`, `claim`, `categorize_llm`,
-  `reset_data`.
+  `spend_categories`, `merchants`, `flow`, `subscriptions`, `rhythms`,
+  `categories`, `set_category`, `set_flag`, `apply_flags`, `has_credit_account`,
+  `pull_from_file`, `pull_live`, `claim`, `categorize_llm`, `reset_data`.
 - **GUI frontend** (`app/src/`) — `api.ts` wraps `invoke()`; `types.ts` mirrors
   the serde DTOs; components render Recharts dashboards. See DATA_MODEL.md for the
   serialization boundary.
@@ -100,7 +110,12 @@ zero features via `pull --from-file`.
 - **Local-model LLM** — needs an in-app Settings panel (env is unavailable to a
   double-clicked app) and likely an OpenAI-shaped `Prompter` (the current adapter
   is Anthropic-Messages-only). The `core::llm` trait boundary makes this cheap.
-- **Transfer detection** — moving money between own accounts currently reads as
-  outflow. Needs both-leg matching once card/savings accounts are linked.
+- **Transfer / card-payment handling** — handled by the `TxnFlag` suppression axis
+  (`Transfer`/`CardPayment` excluded from analytics) plus behavioral dating, which
+  nets a card payment against its underlying charges with no explicit payment↔charge
+  link. Still manual (flag + learn-a-rule); *automatic* both-leg matching is a
+  future refinement, and card-payment suppression assumes the card account is
+  ingested (the app warns otherwise).
 - **Annual subscriptions** — undetectable until the DB holds >1 year.
-- **Local-timezone month bucketing** — currently UTC.
+- **Local-timezone month bucketing** — done: buckets use `chrono::Local` on
+  `effective_date()`.

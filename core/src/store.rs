@@ -23,11 +23,21 @@ fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
             p != 0
         },
         raw: r.get(9)?,
+        transacted_at: r.get(10)?,
+        flag: {
+            // NOT NULL DEFAULT 'spending', so this is always present; unknown
+            // values degrade to Spending rather than dropping the row.
+            let f: String = r.get(11)?;
+            TxnFlag::from_str(&f).unwrap_or(TxnFlag::Spending)
+        },
     })
 }
 
-const TXN_COLUMNS: &str =
-    "id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw";
+// Column order is load-bearing: it must stay in lockstep with the positional
+// `row_to_txn` indices and the `upsert_transactions` INSERT. New columns are
+// APPENDED, never inserted mid-list.
+const TXN_COLUMNS: &str = "id, account_id, posted, amount_cents, description, payee, \
+     category, category_source, pending, raw, transacted_at, flag";
 
 pub struct Store {
     conn: Connection,
@@ -37,6 +47,41 @@ pub struct Store {
 pub struct UpsertResult {
     pub added: usize,
     pub updated: usize,
+}
+
+/// A learned/manual rule that assigns a `TxnFlag` to transactions whose
+/// normalized merchant matches `pattern`. Parallel to `CategoryRule` — the same
+/// mechanism on an independent axis (a merchant can be categorized AND flagged).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlagRule {
+    pub id: i64,
+    pub match_type: MatchType,
+    pub pattern: String,
+    pub flag: TxnFlag,
+}
+
+/// Match a normalized merchant against flag rules with the same precedence as
+/// `RuleSet`: an exact match wins; otherwise the longest `contains` pattern wins.
+fn match_flag<'a>(rules: &'a [FlagRule], merchant: &str) -> Option<&'a FlagRule> {
+    let m = normalize_payee(merchant);
+    if m.is_empty() {
+        return None;
+    }
+    for r in rules {
+        if r.match_type == MatchType::Exact && r.pattern == m {
+            return Some(r);
+        }
+    }
+    let mut best: Option<&FlagRule> = None;
+    for r in rules {
+        if r.match_type == MatchType::Contains && !r.pattern.is_empty() && m.contains(&r.pattern) {
+            match best {
+                Some(b) if b.pattern.len() >= r.pattern.len() => {}
+                _ => best = Some(r),
+            }
+        }
+    }
+    best
 }
 
 /// Default category vocabulary, seeded on first open and used to constrain the
@@ -88,7 +133,9 @@ CREATE TABLE IF NOT EXISTS transactions (
     category TEXT,
     category_source TEXT,
     pending INTEGER NOT NULL,
-    raw TEXT NOT NULL
+    raw TEXT NOT NULL,
+    transacted_at INTEGER,
+    flag TEXT NOT NULL DEFAULT 'spending'
 );
 CREATE INDEX IF NOT EXISTS idx_txn_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_txn_posted ON transactions(posted);
@@ -98,6 +145,12 @@ CREATE TABLE IF NOT EXISTS category_rules (
     match_type TEXT NOT NULL,
     pattern TEXT NOT NULL,
     category TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS flag_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_type TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    flag TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS categories (
     name TEXT PRIMARY KEY
@@ -112,6 +165,10 @@ CREATE TABLE IF NOT EXISTS sync_log (
     note TEXT
 );
 ";
+
+/// Current schema version, tracked via `PRAGMA user_version`. Bump this and add a
+/// guarded block in `run_migrations` when altering an existing table.
+const SCHEMA_VERSION: i64 = 1;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -138,8 +195,51 @@ impl Store {
     }
 
     fn migrate(&self) -> rusqlite::Result<()> {
+        // Fresh DBs get every table/column from SCHEMA (all `IF NOT EXISTS`).
         self.conn.execute_batch(SCHEMA)?;
+        // Existing DBs predate columns added later: `CREATE TABLE IF NOT EXISTS`
+        // is a no-op once the table exists, so new columns must be ALTERed in.
+        self.run_migrations()?;
         self.seed_default_categories()
+    }
+
+    /// Versioned schema upgrades for DBs created by an earlier build. Guarded by
+    /// `PRAGMA user_version`; each column add is idempotent (skipped if the
+    /// column already exists, e.g. on a fresh DB where SCHEMA created it).
+    fn run_migrations(&self) -> rusqlite::Result<()> {
+        let version: i64 = self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < 1 {
+            // v1: behavioral date + suppression flag on transactions.
+            self.add_column_if_missing("transactions", "transacted_at", "INTEGER")?;
+            self.add_column_if_missing(
+                "transactions",
+                "flag",
+                "TEXT NOT NULL DEFAULT 'spending'",
+            )?;
+            // flag_rules is a new table → already created by SCHEMA, no ALTER.
+        }
+        self.conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        Ok(())
+    }
+
+    fn add_column_if_missing(
+        &self,
+        table: &str,
+        column: &str,
+        decl: &str,
+    ) -> rusqlite::Result<()> {
+        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({})", table))?;
+        let present = stmt
+            .query_map([], |r| r.get::<_, String>(1))?
+            .filter_map(|c| c.ok())
+            .any(|c| c == column);
+        if !present {
+            self.conn.execute(
+                &format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, decl),
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     /// Populate the category vocabulary with a sensible default set on first
@@ -259,16 +359,20 @@ impl Store {
 
         for t in txns {
             let cat_src = t.category_source.map(|c| c.as_str());
+            // `flag` is intentionally absent from the conflict-update: a re-pull
+            // must not reset a manually-applied Transfer/CardPayment flag back to
+            // 'spending'. `transacted_at` IS updated so a later pull can fill it
+            // in if the bank starts supplying it.
             tx.execute(
                 "INSERT INTO transactions
-                    (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                    (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw, transacted_at, flag)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(id) DO UPDATE SET
                     account_id=excluded.account_id, posted=excluded.posted,
                     amount_cents=excluded.amount_cents, description=excluded.description,
                     payee=excluded.payee, category=excluded.category,
                     category_source=excluded.category_source, pending=excluded.pending,
-                    raw=excluded.raw",
+                    raw=excluded.raw, transacted_at=excluded.transacted_at",
                 params![
                     t.id,
                     t.account_id,
@@ -279,7 +383,9 @@ impl Store {
                     t.category,
                     cat_src,
                     t.pending as i64,
-                    t.raw
+                    t.raw,
+                    t.transacted_at,
+                    t.flag.as_str()
                 ],
             )?;
             if t.pending {
@@ -414,6 +520,100 @@ impl Store {
         }
         Ok(None)
     }
+
+    pub fn add_flag_rule(
+        &self,
+        match_type: MatchType,
+        pattern: &str,
+        flag: TxnFlag,
+    ) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO flag_rules (match_type, pattern, flag) VALUES (?1, ?2, ?3)",
+            params![match_type.as_str(), pattern.to_lowercase(), flag.as_str()],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn flag_rules(&self) -> rusqlite::Result<Vec<FlagRule>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, match_type, pattern, flag FROM flag_rules")?;
+        let rows = stmt.query_map([], |r| {
+            let mt: String = r.get(1)?;
+            let fl: String = r.get(3)?;
+            Ok(FlagRule {
+                id: r.get(0)?,
+                match_type: MatchType::from_str(&mt).unwrap_or(MatchType::Contains),
+                pattern: r.get(2)?,
+                flag: TxnFlag::from_str(&fl).unwrap_or(TxnFlag::Spending),
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Set a transaction's flag; when `learn`, also write an exact flag rule on
+    /// its normalized merchant so siblings pick up the flag on the next
+    /// `apply_flags` pass. Mirrors `set_manual_category`.
+    pub fn set_flag(
+        &self,
+        txn_id: &str,
+        flag: TxnFlag,
+        learn: bool,
+    ) -> rusqlite::Result<Option<i64>> {
+        let existing = self.transaction(txn_id)?;
+        self.conn.execute(
+            "UPDATE transactions SET flag = ?1 WHERE id = ?2",
+            params![flag.as_str(), txn_id],
+        )?;
+        if learn {
+            if let Some(t) = existing {
+                let pattern = normalize_payee(t.merchant());
+                if !pattern.is_empty() {
+                    let id = self.add_flag_rule(MatchType::Exact, &pattern, flag)?;
+                    return Ok(Some(id));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    /// Apply every flag rule to matching transactions. Only touches rows whose
+    /// current flag differs from the rule's, and never resets a row to
+    /// `Spending` (rules only assign the flag they carry). Returns the count
+    /// changed.
+    pub fn apply_flags(&self) -> rusqlite::Result<usize> {
+        let rules = self.flag_rules()?;
+        if rules.is_empty() {
+            return Ok(0);
+        }
+        let txns = self.all_transactions()?;
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        for t in &txns {
+            if let Some(r) = match_flag(&rules, t.merchant()) {
+                if t.flag != r.flag {
+                    tx.execute(
+                        "UPDATE transactions SET flag = ?1 WHERE id = ?2",
+                        params![r.flag.as_str(), t.id],
+                    )?;
+                    n += 1;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Whether any ingested account is a credit/card account. Used to warn before
+    /// suppressing a CardPayment with no offsetting charges present.
+    pub fn has_credit_account(&self) -> rusqlite::Result<bool> {
+        let n: i64 = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM accounts WHERE kind = ?1)",
+            params![AccountKind::Credit.as_str()],
+            |r| r.get(0),
+        )?;
+        Ok(n != 0)
+    }
 }
 
 #[cfg(test)]
@@ -431,6 +631,8 @@ mod tests {
             category: None,
             category_source: None,
             pending,
+            transacted_at: None,
+            flag: TxnFlag::Spending,
             raw: "{}".into(),
         }
     }
@@ -516,6 +718,103 @@ mod tests {
         s.upsert_transactions(&[txn("p_b", "acctB", 100, -100, true)]).unwrap();
         assert_eq!(s.count_transactions().unwrap(), 2);
     }
+
+    #[test]
+    fn migrate_stamps_schema_version() {
+        let s = Store::open_in_memory().unwrap();
+        let v: i64 = s.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrates_legacy_db_by_adding_columns() {
+        // Emulate a DB created before this change: old transactions shape,
+        // user_version 0, one existing row. Opening it through Store must add
+        // the new columns in place without error and default the row's flag.
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE transactions (
+                    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, posted INTEGER NOT NULL,
+                    amount_cents INTEGER NOT NULL, description TEXT NOT NULL, payee TEXT,
+                    category TEXT, category_source TEXT, pending INTEGER NOT NULL, raw TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO transactions
+                    (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw)
+                 VALUES ('old', 'acct', 100, -500, 'Legacy', NULL, NULL, NULL, 0, '{}')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let s = Store::open(&path).unwrap();
+        let v: i64 = s.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        let t = s.transaction("old").unwrap().unwrap();
+        assert_eq!(t.transacted_at, None);
+        assert_eq!(t.flag, TxnFlag::Spending);
+        assert_eq!(t.effective_date(), 100);
+
+        drop(s);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn set_flag_learns_rule_and_apply_flags_catches_siblings() {
+        let s = Store::open_in_memory().unwrap();
+        // Both share merchant() == "d" (payee None → description), so a learned
+        // rule on one flags the other.
+        s.upsert_transactions(&[
+            txn("a", "acct1", 100, -500, false),
+            txn("b", "acct1", 200, -600, false),
+        ])
+        .unwrap();
+
+        let rule = s.set_flag("a", TxnFlag::Transfer, true).unwrap();
+        assert!(rule.is_some());
+        // Sibling stays Spending until an apply pass runs.
+        assert_eq!(s.transaction("b").unwrap().unwrap().flag, TxnFlag::Spending);
+
+        assert_eq!(s.apply_flags().unwrap(), 1);
+        assert_eq!(s.transaction("b").unwrap().unwrap().flag, TxnFlag::Transfer);
+        // Idempotent: nothing left to change.
+        assert_eq!(s.apply_flags().unwrap(), 0);
+    }
+
+    #[test]
+    fn flag_survives_repull() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
+        s.set_flag("a", TxnFlag::CardPayment, false).unwrap();
+        // A re-pull of the same id must not reset the manual flag to Spending.
+        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
+        assert_eq!(s.transaction("a").unwrap().unwrap().flag, TxnFlag::CardPayment);
+    }
+
+    #[test]
+    fn has_credit_account_reflects_ingested_kinds() {
+        let s = Store::open_in_memory().unwrap();
+        assert!(!s.has_credit_account().unwrap());
+        s.upsert_accounts(&[Account {
+            id: "c".into(),
+            org: "o".into(),
+            name: "Visa".into(),
+            kind: AccountKind::Credit,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+        }])
+        .unwrap();
+        assert!(s.has_credit_account().unwrap());
+    }
 }
 
 #[cfg(test)]
@@ -534,6 +833,8 @@ mod categorize_tests {
             category: None,
             category_source: None,
             pending: false,
+            transacted_at: None,
+            flag: TxnFlag::Spending,
             raw: "{}".into(),
         }
     }
@@ -597,6 +898,8 @@ mod encryption_tests {
             category: None,
             category_source: None,
             pending: false,
+            transacted_at: None,
+            flag: TxnFlag::Spending,
             raw: "{}".into(),
         }
     }

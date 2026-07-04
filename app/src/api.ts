@@ -9,8 +9,10 @@ import type {
   MerchantSpend,
   MonthlyFlow,
   PullResult,
+  RhythmEntry,
   Subscription,
   Transaction,
+  TxnFlag,
 } from "./types";
 
 export const api = {
@@ -23,9 +25,15 @@ export const api = {
     invoke<MerchantSpend[]>("merchants", { filter, limit }),
   flow: (filter?: Filter) => invoke<MonthlyFlow[]>("flow", { filter }),
   subscriptions: () => invoke<Subscription[]>("subscriptions"),
+  rhythms: () => invoke<RhythmEntry[]>("rhythms"),
   categories: () => invoke<string[]>("categories"),
   setCategory: (txnId: string, category: string, learn: boolean) =>
     invoke<number | null>("set_category", { txnId, category, learn }),
+  // flag is the serde variant name, e.g. "Transfer" | "CardPayment" | "Spending".
+  setFlag: (txnId: string, flag: TxnFlag, learn: boolean) =>
+    invoke<number | null>("set_flag", { txnId, flag, learn }),
+  applyFlags: () => invoke<number>("apply_flags"),
+  hasCreditAccount: () => invoke<boolean>("has_credit_account"),
   pullFromFile: (path: string) => invoke<PullResult>("pull_from_file", { path }),
 
   resetData: () => invoke<void>("reset_data"),

@@ -105,6 +105,8 @@ mod tests {
             category: None,
             category_source: None,
             pending: false,
+            transacted_at: None,
+            flag: crate::model::TxnFlag::Spending,
             raw: "{}".into(),
         }
     }

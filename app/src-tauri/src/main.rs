@@ -9,9 +9,9 @@
 use std::sync::Mutex;
 
 use outflow_core::{
-    detect, monthly_flow, parse_account_set, spend_by_category, top_merchants, Account,
-    CategorySource, CategorySpend, MerchantSpend, MonthlyFlow, Store, Subscription, Transaction,
-    TxnFilter,
+    detect, detect_rhythms, monthly_flow, parse_account_set, spend_by_category, top_merchants,
+    Account, CategorySource, CategorySpend, MerchantSpend, MonthlyFlow, RhythmEntry, Store,
+    Subscription, Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
@@ -37,6 +37,10 @@ struct FilterArg {
     until: Option<i64>,
     #[serde(default = "default_true")]
     include_pending: bool,
+    /// Off by default: charts suppress transfers/card payments. A "show
+    /// transfers" toggle sends true.
+    #[serde(default)]
+    include_non_spending: bool,
 }
 
 fn default_true() -> bool {
@@ -49,6 +53,7 @@ impl From<FilterArg> for TxnFilter {
             since: f.since,
             until: f.until,
             include_pending: f.include_pending,
+            include_non_spending: f.include_non_spending,
         }
     }
 }
@@ -60,19 +65,23 @@ fn to_filter(filter: Option<FilterArg>) -> TxnFilter {
     filter.map(Into::into).unwrap_or_else(TxnFilter::all)
 }
 
-/// Mirror of the query-layer `passes()`: keep the transaction list consistent
-/// with the aggregates, which all apply the same filter semantics.
+/// Filter for the transaction LIST. Mirrors the query-layer date/pending
+/// semantics (filtering on the behavioral date), but deliberately does NOT drop
+/// non-Spending rows — the list is where the user sees and reclassifies transfers
+/// and card payments, so they must remain visible even though the charts hide
+/// them. (`include_non_spending` therefore doesn't apply here.)
 fn passes(t: &Transaction, f: &TxnFilter) -> bool {
     if !f.include_pending && t.pending {
         return false;
     }
+    let d = t.effective_date();
     if let Some(s) = f.since {
-        if t.posted < s {
+        if d < s {
             return false;
         }
     }
     if let Some(u) = f.until {
-        if t.posted >= u {
+        if d >= u {
             return false;
         }
     }
@@ -154,6 +163,44 @@ fn subscriptions(state: State<AppState>) -> CmdResult<Vec<Subscription>> {
     let store = state.store.lock().map_err(e)?;
     let txns = store.all_transactions().map_err(e)?;
     Ok(detect(&txns))
+}
+
+/// Recurring merchants whose amount varies (the rhythm roster). Complements
+/// `subscriptions`, which requires a stable amount.
+#[tauri::command]
+fn rhythms(state: State<AppState>) -> CmdResult<Vec<RhythmEntry>> {
+    let store = state.store.lock().map_err(e)?;
+    let txns = store.all_transactions().map_err(e)?;
+    Ok(detect_rhythms(&txns))
+}
+
+/// Set a transaction's suppression flag (`Spending`/`Transfer`/`CardPayment`);
+/// when `learn`, write a rule so siblings pick it up on the next `apply_flags`.
+/// The frontend sends the serde variant name (e.g. "Transfer").
+#[tauri::command]
+fn set_flag(
+    state: State<AppState>,
+    txn_id: String,
+    flag: TxnFlag,
+    learn: bool,
+) -> CmdResult<Option<i64>> {
+    let store = state.store.lock().map_err(e)?;
+    store.set_flag(&txn_id, flag, learn).map_err(e)
+}
+
+/// Re-apply all flag rules across the transactions. Returns the count changed.
+#[tauri::command]
+fn apply_flags(state: State<AppState>) -> CmdResult<usize> {
+    let store = state.store.lock().map_err(e)?;
+    store.apply_flags().map_err(e)
+}
+
+/// Whether any ingested account is a credit/card account. The frontend warns
+/// before suppressing a CardPayment when this is false (no offsetting charges).
+#[tauri::command]
+fn has_credit_account(state: State<AppState>) -> CmdResult<bool> {
+    let store = state.store.lock().map_err(e)?;
+    store.has_credit_account().map_err(e)
 }
 
 #[tauri::command]
@@ -379,8 +426,12 @@ fn main() {
             merchants,
             flow,
             subscriptions,
+            rhythms,
             categories,
             set_category,
+            set_flag,
+            apply_flags,
+            has_credit_account,
             pull_from_file,
             pull_live,
             claim,

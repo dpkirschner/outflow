@@ -1,3 +1,15 @@
 /target
 **/*.rs.bk
 .DS_Store
+
+# Local databases (real data lives here — never commit)
+*.db
+*.sqlite*
+
+# Secrets / local env
+.env*
+*.pem
+*.key
+
+# Personal build spec / session handoff (kept out of git intentionally)
+agent.md

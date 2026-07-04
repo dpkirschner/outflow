@@ -63,9 +63,11 @@ keychain, encryption, or the demo setup.
   fresh token from SimpleFIN Bridge. The access URL is the durable secret.
 - **Connect from inside the app**, not the CLI, so the keychain item is owned by
   the app's code signature (avoids cross-app keychain prompts).
-- **Demo credentials** (for testing only): setup token
-  `aHR0cHM6Ly9iZXRhLWJyaWRnZS5zaW1wbGVmaW4ub3JnL3NpbXBsZWZpbi9jbGFpbS9ERU1P`,
-  which claims to `https://demo:demo@beta-bridge.simplefin.org/simplefin`.
+- **Demo / testing:** SimpleFIN publishes a public demo bridge
+  (`beta-bridge.simplefin.org`) with a `demo`/`demo` login — see SimpleFIN's own
+  docs for the current demo setup token. It's a public sandbox, not a secret; the
+  literal token is kept out of the repo so secret-scanners don't flag it. (The
+  local `agent.md`, which is git-ignored, has it stashed for convenience.)
 
 ## Known design limits (not bugs)
 

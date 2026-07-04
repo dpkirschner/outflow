@@ -28,6 +28,8 @@ export const api = {
     invoke<number | null>("set_category", { txnId, category, learn }),
   pullFromFile: (path: string) => invoke<PullResult>("pull_from_file", { path }),
 
+  resetData: () => invoke<void>("reset_data"),
+
   // networked (require the `net` feature build)
   pullLive: () => invoke<PullResult>("pull_live"),
   claim: (setupToken: string) => invoke<string>("claim", { setupToken }),

@@ -9,6 +9,7 @@ interface Props {
   onCategorize: () => void;
   onCategorizeLlm: () => void;
   onClaim: (token: string) => void;
+  onReset: () => void;
   onRefresh: () => void;
 }
 
@@ -19,6 +20,7 @@ export function TopBar({
   onCategorize,
   onCategorizeLlm,
   onClaim,
+  onReset,
   onRefresh,
 }: Props) {
   const [connecting, setConnecting] = useState(false);
@@ -63,6 +65,9 @@ export function TopBar({
           </button>
           <button className="btn" onClick={onCategorizeLlm} disabled={busy}>
             Categorize · AI
+          </button>
+          <button className="btn danger" onClick={onReset} disabled={busy}>
+            Reset
           </button>
         </div>
       </div>

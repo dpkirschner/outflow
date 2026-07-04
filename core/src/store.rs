@@ -202,6 +202,16 @@ impl Store {
         tx.commit()
     }
 
+    /// Wipe pulled data — transactions, accounts, and the sync log — for a clean
+    /// re-pull, while keeping learned category rules and the vocabulary.
+    pub fn reset_data(&self) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM transactions", [])?;
+        tx.execute("DELETE FROM accounts", [])?;
+        tx.execute("DELETE FROM sync_log", [])?;
+        tx.commit()
+    }
+
     pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, org, name, kind, balance_cents, currency, last_synced
@@ -466,6 +476,20 @@ mod tests {
         let after = s.categories().unwrap();
         assert_eq!(after.iter().filter(|c| *c == "Groceries").count(), 1);
         assert!(after.contains(&"Charity".to_string()));
+    }
+
+    #[test]
+    fn reset_data_clears_txns_and_accounts_but_keeps_rules() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
+        s.add_rule(MatchType::Exact, "netflix", "Streaming").unwrap();
+
+        s.reset_data().unwrap();
+
+        assert_eq!(s.count_transactions().unwrap(), 0);
+        assert!(s.accounts().unwrap().is_empty());
+        // Learned rules survive a data reset.
+        assert_eq!(s.rules().unwrap().len(), 1);
     }
 
     #[test]

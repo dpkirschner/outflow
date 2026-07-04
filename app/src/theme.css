@@ -133,6 +133,13 @@ button.btn.primary {
   border-color: rgba(45, 226, 197, 0.4);
   color: var(--accent);
 }
+button.btn.danger {
+  color: var(--neg);
+  border-color: rgba(255, 107, 138, 0.3);
+}
+button.btn.danger:hover {
+  border-color: var(--neg);
+}
 button.btn:disabled {
   opacity: 0.5;
   cursor: default;
@@ -287,6 +294,19 @@ select.cat:focus {
   color: var(--text-faint);
   font-size: 13px;
   padding: 12px 4px;
+}
+
+.firstrun {
+  background: linear-gradient(90deg, rgba(45, 226, 197, 0.1), rgba(110, 168, 254, 0.08));
+  border: 1px solid rgba(45, 226, 197, 0.35);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  font-size: 14px;
+  color: var(--text);
+}
+.firstrun b {
+  color: var(--accent);
 }
 
 /* toast */

@@ -173,6 +173,14 @@ fn set_category(
     store.set_manual_category(&txn_id, &category, learn).map_err(e)
 }
 
+/// Clear pulled data (transactions + accounts + sync log) for a clean re-pull,
+/// keeping learned category rules. The safety valve for a contaminated DB.
+#[tauri::command]
+fn reset_data(state: State<AppState>) -> CmdResult<()> {
+    let store = state.store.lock().map_err(e)?;
+    store.reset_data().map_err(e)
+}
+
 /// Dev/offline pull: load a SimpleFIN JSON file (the `--from-file` path). Live
 /// SimpleFIN over the network is the deferred `net` pass.
 #[tauri::command]
@@ -295,8 +303,8 @@ fn categorize_llm(state: State<AppState>) -> CmdResult<usize> {
     }
 }
 
-fn open_store() -> Result<Store, String> {
-    let db = std::env::var("OUTFLOW_DB").unwrap_or_else(|_| "outflow.db".into());
+fn open_store(app: &tauri::App) -> Result<Store, String> {
+    let db = resolve_db_path(app)?;
     let store = open_db(&db)?;
     // Surface which DB we opened and how full it is — a fresh/empty file is the
     // usual reason "no data shows". Visible in the `tauri dev` terminal.
@@ -305,25 +313,59 @@ fn open_store() -> Result<Store, String> {
     Ok(store)
 }
 
-fn open_db(db: &str) -> Result<Store, String> {
-    // With the encryption feature, OUTFLOW_DB_KEY opens the DB via SQLCipher.
-    // The key is a secret: environment only, never argv or the DB.
-    #[cfg(feature = "encryption")]
-    {
-        if let Ok(key) = std::env::var("OUTFLOW_DB_KEY") {
-            if !key.is_empty() {
-                return Store::open_encrypted(db, &key)
-                    .map_err(|err| format!("open encrypted db {db}: {err}"));
-            }
+/// DB path: the `OUTFLOW_DB` override (dev/CLI), else the platform app-data dir.
+/// A Finder-launched `.app` inherits no shell env, so the app-data dir is the
+/// only path it can rely on. Created on first run.
+fn resolve_db_path(app: &tauri::App) -> Result<String, String> {
+    if let Ok(p) = std::env::var("OUTFLOW_DB") {
+        if !p.is_empty() {
+            return Ok(p);
         }
     }
-    Store::open(db).map_err(|err| format!("open db {db}: {err}"))
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    Ok(dir.join("outflow.db").to_string_lossy().into_owned())
+}
+
+fn open_db(db: &str) -> Result<Store, String> {
+    #[cfg(feature = "encryption")]
+    {
+        let key = resolve_db_key()?;
+        Store::open_encrypted(db, &key).map_err(|err| format!("open encrypted db {db}: {err}"))
+    }
+    #[cfg(not(feature = "encryption"))]
+    {
+        Store::open(db).map_err(|err| format!("open db {db}: {err}"))
+    }
+}
+
+/// SQLCipher key: the `OUTFLOW_DB_KEY` override (dev/CLI), else a keychain-managed
+/// key generated on first run — transparent, passphrase-free encryption for the
+/// double-click app. The key is a secret: env or keychain only, never argv/DB.
+#[cfg(feature = "encryption")]
+fn resolve_db_key() -> Result<String, String> {
+    if let Ok(k) = std::env::var("OUTFLOW_DB_KEY") {
+        if !k.is_empty() {
+            return Ok(k);
+        }
+    }
+    #[cfg(feature = "keychain")]
+    {
+        outflow_net::secrets::db_key_get_or_create()
+    }
+    #[cfg(not(feature = "keychain"))]
+    {
+        Err("encryption needs a key: set OUTFLOW_DB_KEY, or enable the keychain feature".into())
+    }
 }
 
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let store = open_store()?;
+            let store = open_store(app)?;
             app.manage(AppState {
                 store: Mutex::new(store),
             });
@@ -343,6 +385,7 @@ fn main() {
             pull_live,
             claim,
             categorize_llm,
+            reset_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running outflow");

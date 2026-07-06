@@ -85,8 +85,25 @@ pub struct LedgerStats {
     pub noise_count: usize,
 }
 
+/// How much data sits behind the current view — so the UI can distinguish "the
+/// window is set to 12mo" from "you only have 3 months of history."
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Coverage {
+    /// Earliest behavioral date across the WHOLE database (not just the window).
+    /// `None` when there are no transactions.
+    pub earliest: Option<i64>,
+    /// Count of outflow transactions within the window — the spend the screen
+    /// analyzes.
+    pub window_txn_count: usize,
+    /// True when the window reaches back to (or before) the earliest data — i.e.
+    /// it's showing everything, not clipping. Every window ≥ your history reads
+    /// the same until the archive accumulates past the window.
+    pub covers_all: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LedgerView {
+    pub coverage: Coverage,
     pub stats: LedgerStats,
     pub streams: Vec<Stream>,
     pub committed: Vec<Stream>,
@@ -216,11 +233,22 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
         .map(|a| (a.id.clone(), a))
         .collect();
 
-    let windowed: Vec<Transaction> = store
-        .all_transactions()?
+    let all = store.all_transactions()?;
+    // Earliest date across the whole archive (independent of the window), so the
+    // UI can report how far back the data goes.
+    let earliest = all.iter().map(|t| t.effective_date()).min();
+    let windowed: Vec<Transaction> = all
         .into_iter()
         .filter(|t| since.map_or(true, |s| t.effective_date() >= s))
         .collect();
+    let coverage = Coverage {
+        earliest,
+        window_txn_count: windowed.iter().filter(|t| t.amount.is_outflow()).count(),
+        covers_all: match since {
+            None => true,
+            Some(s) => earliest.map_or(true, |e| e >= s),
+        },
+    };
 
     let marks = store.merchant_marks()?;
 
@@ -322,6 +350,7 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
     };
 
     Ok(LedgerView {
+        coverage,
         stats,
         streams,
         committed,
@@ -494,6 +523,32 @@ mod tests {
             assert!(obj.contains_key(key), "Stream JSON missing top-level `{key}`");
         }
         assert_eq!(obj["cadence"], serde_json::json!("Daily"));
+    }
+
+    #[test]
+    fn coverage_distinguishes_window_from_available_data() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        // Data spans day 0 to day 100.
+        s.upsert_transactions(&[
+            tx("a", "chk", 0, -1000, "Old Shop"),
+            tx("b", "chk", 100, -1000, "New Shop"),
+        ])
+        .unwrap();
+
+        // No window → covers everything, both txns.
+        let all = ledger(&s, None, NOW).unwrap();
+        assert!(all.coverage.covers_all);
+        assert_eq!(all.coverage.window_txn_count, 2);
+        assert_eq!(all.coverage.earliest, Some(BASE));
+
+        // A `since` after the earliest txn → the window is clipping.
+        let since = BASE + 50 * DAY;
+        let clipped = ledger(&s, Some(since), NOW).unwrap();
+        assert!(!clipped.coverage.covers_all, "window starts after earliest data");
+        assert_eq!(clipped.coverage.window_txn_count, 1);
+        // earliest still reports the true start of the archive, not the window.
+        assert_eq!(clipped.coverage.earliest, Some(BASE));
     }
 
     #[test]

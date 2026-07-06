@@ -6,6 +6,7 @@ import { ActionBar } from "./components/ledger/ActionBar";
 import { StatStrip, LedgerZones } from "./components/ledger/Zones";
 import { StreamsCard, type SortMode } from "./components/ledger/Streams";
 import { StreamSlideOver } from "./components/ledger/SlideOver";
+import { coverageText } from "./components/ledger/labels";
 
 export default function App() {
   const [view, setView] = useState<LedgerView | null>(null);
@@ -166,6 +167,7 @@ export default function App() {
       ) : (
         view && (
           <>
+            <div className="lg-coverage">{coverageText(view.coverage, win)}</div>
             <StatStrip stats={view.stats} />
             <StreamsCard
               streams={view.streams}

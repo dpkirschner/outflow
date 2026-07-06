@@ -1,5 +1,25 @@
 // Display helpers for the rhythm ledger.
-import type { Account, Source, SourceKind, StreamCadence, Trend } from "../../types";
+import type { Account, Coverage, Source, SourceKind, StreamCadence, Trend, Window } from "../../types";
+import { formatDate } from "../../format";
+
+const WINDOW_SPAN: Record<Window, string> = {
+  "3mo": "the last 3 months",
+  "6mo": "the last 6 months",
+  "12mo": "the last 12 months",
+  all: "all time",
+};
+
+// A plain-language coverage line: always states how far back the data goes, and
+// whether the current window is showing all of it or clipping — so "window is at
+// 12mo" is distinguishable from "you only have 3 months of data." No date math.
+export function coverageText(c: Coverage, win: Window): string {
+  if (c.earliest === null) return "No transactions yet — Connect and Pull.";
+  const since = formatDate(c.earliest);
+  const n = c.window_txn_count;
+  const txns = `${n} transaction${n === 1 ? "" : "s"}`;
+  const tail = c.covers_all ? "showing all of it" : `showing ${WINDOW_SPAN[win]}`;
+  return `Data since ${since} · ${tail} · ${txns}`;
+}
 
 // Derive a source chip from an account (mirrors core's ledger::account_source):
 // cards show their last-4, ACH accounts show their name.

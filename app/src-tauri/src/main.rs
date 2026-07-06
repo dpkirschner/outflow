@@ -9,9 +9,9 @@
 use std::sync::Mutex;
 
 use outflow_core::{
-    detect, detect_rhythms, monthly_flow, parse_account_set, spend_by_category, top_merchants,
-    Account, CategorySource, CategorySpend, MerchantSpend, MonthlyFlow, RhythmEntry, Store,
-    Subscription, Transaction, TxnFilter, TxnFlag,
+    detect, monthly_flow, parse_account_set, spend_by_category, top_merchants, Account,
+    CategorySource, CategorySpend, LedgerView, Mark, MerchantSpend, MonthlyFlow, Store, Subscription,
+    Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
@@ -27,6 +27,25 @@ type CmdResult<T> = Result<T, String>;
 
 fn e<E: std::fmt::Display>(err: E) -> String {
     err.to_string()
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Rolling-window control → a `since` bound (epoch secs). ~30.5-day months is a
+/// coarse filter; the ledger's month/rate math is exact via `chrono::Local`.
+const MONTH_SECS: i64 = 2_635_200;
+fn window_since(window: &str, now: i64) -> Option<i64> {
+    match window {
+        "all" => None,
+        "3mo" => Some(now - 3 * MONTH_SECS),
+        "12mo" => Some(now - 12 * MONTH_SECS),
+        _ => Some(now - 6 * MONTH_SECS), // default 6mo
+    }
 }
 
 /// Filter payload from JS. Epoch **seconds**; the frontend computes them.
@@ -165,13 +184,40 @@ fn subscriptions(state: State<AppState>) -> CmdResult<Vec<Subscription>> {
     Ok(detect(&txns))
 }
 
-/// Recurring merchants whose amount varies (the rhythm roster). Complements
-/// `subscriptions`, which requires a stable amount.
+/// The whole rhythm-ledger view for a rolling window (`3mo`/`6mo`/`12mo`/`all`).
+/// Streams + zones + stats, partitioned once. The screen's primary query.
 #[tauri::command]
-fn rhythms(state: State<AppState>) -> CmdResult<Vec<RhythmEntry>> {
+fn ledger(state: State<AppState>, window: String) -> CmdResult<LedgerView> {
     let store = state.store.lock().map_err(e)?;
-    let txns = store.all_transactions().map_err(e)?;
-    Ok(detect_rhythms(&txns))
+    let now = now_secs();
+    outflow_core::ledger(&store, window_since(&window, now), now).map_err(e)
+}
+
+/// The occurrences behind one stream (its normalized merchant), for the slide-over.
+#[tauri::command]
+fn stream_occurrences(
+    state: State<AppState>,
+    merchant: String,
+    window: String,
+) -> CmdResult<Vec<Transaction>> {
+    let store = state.store.lock().map_err(e)?;
+    let since = window_since(&window, now_secs());
+    store.stream_occurrences(&merchant, since).map_err(e)
+}
+
+/// Apply a per-merchant ledger override (`Committed` / `Dismissed`) from the
+/// slide-over's subtractive reclassify.
+#[tauri::command]
+fn mark_stream(state: State<AppState>, merchant: String, mark: Mark) -> CmdResult<()> {
+    let store = state.store.lock().map_err(e)?;
+    store.set_merchant_mark(&merchant, mark).map_err(e)
+}
+
+/// Remove a merchant's override, returning it to the normal streams list.
+#[tauri::command]
+fn clear_stream_mark(state: State<AppState>, merchant: String) -> CmdResult<()> {
+    let store = state.store.lock().map_err(e)?;
+    store.clear_merchant_mark(&merchant).map_err(e)
 }
 
 /// Set a transaction's suppression flag (`Spending`/`Transfer`/`CardPayment`);
@@ -426,7 +472,10 @@ fn main() {
             merchants,
             flow,
             subscriptions,
-            rhythms,
+            ledger,
+            stream_occurrences,
+            mark_stream,
+            clear_stream_mark,
             categories,
             set_category,
             set_flag,

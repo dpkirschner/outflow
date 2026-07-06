@@ -36,10 +36,16 @@ money            i64-cents type, decimal parse, display
   └ model        Account, Transaction, enums (+ merchant())
       └ store    SQLite persistence (rusqlite); upsert rules; rule/category CRUD
           ├ query          spend_by_category, top_merchants, monthly_flow
-          ├ subscriptions  normalize_payee (THE normalizer), detect()
+          ├ subscriptions  normalize_payee (THE normalizer), detect(), detect_rhythms()
+          ├ ledger         the rhythm-ledger view model (ledger() → LedgerView)
           ├ categorize     RuleSet, precedence
           └ llm            Prompter trait, prompt build, response validation
 ```
+
+`ledger` sits on top of `subscriptions` + `query` + `store`: `ledger()` runs the
+stream detector, attaches per-stream `Source`s, and partitions a window **once**
+into the screen's zones (streams / committed / notable / transfers / noise) so
+nothing double-counts. It is the single source of truth for the ledger screen.
 
 Analysis (`query`, `subscriptions`) reads all transactions from the store and
 **aggregates in memory in Rust**, not in SQL. Months are bucketed on each
@@ -73,13 +79,21 @@ SimpleFIN JSON ──net::simplefin::fetch──▶ parse_account_set ──▶ 
   wrappers over `net`.
 - **GUI backend** (`app/src-tauri/src/main.rs`) — a `Mutex<Store>` in Tauri
   managed state (rusqlite `Connection` is not `Sync`); each `#[tauri::command]`
-  locks it and calls core. Commands: `accounts`, `transactions`, `categorize`,
-  `spend_categories`, `merchants`, `flow`, `subscriptions`, `rhythms`,
-  `categories`, `set_category`, `set_flag`, `apply_flags`, `has_credit_account`,
-  `pull_from_file`, `pull_live`, `claim`, `categorize_llm`, `reset_data`.
-- **GUI frontend** (`app/src/`) — `api.ts` wraps `invoke()`; `types.ts` mirrors
-  the serde DTOs; components render Recharts dashboards. See DATA_MODEL.md for the
-  serialization boundary.
+  locks it and calls core. Ledger commands: `ledger(window)`,
+  `stream_occurrences(merchant, window)`, `mark_stream`/`clear_stream_mark`;
+  editing: `set_category`, `set_flag`, `apply_flags`, `has_credit_account`; plus
+  `accounts`, `categorize`, `categorize_llm`, `pull_live`, `claim`, `reset_data`
+  (and legacy `spend_categories`/`merchants`/`flow`/`subscriptions`, still
+  registered). A window string (`3mo`/`6mo`/`12mo`/`all`) becomes a `since` bound.
+- **GUI frontend** (`app/src/`) — the primary screen is the **rhythm ledger**
+  (`App.tsx` + `components/ledger/*`, styled by `ledger.css`): an action bar
+  (connect/pull/categorize/reset + rolling-window control), the streams list with
+  hand-rolled flexbox rhythm strips (not Recharts) and By-size/By-change sort, the
+  Notable/Committed/Transfers/Noise zones, and a right slide-over for per-stream
+  drill-down and editing (reclassify, per-txn flag/categorize, card-payment
+  warning). `api.ts` wraps `invoke()`; `types.ts` mirrors the serde DTOs. The old
+  dashboard components remain in the tree but are no longer mounted. See
+  DATA_MODEL.md for the serialization boundary.
 
 ## Config resolution (the productionization crux)
 

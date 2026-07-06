@@ -1,43 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type {
-  Account,
-  CategorySpend,
-  MerchantSpend,
-  MonthlyFlow,
-  Subscription,
-  Transaction,
-} from "./types";
-import { TopBar } from "./components/TopBar";
-import { MonthlyFlowCard } from "./components/MonthlyFlow";
-import { SpendByCategory } from "./components/SpendByCategory";
-import { MerchantLeaderboard } from "./components/MerchantLeaderboard";
-import { Subscriptions } from "./components/Subscriptions";
-import { TransactionList } from "./components/TransactionList";
+import type { Account, LedgerView, Stream, Window } from "./types";
 import { Toast, type ToastMsg } from "./components/Toast";
-
-export interface Dashboard {
-  accounts: Account[];
-  flow: MonthlyFlow[];
-  categories: CategorySpend[];
-  merchants: MerchantSpend[];
-  subscriptions: Subscription[];
-  transactions: Transaction[];
-  vocab: string[];
-}
-
-const EMPTY: Dashboard = {
-  accounts: [],
-  flow: [],
-  categories: [],
-  merchants: [],
-  subscriptions: [],
-  transactions: [],
-  vocab: [],
-};
+import { ActionBar } from "./components/ledger/ActionBar";
+import { StatStrip, LedgerZones } from "./components/ledger/Zones";
+import { StreamsCard, type SortMode } from "./components/ledger/Streams";
+import { StreamSlideOver } from "./components/ledger/SlideOver";
 
 export default function App() {
-  const [data, setData] = useState<Dashboard>(EMPTY);
+  const [view, setView] = useState<LedgerView | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [vocab, setVocab] = useState<string[]>([]);
+  const [hasCard, setHasCard] = useState(false);
+  const [win, setWin] = useState<Window>("6mo");
+  const [sort, setSort] = useState<SortMode>("size");
+  const [open, setOpen] = useState<Stream | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
@@ -47,164 +24,169 @@ export default function App() {
     window.setTimeout(() => setToast(null), 3200);
   }, []);
 
-  const reload = useCallback(async () => {
-    try {
-      const [accounts, flow, categories, merchants, subscriptions, transactions, vocab] =
-        await Promise.all([
+  const reload = useCallback(
+    async (w: Window) => {
+      try {
+        const [v, accts, cats, card] = await Promise.all([
+          api.ledger(w),
           api.accounts(),
-          api.flow(),
-          api.spendCategories(),
-          api.merchants(undefined, 15),
-          api.subscriptions(),
-          api.transactions(),
           api.categories(),
+          api.hasCreditAccount(),
         ]);
-      setData({ accounts, flow, categories, merchants, subscriptions, transactions, vocab });
-    } catch (err) {
-      notify({ kind: "err", text: `Load failed: ${String(err)}` });
-    } finally {
-      setLoading(false);
-    }
-  }, [notify]);
+        setView(v);
+        setAccounts(accts);
+        setVocab(cats);
+        setHasCard(card);
+        // Keep an open slide-over in sync with fresh data (or close it if the
+        // stream moved out of the streams/committed lists, e.g. dismissed).
+        setOpen((cur) =>
+          cur
+            ? v.streams.find((s) => s.merchant === cur.merchant) ??
+              v.committed.find((s) => s.merchant === cur.merchant) ??
+              null
+            : null,
+        );
+      } catch (err) {
+        notify({ kind: "err", text: `Load failed: ${String(err)}` });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [notify],
+  );
 
   const launched = useRef(false);
   useEffect(() => {
     if (launched.current) return;
     launched.current = true;
     void (async () => {
-      await reload();
-      // Best-effort live refresh on open. Silent if not connected yet or
-      // offline — a first-run user hasn't linked a bank, and that's fine.
+      await reload(win);
+      // Best-effort live refresh on open; silent if not connected/offline.
       try {
         const r = await api.pullLive();
         if (r.added || r.updated) {
           notify({ kind: "ok", text: `Refreshed: ${r.added} added, ${r.updated} updated` });
-          await reload();
+          await reload(win);
         }
       } catch {
         /* not connected / offline — stay quiet on launch */
       }
     })();
-  }, [reload, notify]);
+  }, [reload, notify, win]);
 
-  const onCategorize = useCallback(async () => {
-    setBusy(true);
-    try {
-      const r = await api.categorize();
-      notify({
-        kind: "ok",
-        text: `Categorized ${r.rule} by rule · ${r.remaining} still uncategorized`,
-      });
-      await reload();
-    } catch (err) {
-      notify({ kind: "err", text: `Categorize failed: ${String(err)}` });
-    } finally {
-      setBusy(false);
-    }
-  }, [notify, reload]);
-
-  const onCategorizeLlm = useCallback(async () => {
-    setBusy(true);
-    try {
-      // Rule pass first (cheap), then the LLM tail over what's left.
-      const r = await api.categorize();
-      const m = await api.categorizeLlm();
-      notify({ kind: "ok", text: `Categorized ${r.rule} by rule · ${m} by AI` });
-      await reload();
-    } catch (err) {
-      notify({ kind: "err", text: `AI categorize failed: ${String(err)}` });
-    } finally {
-      setBusy(false);
-    }
-  }, [notify, reload]);
-
-  const onPull = useCallback(async () => {
-    setBusy(true);
-    try {
-      const r = await api.pullLive();
-      notify({
-        kind: "ok",
-        text: `Pulled ${r.accounts} account(s): ${r.added} added, ${r.updated} updated${
-          r.warnings.length ? ` · ${r.warnings.length} warning(s)` : ""
-        }`,
-      });
-      await reload();
-    } catch (err) {
-      notify({ kind: "err", text: `Pull failed: ${String(err)}` });
-    } finally {
-      setBusy(false);
-    }
-  }, [notify, reload]);
-
-  const onReset = useCallback(async () => {
-    const ok = window.confirm(
-      "Clear all pulled data (accounts + transactions)? Your learned category " +
-        "rules are kept. Use this to start clean, then hit Pull."
-    );
-    if (!ok) return;
-    setBusy(true);
-    try {
-      await api.resetData();
-      notify({ kind: "ok", text: "Data cleared — hit Pull to re-fetch." });
-      await reload();
-    } catch (err) {
-      notify({ kind: "err", text: `Reset failed: ${String(err)}` });
-    } finally {
-      setBusy(false);
-    }
-  }, [notify, reload]);
-
-  const onClaim = useCallback(
-    async (token: string) => {
+  // Generic action wrapper: flip busy, run, toast, reload.
+  const act = useCallback(
+    async (fn: () => Promise<string>) => {
       setBusy(true);
       try {
-        const msg = await api.claim(token);
+        const msg = await fn();
         notify({ kind: "ok", text: msg });
+        await reload(win);
       } catch (err) {
-        notify({ kind: "err", text: `Connect failed: ${String(err)}` });
+        notify({ kind: "err", text: String(err) });
       } finally {
         setBusy(false);
       }
     },
-    [notify]
+    [notify, reload, win],
   );
 
+  const onPull = () =>
+    act(async () => {
+      const r = await api.pullLive();
+      return `Pulled ${r.accounts} account(s): ${r.added} added, ${r.updated} updated`;
+    });
+  const onCategorize = () =>
+    act(async () => {
+      const r = await api.categorize();
+      return `Categorized ${r.rule} by rule · ${r.remaining} left`;
+    });
+  const onCategorizeLlm = () =>
+    act(async () => {
+      const r = await api.categorize();
+      const m = await api.categorizeLlm();
+      return `Categorized ${r.rule} by rule · ${m} by AI`;
+    });
+  const onConnect = (token: string) => act(() => api.claim(token));
+  const onReset = () => {
+    if (
+      !window.confirm(
+        "Clear all pulled data (accounts + transactions)? Learned rules are kept. Then hit Pull.",
+      )
+    )
+      return;
+    void act(async () => {
+      await api.resetData();
+      return "Data cleared — hit Pull to re-fetch.";
+    });
+  };
+  const onWindow = (w: Window) => {
+    setWin(w);
+    void reload(w);
+  };
+
+  const connected = accounts.length > 0;
+  const empty = !loading && !connected && (view?.streams.length ?? 0) === 0;
+
   return (
-    <div className="app">
-      <TopBar
-        accounts={data.accounts}
+    <div className="lg-app">
+      <div className="lg-top">
+        <span className="lg-wm">outflow</span>
+        <span className="lg-sub">where did my money go?</span>
+        <span className="lg-nav">
+          <span className="on">Ledger</span>
+          <span>Flow · soon</span>
+          <span>Reconcile · soon</span>
+        </span>
+      </div>
+
+      <ActionBar
+        accounts={accounts}
         busy={busy || loading}
+        window={win}
+        onWindow={onWindow}
+        onConnect={onConnect}
         onPull={onPull}
+        onRefresh={() => reload(win)}
         onCategorize={onCategorize}
         onCategorizeLlm={onCategorizeLlm}
-        onClaim={onClaim}
         onReset={onReset}
-        onRefresh={reload}
       />
 
-      {!loading && data.accounts.length === 0 && data.transactions.length === 0 && (
-        <div className="firstrun">
-          No data yet — click <b>Connect</b> to link your bank with a SimpleFIN
-          setup token, then hit <b>Pull</b>.
+      {loading ? (
+        <div className="lg-empty">Loading…</div>
+      ) : empty ? (
+        <div className="lg-empty">
+          No data yet — click <b>Connect</b> to link your bank with a SimpleFIN setup token, then
+          hit <b>Pull</b>.
         </div>
+      ) : (
+        view && (
+          <>
+            <StatStrip stats={view.stats} />
+            <StreamsCard
+              streams={view.streams}
+              mode={sort}
+              onMode={setSort}
+              activeMerchant={open?.merchant ?? null}
+              onOpen={setOpen}
+            >
+              <LedgerZones view={view} onOpen={setOpen} />
+            </StreamsCard>
+          </>
+        )
       )}
 
-      {loading ? (
-        <div className="muted">Loading…</div>
-      ) : (
-        <div className="grid">
-          <MonthlyFlowCard flow={data.flow} />
-          <SpendByCategory rows={data.categories} />
-          <MerchantLeaderboard rows={data.merchants} />
-          <Subscriptions rows={data.subscriptions} />
-          <TransactionList
-            txns={data.transactions}
-            vocab={data.vocab}
-            onChanged={reload}
-            notify={notify}
-          />
-        </div>
-      )}
+      <StreamSlideOver
+        stream={open}
+        win={win}
+        accounts={accounts}
+        vocab={vocab}
+        hasCard={hasCard}
+        onClose={() => setOpen(null)}
+        onEdited={() => reload(win)}
+        notify={notify}
+      />
 
       {toast && <Toast msg={toast} />}
     </div>

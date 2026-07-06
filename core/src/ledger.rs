@@ -1,0 +1,506 @@
+//! The rhythm ledger view model — the single source of truth for the ledger
+//! screen. `ledger()` partitions a window of transactions **once** into the
+//! screen's zones (streams / committed / notable / transfers / noise) so nothing
+//! double-counts, and attaches per-stream sources. Everything downstream (Tauri
+//! commands, the React screen) is a thin render over `LedgerView`.
+
+use crate::model::{Account, AccountKind, Mark, Transaction, TxnFlag};
+use crate::store::Store;
+use crate::subscriptions::{detect_rhythms, normalize_payee, RhythmEntry};
+use serde::Serialize;
+use std::collections::HashMap;
+
+/// One-off spend at or above this is "Notable" rather than "Noise" (flat start;
+/// spec revisits relative-to-median later).
+const NOTABLE_THRESHOLD_CENTS: i64 = 40_000; // $400
+const NOTABLE_TOP_N: usize = 8;
+
+/// Categories that make a recurring stream a fixed obligation ("Committed") — kept
+/// out of the hunt. Matched case-insensitively against a stream's dominant
+/// category. Editable; the slide-over's manual "Mark as Committed" covers the rest.
+const COMMITTED_CATEGORIES: &[&str] = &[
+    "rent",
+    "housing",
+    "home",
+    "mortgage",
+    "insurance",
+    "loan",
+    "loans",
+    "debt",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum SourceKind {
+    Card,
+    Ach,
+}
+
+/// Which account(s) a stream's charges land on. `label` = last-4 (cards) or the
+/// account name; `pct` = share of the stream's occurrences on this account.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Source {
+    pub label: String,
+    pub kind: SourceKind,
+    pub pct: u8,
+}
+
+/// A recurring stream row: the detected rhythm plus its sources and the dominant
+/// category (used for Committed classification and display).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Stream {
+    #[serde(flatten)]
+    pub rhythm: RhythmEntry,
+    pub sources: Vec<Source>,
+    pub category: Option<String>,
+}
+
+/// A single transaction line item — used for both Notable one-offs and the
+/// expandable Noise list, so the user can always see the rows behind a zone.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LineItem {
+    pub id: String,
+    pub merchant: String,
+    pub date: i64,
+    pub amount_cents: i64,
+    pub category: Option<String>,
+    pub source: Source,
+}
+
+/// A suppressed group (Transfer or CardPayment), shown collapsed and excluded
+/// from every total.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TransferGroup {
+    pub merchant: String,
+    pub flag: TxnFlag,
+    pub total_cents: i64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct LedgerStats {
+    pub recurring_monthly_cents: i64,
+    pub stream_count: usize,
+    pub committed_monthly_cents: i64,
+    pub noise_total_cents: i64,
+    pub noise_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LedgerView {
+    pub stats: LedgerStats,
+    pub streams: Vec<Stream>,
+    pub committed: Vec<Stream>,
+    pub notable: Vec<LineItem>,
+    /// The individual sub-threshold one-offs behind the Noise summary, newest
+    /// first — so the fold can list them, not just the total.
+    pub noise_items: Vec<LineItem>,
+    pub transfers: Vec<TransferGroup>,
+}
+
+/// Parse a card's last-4 from the account name — the last run of ≥4 digits, e.g.
+/// "Chase Freedom Unlimited (4707)" → "4707". `None` when the name has no digits.
+fn last4(name: &str) -> Option<String> {
+    let mut best: Option<String> = None;
+    let mut cur = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_digit() {
+            cur.push(ch);
+        } else {
+            if cur.len() >= 4 {
+                best = Some(cur.clone());
+            }
+            cur.clear();
+        }
+    }
+    if cur.len() >= 4 {
+        best = Some(cur);
+    }
+    best.map(|r| r[r.len() - 4..].to_string())
+}
+
+fn source_kind(kind: AccountKind) -> SourceKind {
+    match kind {
+        AccountKind::Credit => SourceKind::Card,
+        _ => SourceKind::Ach,
+    }
+}
+
+/// Label + kind for an account (pct filled in per stream). Card → last-4; else the
+/// account name.
+fn account_source(acct: &Account) -> (String, SourceKind) {
+    let kind = source_kind(acct.kind);
+    let label = match kind {
+        SourceKind::Card => last4(&acct.name).unwrap_or_else(|| acct.name.clone()),
+        SourceKind::Ach => acct.name.clone(),
+    };
+    (label, kind)
+}
+
+/// The dominant non-null category among a group of transactions, if any.
+fn dominant_category(items: &[&Transaction]) -> Option<String> {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for t in items {
+        if let Some(c) = &t.category {
+            *counts.entry(c.as_str()).or_insert(0) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .map(|(c, _)| c.to_string())
+}
+
+/// Per-account source distribution for a stream's occurrences, sorted by share.
+fn stream_sources(items: &[&Transaction], accounts: &HashMap<String, Account>) -> Vec<Source> {
+    let total = items.len().max(1);
+    let mut by_acct: HashMap<&str, usize> = HashMap::new();
+    for t in items {
+        *by_acct.entry(t.account_id.as_str()).or_insert(0) += 1;
+    }
+    let mut out: Vec<Source> = by_acct
+        .into_iter()
+        .map(|(id, n)| {
+            let (label, kind) = accounts
+                .get(id)
+                .map(account_source)
+                .unwrap_or_else(|| (id.to_string(), SourceKind::Ach));
+            Source {
+                label,
+                kind,
+                pct: ((n * 100 + total / 2) / total) as u8,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| b.pct.cmp(&a.pct));
+    out
+}
+
+/// Build a line item (with its account source) for a single transaction.
+fn line_item(t: &Transaction, accounts: &HashMap<String, Account>) -> LineItem {
+    let (label, kind) = accounts
+        .get(&t.account_id)
+        .map(account_source)
+        .unwrap_or_else(|| (t.account_id.clone(), SourceKind::Ach));
+    LineItem {
+        id: t.id.clone(),
+        merchant: t.merchant().to_string(),
+        date: t.effective_date(),
+        amount_cents: t.amount.cents().abs(),
+        category: t.category.clone(),
+        source: Source { label, kind, pct: 100 },
+    }
+}
+
+fn is_committed(category: &Option<String>, mark: Option<Mark>) -> bool {
+    if mark == Some(Mark::Committed) {
+        return true;
+    }
+    match category {
+        Some(c) => {
+            let lc = c.to_lowercase();
+            COMMITTED_CATEGORIES.iter().any(|k| lc == *k)
+        }
+        None => false,
+    }
+}
+
+/// Assemble the whole ledger view for a window. `since` bounds transactions on the
+/// behavioral date (inclusive; `None` = all history); `now` fixes the in-progress
+/// month for the rate/trend math.
+pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<LedgerView> {
+    let accounts: HashMap<String, Account> = store
+        .accounts()?
+        .into_iter()
+        .map(|a| (a.id.clone(), a))
+        .collect();
+
+    let windowed: Vec<Transaction> = store
+        .all_transactions()?
+        .into_iter()
+        .filter(|t| since.map_or(true, |s| t.effective_date() >= s))
+        .collect();
+
+    let marks = store.merchant_marks()?;
+
+    // Group Spending outflows by normalized merchant — the same grouping the
+    // detector uses — so we can attach sources/category per stream.
+    let mut groups: HashMap<String, Vec<&Transaction>> = HashMap::new();
+    for t in windowed
+        .iter()
+        .filter(|t| t.amount.is_outflow() && t.flag == TxnFlag::Spending)
+    {
+        let key = normalize_payee(t.merchant());
+        if key.is_empty() {
+            continue;
+        }
+        groups.entry(key).or_default().push(t);
+    }
+
+    let entries: Vec<RhythmEntry> = detect_rhythms(&windowed, now);
+
+    let mut streams: Vec<Stream> = Vec::new();
+    let mut committed: Vec<Stream> = Vec::new();
+    // Merchants that are "accounted for" by a stream — excluded from notable/noise.
+    // A Dismissed stream is NOT accounted (its spend falls back to notable/noise).
+    let mut accounted: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for entry in entries {
+        let key = entry.merchant.clone();
+        let mark = marks.get(&key).copied();
+        if mark == Some(Mark::Dismissed) {
+            continue; // repartitioned into notable/noise below
+        }
+        accounted.insert(key.clone());
+        let items = groups.get(&key).cloned().unwrap_or_default();
+        let category = dominant_category(&items);
+        let sources = stream_sources(&items, &accounts);
+        let stream = Stream {
+            rhythm: entry,
+            sources,
+            category: category.clone(),
+        };
+        if is_committed(&category, mark) {
+            committed.push(stream);
+        } else {
+            streams.push(stream);
+        }
+    }
+
+    // Non-stream spending outflows → Notable (≥ threshold) or Noise (below).
+    let mut notable: Vec<LineItem> = Vec::new();
+    let mut noise_items: Vec<LineItem> = Vec::new();
+    let mut noise_total = 0i64;
+    for t in windowed
+        .iter()
+        .filter(|t| t.amount.is_outflow() && t.flag == TxnFlag::Spending)
+    {
+        let key = normalize_payee(t.merchant());
+        if accounted.contains(&key) {
+            continue;
+        }
+        let amt = t.amount.cents().abs();
+        let item = line_item(t, &accounts);
+        if amt >= NOTABLE_THRESHOLD_CENTS {
+            notable.push(item);
+        } else {
+            noise_total += amt;
+            noise_items.push(item);
+        }
+    }
+    notable.sort_by(|a, b| b.amount_cents.cmp(&a.amount_cents));
+    notable.truncate(NOTABLE_TOP_N);
+    noise_items.sort_by(|a, b| b.date.cmp(&a.date)); // newest first
+    let noise_count = noise_items.len();
+
+    // Transfers / card payments — grouped, excluded from every total.
+    let mut xfer: HashMap<(String, &'static str), (TxnFlag, i64, usize)> = HashMap::new();
+    for t in windowed.iter().filter(|t| t.flag != TxnFlag::Spending) {
+        let key = (normalize_payee(t.merchant()), t.flag.as_str());
+        let e = xfer.entry(key).or_insert((t.flag, 0, 0));
+        e.1 += t.amount.cents().abs();
+        e.2 += 1;
+    }
+    let mut transfers: Vec<TransferGroup> = xfer
+        .into_iter()
+        .map(|((merchant, _), (flag, total_cents, count))| TransferGroup {
+            merchant,
+            flag,
+            total_cents,
+            count,
+        })
+        .collect();
+    transfers.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+
+    let stats = LedgerStats {
+        recurring_monthly_cents: streams.iter().map(|s| s.rhythm.monthly_estimate_cents).sum(),
+        stream_count: streams.len(),
+        committed_monthly_cents: committed.iter().map(|s| s.rhythm.monthly_estimate_cents).sum(),
+        noise_total_cents: noise_total,
+        noise_count,
+    };
+
+    Ok(LedgerView {
+        stats,
+        streams,
+        committed,
+        notable,
+        noise_items,
+        transfers,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::AccountKind;
+    use crate::money::Money;
+
+    const BASE: i64 = 1_610_712_000; // 2021-01-15 12:00 UTC
+    const DAY: i64 = 86_400;
+    const NOW: i64 = BASE + 400 * DAY;
+
+    fn acct(id: &str, name: &str, kind: AccountKind) -> Account {
+        Account {
+            id: id.into(),
+            org: "Bank".into(),
+            name: name.into(),
+            kind,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+        }
+    }
+
+    fn tx(id: &str, acct: &str, day: i64, cents: i64, merchant: &str) -> Transaction {
+        Transaction {
+            id: id.into(),
+            account_id: acct.into(),
+            posted: BASE + day * DAY,
+            transacted_at: None,
+            amount: Money::from_cents(cents),
+            description: merchant.into(),
+            payee: Some(merchant.into()),
+            category: None,
+            category_source: None,
+            pending: false,
+            flag: TxnFlag::Spending,
+            raw: "{}".into(),
+        }
+    }
+
+    #[test]
+    fn last4_parses_trailing_group() {
+        assert_eq!(last4("Chase Freedom Unlimited (4707)").as_deref(), Some("4707"));
+        assert_eq!(last4("Amex ending 1005").as_deref(), Some("1005"));
+        assert_eq!(last4("SimpleFIN Checking"), None);
+    }
+
+    #[test]
+    fn partitions_streams_notable_and_noise_without_double_count() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "SimpleFIN Checking", AccountKind::Checking)])
+            .unwrap();
+        let mut txns = Vec::new();
+        // A daily stream (grocery), 20 days.
+        for d in 0..20 {
+            txns.push(tx(&format!("g{d}"), "chk", d, -(2000 + d * 10), "Grocery Store"));
+        }
+        // A big one-off ($900) → Notable.
+        txns.push(tx("big", "chk", 5, -90000, "Tree Removal Co"));
+        // Two small scattered one-offs → Noise.
+        txns.push(tx("n1", "chk", 2, -1200, "Random Cafe"));
+        txns.push(tx("n2", "chk", 9, -800, "Corner Shop"));
+        s.upsert_transactions(&txns).unwrap();
+
+        let v = ledger(&s, None, NOW).unwrap();
+        assert_eq!(v.streams.len(), 1, "grocery is the only stream");
+        assert_eq!(v.streams[0].rhythm.merchant, "grocery store");
+        assert_eq!(v.streams[0].sources.len(), 1);
+        assert_eq!(v.streams[0].sources[0].kind, SourceKind::Ach);
+        assert_eq!(v.notable.len(), 1);
+        assert_eq!(v.notable[0].amount_cents, 90000);
+        assert_eq!(v.stats.noise_count, 2);
+        assert_eq!(v.stats.noise_total_cents, 2000);
+        // The grocery charges are NOT also in noise/notable.
+        assert!(v.stats.recurring_monthly_cents > 0);
+    }
+
+    #[test]
+    fn committed_by_category_and_mark_leaves_the_streams_list() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        // Two monthly streams.
+        let mut txns = Vec::new();
+        for (i, d) in [0i64, 31, 59, 90].iter().enumerate() {
+            txns.push(tx(&format!("m{i}"), "chk", *d, -220000, "Chase Mortgage"));
+            txns.push(tx(&format!("g{i}"), "chk", *d, -4500, "Planet Fitness"));
+        }
+        s.upsert_transactions(&txns).unwrap();
+        // Mortgage → Committed by category.
+        for t in s.all_transactions().unwrap() {
+            if t.merchant() == "Chase Mortgage" {
+                s.set_category(&t.id, "Rent", crate::model::CategorySource::Manual).unwrap();
+            }
+        }
+        let v = ledger(&s, None, NOW).unwrap();
+        assert_eq!(v.committed.len(), 1);
+        assert_eq!(v.committed[0].rhythm.merchant, "chase mortgage");
+        assert_eq!(v.streams.len(), 1);
+        assert_eq!(v.streams[0].rhythm.merchant, "planet fitness");
+
+        // Manually mark Planet Fitness Committed too.
+        s.set_merchant_mark("planet fitness", Mark::Committed).unwrap();
+        let v2 = ledger(&s, None, NOW).unwrap();
+        assert_eq!(v2.streams.len(), 0);
+        assert_eq!(v2.committed.len(), 2);
+    }
+
+    #[test]
+    fn dismissed_stream_falls_to_noise_or_notable() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        let mut txns = Vec::new();
+        for d in 0..20 {
+            txns.push(tx(&format!("c{d}"), "chk", d, -500, "Blue Bottle"));
+        }
+        s.upsert_transactions(&txns).unwrap();
+        assert_eq!(ledger(&s, None, NOW).unwrap().streams.len(), 1);
+
+        s.set_merchant_mark("blue bottle", Mark::Dismissed).unwrap();
+        let v = ledger(&s, None, NOW).unwrap();
+        assert_eq!(v.streams.len(), 0, "dismissed → not a stream");
+        // Each $5 charge is below the notable threshold → noise.
+        assert_eq!(v.stats.noise_count, 20);
+        assert!(v.notable.is_empty());
+        // The individual rows are still visible in the noise list.
+        assert_eq!(v.noise_items.len(), 20);
+        assert!(v.noise_items.iter().all(|i| i.merchant == "Blue Bottle"));
+    }
+
+    #[test]
+    fn stream_serializes_flat_for_the_ts_contract() {
+        // The TS `Stream` interface expects the RhythmEntry fields flattened
+        // alongside `sources`/`category`. Guard the serde(flatten) boundary.
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        let txns: Vec<_> = (0..20)
+            .map(|d| tx(&format!("c{d}"), "chk", d, -500, "Blue Bottle"))
+            .collect();
+        s.upsert_transactions(&txns).unwrap();
+        let v = ledger(&s, None, NOW).unwrap();
+        let json = serde_json::to_value(&v.streams[0]).unwrap();
+        let obj = json.as_object().unwrap();
+        for key in [
+            "merchant",
+            "cadence",
+            "occurrence_count",
+            "median_amount_cents",
+            "monthly_estimate_cents",
+            "trend_pct",
+            "trend",
+            "spark_cents",
+            "sources",
+            "category",
+        ] {
+            assert!(obj.contains_key(key), "Stream JSON missing top-level `{key}`");
+        }
+        assert_eq!(obj["cadence"], serde_json::json!("Daily"));
+    }
+
+    #[test]
+    fn transfers_are_grouped_and_excluded() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        let mut a = tx("t1", "chk", 1, -50000, "Move to Savings");
+        a.flag = TxnFlag::Transfer;
+        let mut b = tx("t2", "chk", 2, -30000, "Move to Savings");
+        b.flag = TxnFlag::Transfer;
+        s.upsert_transactions(&[a, b, tx("s1", "chk", 3, -2000, "Coffee")]).unwrap();
+        let v = ledger(&s, None, NOW).unwrap();
+        assert_eq!(v.transfers.len(), 1);
+        assert_eq!(v.transfers[0].total_cents, 80000);
+        assert_eq!(v.transfers[0].count, 2);
+        // The transfer isn't in noise (only the $20 coffee is).
+        assert_eq!(v.stats.noise_total_cents, 2000);
+    }
+}

@@ -9,6 +9,17 @@ export type Cadence = "Monthly" | "Yearly";
 // (money moved between the user's own accounts) are hidden from the charts.
 export type TxnFlag = "Spending" | "Transfer" | "CardPayment";
 export type Trend = "Rising" | "Falling" | "Steady";
+// Rhythm cadence buckets (StreamCadence in core). UI maps these to badge labels.
+export type StreamCadence =
+  | "Daily"
+  | "FewPerWeek"
+  | "Weekly"
+  | "FewPerMonth"
+  | "Monthly"
+  | "Yearly";
+export type SourceKind = "Card" | "Ach";
+export type Mark = "Committed" | "Dismissed";
+export type Window = "3mo" | "6mo" | "12mo" | "all";
 
 export interface Account {
   id: string;
@@ -65,17 +76,62 @@ export interface Subscription {
   total_cents: number;
 }
 
-// A recurring merchant whose amount varies (the rhythm roster row).
-export interface RhythmEntry {
+// A source chip: which account a stream's charges land on.
+export interface Source {
+  label: string; // last-4 (cards) or account name
+  kind: SourceKind;
+  pct: number; // share of the stream's occurrences on this account
+}
+
+// A recurring stream row (core `Stream` = flattened `RhythmEntry` + sources).
+export interface Stream {
   merchant: string;
-  cadence: Cadence;
+  cadence: StreamCadence;
   occurrence_count: number;
   median_amount_cents: number;
   amount_min_cents: number;
   amount_max_cents: number;
   monthly_estimate_cents: number;
   last_seen: number; // epoch seconds
+  trend_pct: number; // signed pct vs prior 3-mo avg
   trend: Trend;
+  spark_cents: number[]; // per-month spend, oldest→newest; last = in-progress month
+  sources: Source[];
+  category: string | null;
+}
+
+// A single transaction row — Notable one-offs and the expandable Noise list.
+export interface LineItem {
+  id: string;
+  merchant: string;
+  date: number; // epoch seconds
+  amount_cents: number;
+  category: string | null;
+  source: Source;
+}
+
+export interface TransferGroup {
+  merchant: string;
+  flag: TxnFlag;
+  total_cents: number;
+  count: number;
+}
+
+export interface LedgerStats {
+  recurring_monthly_cents: number;
+  stream_count: number;
+  committed_monthly_cents: number;
+  noise_total_cents: number;
+  noise_count: number;
+}
+
+export interface LedgerView {
+  stats: LedgerStats;
+  streams: Stream[];
+  committed: Stream[];
+  notable: LineItem[];
+  noise_items: LineItem[];
+  transfers: TransferGroup[];
 }
 
 export interface CategorizeResult {

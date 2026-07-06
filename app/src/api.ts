@@ -6,13 +6,15 @@ import type {
   CategorizeResult,
   CategorySpend,
   Filter,
+  LedgerView,
+  Mark,
   MerchantSpend,
   MonthlyFlow,
   PullResult,
-  RhythmEntry,
   Subscription,
   Transaction,
   TxnFlag,
+  Window,
 } from "./types";
 
 export const api = {
@@ -25,7 +27,14 @@ export const api = {
     invoke<MerchantSpend[]>("merchants", { filter, limit }),
   flow: (filter?: Filter) => invoke<MonthlyFlow[]>("flow", { filter }),
   subscriptions: () => invoke<Subscription[]>("subscriptions"),
-  rhythms: () => invoke<RhythmEntry[]>("rhythms"),
+  // Rhythm ledger — the primary screen query.
+  ledger: (window: Window) => invoke<LedgerView>("ledger", { window }),
+  streamOccurrences: (merchant: string, window: Window) =>
+    invoke<Transaction[]>("stream_occurrences", { merchant, window }),
+  markStream: (merchant: string, mark: Mark) =>
+    invoke<void>("mark_stream", { merchant, mark }),
+  clearStreamMark: (merchant: string) =>
+    invoke<void>("clear_stream_mark", { merchant }),
   categories: () => invoke<string[]>("categories"),
   setCategory: (txnId: string, category: string, learn: boolean) =>
     invoke<number | null>("set_category", { txnId, category, learn }),

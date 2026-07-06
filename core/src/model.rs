@@ -69,14 +69,16 @@ impl CategorySource {
     }
 }
 
-/// A per-merchant override the user applies from the ledger slide-over, to move a
-/// detected stream out of the main list. `Committed` = a fixed obligation (kept
-/// out of the "hunt"); `Dismissed` = not a real stream (its spend falls to
-/// Notable/Noise). Keyed on the normalized merchant, so it applies to siblings.
+/// A per-merchant override the user applies from the ledger slide-over. All three
+/// are sticky, keyed on the normalized merchant so they apply to siblings:
+/// `Committed` = a fixed obligation (kept out of the "hunt"); `Dismissed` = not a
+/// real stream (its spend falls to Notable/Noise); `Kept` = force back into the
+/// main streams list, overriding a committed-by-category classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mark {
     Committed,
     Dismissed,
+    Kept,
 }
 
 impl Mark {
@@ -84,6 +86,7 @@ impl Mark {
         match self {
             Mark::Committed => "committed",
             Mark::Dismissed => "dismissed",
+            Mark::Kept => "kept",
         }
     }
 
@@ -91,6 +94,7 @@ impl Mark {
         match s {
             "committed" => Some(Mark::Committed),
             "dismissed" => Some(Mark::Dismissed),
+            "kept" => Some(Mark::Kept),
             _ => None,
         }
     }

@@ -127,6 +127,9 @@ export default function App() {
 
   const connected = accounts.length > 0;
   const empty = !loading && !connected && (view?.streams.length ?? 0) === 0;
+  // Whether the open stream is currently in the Committed section, so the
+  // slide-over offers "Return to the hunt" instead of "Mark as Committed".
+  const openCommitted = !!open && !!view && view.committed.some((s) => s.merchant === open.merchant);
 
   return (
     <div className="lg-app">
@@ -179,6 +182,7 @@ export default function App() {
 
       <StreamSlideOver
         stream={open}
+        committed={openCommitted}
         win={win}
         accounts={accounts}
         vocab={vocab}

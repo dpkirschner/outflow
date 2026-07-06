@@ -8,6 +8,7 @@ import { RhythmStrip, SourceChip } from "./Streams";
 
 export function StreamSlideOver({
   stream,
+  committed,
   win,
   accounts,
   vocab,
@@ -17,6 +18,7 @@ export function StreamSlideOver({
   notify,
 }: {
   stream: Stream | null;
+  committed: boolean;
   win: import("../../types").Window;
   accounts: Account[];
   vocab: string[];
@@ -92,6 +94,8 @@ export function StreamSlideOver({
   };
   const markCommitted = () =>
     run(() => api.markStream(stream.merchant, "Committed" as Mark), "Marked as committed", true);
+  const returnToHunt = () =>
+    run(() => api.markStream(stream.merchant, "Kept" as Mark), "Returned to the hunt", true);
   const dismiss = () =>
     run(() => api.markStream(stream.merchant, "Dismissed" as Mark), "Dismissed to noise", true);
 
@@ -127,7 +131,7 @@ export function StreamSlideOver({
           </div>
           <div className="subline">
             {stream.occurrence_count} visits
-            {primary && <SourceChip s={primary} />}· in the hunt
+            {primary && <SourceChip s={primary} />}· {committed ? "committed" : "in the hunt"}
           </div>
           <div className="bignum">
             {dollars(stream.monthly_estimate_cents)}{" "}
@@ -142,11 +146,19 @@ export function StreamSlideOver({
         <div className="lg-sect">
           <h4>Reclassify this stream</h4>
           <div className="lg-acts">
-            <button className="lg-act" disabled={working} onClick={markCommitted}>
-              <span className="ic">■</span>
-              <span className="grow">Mark as Committed</span>
-              <span className="hint">hide from the hunt</span>
-            </button>
+            {committed ? (
+              <button className="lg-act" disabled={working} onClick={returnToHunt}>
+                <span className="ic">↩</span>
+                <span className="grow">Return to the hunt</span>
+                <span className="hint">back to streams</span>
+              </button>
+            ) : (
+              <button className="lg-act" disabled={working} onClick={markCommitted}>
+                <span className="ic">■</span>
+                <span className="grow">Mark as Committed</span>
+                <span className="hint">hide from the hunt</span>
+              </button>
+            )}
             <button className="lg-act" disabled={working} onClick={flagStream}>
               <span className="ic">⇄</span>
               <span className="grow">Flag as Transfer</span>

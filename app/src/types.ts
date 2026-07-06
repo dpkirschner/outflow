@@ -18,7 +18,7 @@ export type StreamCadence =
   | "Monthly"
   | "Yearly";
 export type SourceKind = "Card" | "Ach";
-export type Mark = "Committed" | "Dismissed";
+export type Mark = "Committed" | "Dismissed" | "Kept";
 export type Window = "3mo" | "6mo" | "12mo" | "all";
 
 export interface Account {

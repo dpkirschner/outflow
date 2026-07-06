@@ -17,7 +17,7 @@ pub use query::{
     TxnFilter,
 };
 pub use ledger::{
-    ledger, LedgerStats, LedgerView, LineItem, Source, SourceKind, Stream, TransferGroup,
+    ledger, Coverage, LedgerStats, LedgerView, LineItem, Source, SourceKind, Stream, TransferGroup,
 };
 pub use source::{parse_account_set, Fetched, SourceError, TransactionSource};
 pub use store::{FlagRule, Store, UpsertResult};

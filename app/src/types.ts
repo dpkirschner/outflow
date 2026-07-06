@@ -125,7 +125,16 @@ export interface LedgerStats {
   noise_count: number;
 }
 
+// How much data sits behind the view — to distinguish "window is at 12mo" from
+// "you only have 3 months of history."
+export interface Coverage {
+  earliest: number | null; // earliest behavioral date in the whole DB
+  window_txn_count: number; // outflow txns within the window
+  covers_all: boolean; // window reaches all history (not clipping)
+}
+
 export interface LedgerView {
+  coverage: Coverage;
   stats: LedgerStats;
   streams: Stream[];
   committed: Stream[];

@@ -69,6 +69,33 @@ impl CategorySource {
     }
 }
 
+/// A per-merchant override the user applies from the ledger slide-over, to move a
+/// detected stream out of the main list. `Committed` = a fixed obligation (kept
+/// out of the "hunt"); `Dismissed` = not a real stream (its spend falls to
+/// Notable/Noise). Keyed on the normalized merchant, so it applies to siblings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Mark {
+    Committed,
+    Dismissed,
+}
+
+impl Mark {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Mark::Committed => "committed",
+            Mark::Dismissed => "dismissed",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Mark> {
+        match s {
+            "committed" => Some(Mark::Committed),
+            "dismissed" => Some(Mark::Dismissed),
+            _ => None,
+        }
+    }
+}
+
 /// How a transaction is treated by spend analytics. `Spending` is real
 /// consumption and the default; `Transfer` (money moved between the user's own
 /// accounts) and `CardPayment` (a checking→card payment whose underlying charges

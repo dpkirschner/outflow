@@ -3,7 +3,7 @@ use crate::model::*;
 use crate::money::Money;
 use crate::subscriptions::normalize_payee;
 use rusqlite::{params, Connection};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
     Ok(Transaction {
@@ -155,6 +155,10 @@ CREATE TABLE IF NOT EXISTS flag_rules (
 CREATE TABLE IF NOT EXISTS categories (
     name TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS merchant_overrides (
+    pattern TEXT PRIMARY KEY,
+    mark TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started INTEGER NOT NULL,
@@ -167,8 +171,11 @@ CREATE TABLE IF NOT EXISTS sync_log (
 ";
 
 /// Current schema version, tracked via `PRAGMA user_version`. Bump this and add a
-/// guarded block in `run_migrations` when altering an existing table.
-const SCHEMA_VERSION: i64 = 1;
+/// guarded block in `run_migrations` when altering an existing table. New tables
+/// (created via `CREATE TABLE IF NOT EXISTS` in `SCHEMA`) don't need an ALTER, but
+/// bumping documents the change.
+/// v1: transactions.transacted_at + transactions.flag. v2: merchant_overrides.
+const SCHEMA_VERSION: i64 = 2;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -614,6 +621,65 @@ impl Store {
         )?;
         Ok(n != 0)
     }
+
+    /// Set a per-merchant ledger override (Committed / Dismissed). `pattern` is a
+    /// normalized merchant key; upserts so re-marking replaces.
+    pub fn set_merchant_mark(&self, pattern: &str, mark: Mark) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO merchant_overrides (pattern, mark) VALUES (?1, ?2)
+             ON CONFLICT(pattern) DO UPDATE SET mark = excluded.mark",
+            params![pattern.to_lowercase(), mark.as_str()],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a merchant's override, returning it to the normal streams list.
+    pub fn clear_merchant_mark(&self, pattern: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM merchant_overrides WHERE pattern = ?1",
+            params![pattern.to_lowercase()],
+        )?;
+        Ok(())
+    }
+
+    /// All merchant overrides, keyed by normalized merchant.
+    pub fn merchant_marks(&self) -> rusqlite::Result<HashMap<String, Mark>> {
+        let mut stmt = self.conn.prepare("SELECT pattern, mark FROM merchant_overrides")?;
+        let rows = stmt.query_map([], |r| {
+            let pattern: String = r.get(0)?;
+            let mark: String = r.get(1)?;
+            Ok((pattern, mark))
+        })?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (pattern, mark) = row?;
+            if let Some(m) = Mark::from_str(&mark) {
+                out.insert(pattern, m);
+            }
+        }
+        Ok(out)
+    }
+
+    /// The outflow transactions behind one stream — its normalized merchant, since
+    /// `since` (inclusive, on the behavioral date) — newest first, for the
+    /// slide-over. Includes flagged rows so their state is visible.
+    pub fn stream_occurrences(
+        &self,
+        merchant_key: &str,
+        since: Option<i64>,
+    ) -> rusqlite::Result<Vec<Transaction>> {
+        let mut txns: Vec<Transaction> = self
+            .all_transactions()?
+            .into_iter()
+            .filter(|t| {
+                t.amount.is_outflow()
+                    && normalize_payee(t.merchant()) == merchant_key
+                    && since.map_or(true, |s| t.effective_date() >= s)
+            })
+            .collect();
+        txns.sort_by(|a, b| b.effective_date().cmp(&a.effective_date()));
+        Ok(txns)
+    }
 }
 
 #[cfg(test)]
@@ -797,6 +863,42 @@ mod tests {
         // A re-pull of the same id must not reset the manual flag to Spending.
         s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
         assert_eq!(s.transaction("a").unwrap().unwrap().flag, TxnFlag::CardPayment);
+    }
+
+    #[test]
+    fn merchant_marks_round_trip_and_clear() {
+        let s = Store::open_in_memory().unwrap();
+        s.set_merchant_mark("chase mortgage", Mark::Committed).unwrap();
+        s.set_merchant_mark("random pop up", Mark::Dismissed).unwrap();
+        let marks = s.merchant_marks().unwrap();
+        assert_eq!(marks.get("chase mortgage"), Some(&Mark::Committed));
+        assert_eq!(marks.get("random pop up"), Some(&Mark::Dismissed));
+        // Re-marking replaces.
+        s.set_merchant_mark("chase mortgage", Mark::Dismissed).unwrap();
+        assert_eq!(s.merchant_marks().unwrap().get("chase mortgage"), Some(&Mark::Dismissed));
+        s.clear_merchant_mark("chase mortgage").unwrap();
+        assert!(s.merchant_marks().unwrap().get("chase mortgage").is_none());
+    }
+
+    #[test]
+    fn stream_occurrences_filters_by_merchant_and_window() {
+        let s = Store::open_in_memory().unwrap();
+        // Two "blue bottle" (normalize to same key) + one other.
+        let mut a = txn("a", "acct1", 1_000_000, -500, false);
+        a.payee = Some("SQ *BLUE BOTTLE 1".into());
+        let mut b = txn("b", "acct1", 2_000_000, -600, false);
+        b.payee = Some("SQ *BLUE BOTTLE 2".into());
+        let mut c = txn("c", "acct1", 2_000_000, -700, false);
+        c.payee = Some("Whole Foods".into());
+        s.upsert_transactions(&[a, b, c]).unwrap();
+
+        let occ = s.stream_occurrences("blue bottle", None).unwrap();
+        assert_eq!(occ.len(), 2);
+        assert_eq!(occ[0].id, "b"); // newest first
+        // Window bound drops the older one.
+        let recent = s.stream_occurrences("blue bottle", Some(1_500_000)).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, "b");
     }
 
     #[test]

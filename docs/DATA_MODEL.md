@@ -96,13 +96,35 @@ non-Spending rows visible so the user can reclassify them.
   subscription needs **≥3 occurrences**, a **stable amount** (within `max($1, 5%)`
   of the median), and a **regular cadence** (monthly 26–35 days, or yearly
   350–380). Sorted by total spend descending.
-- `subscriptions::detect_rhythms` — the same grouping and cadence test **without**
-  the stable-amount constraint (cadence keyed off `effective_date()`). Returns a
-  `RhythmEntry { merchant, cadence, occurrence_count, median_amount_cents,
-  amount_min_cents, amount_max_cents, monthly_estimate_cents, last_seen, trend }`
-  per recurring variable-amount merchant. `monthly_estimate` = median (monthly) or
-  median/12 (yearly); `trend` compares the earlier vs later half of amounts. This
-  is the rhythm-roster row contract.
+- `subscriptions::detect_rhythms(txns, now)` — the variable-amount stream detector
+  (no stable-amount constraint). Groups **Spending** outflows by `normalize_payee`;
+  a merchant is a stream if it has **≥3 occurrences** and a **consistent** cadence
+  (majority of inter-occurrence gaps within `[0.5×, 2×]` the median gap — tolerant
+  of a weekend skip, *not* a loosened fixed window). Classifies the median gap into
+  `StreamCadence { Daily, FewPerWeek, Weekly, FewPerMonth, Monthly, Yearly }`.
+  `monthly_estimate` = **mean of completed-month totals** (the in-progress month,
+  per `now`, is excluded so a partial month can't deflate the rate); `trend_pct` =
+  last completed month vs the mean of the prior three; `spark_cents` is the
+  per-month series for the strip (last element = in-progress month). Returns
+  `RhythmEntry`.
+
+## Rhythm ledger (`core/src/ledger.rs`)
+
+`ledger(store, since, now) -> LedgerView` is the ledger screen's single query. It
+partitions a window **once** so nothing double-counts, and attaches per-stream
+`sources`:
+
+- `Source { label, kind: Card|Ach, pct }` — `label` = card last-4 (parsed from the
+  account name) else the account name; `kind` from `AccountKind`; `pct` = the
+  stream's share of occurrences on that account.
+- Zones: `streams` (detected streams minus committed), `committed` (streams whose
+  dominant category ∈ a fixed obligation set **or** carrying a `Committed` mark),
+  `notable` (non-stream outflows ≥ $400, top-N), `transfers` (flagged groups), and
+  `stats` (recurring/committed monthly rate, noise total/count). A `Dismissed`
+  mark drops a stream so its spend falls back to Notable/Noise.
+- `Mark { Committed, Dismissed }` overrides are per-normalized-merchant, persisted
+  in the `merchant_overrides` table (`set_merchant_mark`/`clear_merchant_mark`),
+  and applied by the slide-over's subtractive reclassify.
 
 ## Suppression flag (transfers & card payments)
 

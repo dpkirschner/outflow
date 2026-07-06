@@ -192,15 +192,17 @@ fn line_item(t: &Transaction, accounts: &HashMap<String, Account>) -> LineItem {
 }
 
 fn is_committed(category: &Option<String>, mark: Option<Mark>) -> bool {
-    if mark == Some(Mark::Committed) {
-        return true;
-    }
-    match category {
-        Some(c) => {
-            let lc = c.to_lowercase();
-            COMMITTED_CATEGORIES.iter().any(|k| lc == *k)
-        }
-        None => false,
+    match mark {
+        Some(Mark::Committed) => true,
+        Some(Mark::Kept) => false, // force into the main streams list
+        Some(Mark::Dismissed) => false, // handled earlier (dropped from streams)
+        None => match category {
+            Some(c) => {
+                let lc = c.to_lowercase();
+                COMMITTED_CATEGORIES.iter().any(|k| lc == *k)
+            }
+            None => false,
+        },
     }
 }
 
@@ -433,6 +435,13 @@ mod tests {
         let v2 = ledger(&s, None, NOW).unwrap();
         assert_eq!(v2.streams.len(), 0);
         assert_eq!(v2.committed.len(), 2);
+
+        // "Return to the hunt": a Kept mark forces the category-committed mortgage
+        // back into the main streams list, overriding its Rent category.
+        s.set_merchant_mark("chase mortgage", Mark::Kept).unwrap();
+        let v3 = ledger(&s, None, NOW).unwrap();
+        assert!(v3.streams.iter().any(|s| s.rhythm.merchant == "chase mortgage"));
+        assert!(v3.committed.iter().all(|s| s.rhythm.merchant != "chase mortgage"));
     }
 
     #[test]

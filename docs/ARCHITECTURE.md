@@ -5,25 +5,38 @@
 One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
-core/  pure domain — money, model, store, source, categorize, query,
-       subscriptions, llm. Zero GUI/network deps by default. Source of truth.
-net/   networked adapters — secrets (keychain + access-URL resolution),
-       simplefin (fetch/claim), anthropic (Prompter impl). Depends on core.
-cli/   headless binary `outflow` — pull, categorize, report, subs, fix, claim.
-app/   Tauri v2 desktop GUI: src-tauri (Rust backend) + a React/Vite/Recharts
-       frontend (src/). src-tauri depends on core + net.
+core/    pure domain — money, model, store, source, plaid, categorize, query,
+         subscriptions, ledger, transfers, llm. Zero GUI/network deps by
+         default. Source of truth.
+net/     networked adapters (sync ureq) — simplefin (fetch/claim), plaid
+         (Link/exchange/sync transport), plaid_tokens (0600 token file),
+         secrets (keychain + access-URL/DB-key resolution), anthropic
+         (Prompter impl). Depends on core.
+cli/     headless binary `outflow` — pull, categorize, report, subs, fix,
+         claim, txns, accounts, matches, status; direct-DB or HTTP client
+         mode (--server) against a running server.
+server/  axum + tokio HTTP server — JSON API + serves the built React SPA.
+         The always-on deployment target (mac-mini behind tailscale serve).
+app/     npm project (NOT a cargo member): React + Vite + TS frontend in src/,
+         built to app/dist and served by `server`.
 ```
 
-Both front-ends depend on `core` directly and share `net`, so **the CLI and GUI
-run identical domain logic** — a feature exists once, in core, and both call it.
+Both front-ends depend on `core` directly and share `net`, so **the CLI and the
+web app run identical domain logic** — a feature exists once, in core, and both
+call it.
 
-### The two ports (traits)
+### The ports
 
-The volatile externals are traits so they can be swapped without touching the
-domain (invariant: keep core swappable):
+The volatile externals are seams so they can be swapped without touching the
+domain:
 
-- `source::TransactionSource` — where transactions come from. Today SimpleFIN
-  JSON via `parse_account_set`; a Plaid adapter would implement the same trait.
+- **Transaction sources** — one shape, two implementations: raw JSON is fetched
+  in `net` (`simplefin::fetch`, `plaid::transactions_sync_page`/`accounts_get`)
+  and parsed pure in `core` (`source::parse_account_set`,
+  `plaid::parse_sync_page`/`parse_accounts_get`), both producing domain
+  `Account`/`Transaction` values. A future source (e.g. Plaid Investments for
+  brokerage) follows the same pattern. (The `source::TransactionSource` trait
+  exists but the free-function pipeline is the working convention.)
 - `categorize::Categorizer` — assigns a category to a transaction. `RuleSet`
   (deterministic) implements it. The LLM tail uses a second port,
   `llm::Prompter` (pure prompt build + response validation in core; the HTTP
@@ -33,79 +46,91 @@ domain (invariant: keep core swappable):
 
 ```
 money            i64-cents type, decimal parse, display
-  └ model        Account, Transaction, enums (+ merchant())
-      └ store    SQLite persistence (rusqlite); upsert rules; rule/category CRUD
-          ├ query          spend_by_category, top_merchants, monthly_flow
+  └ model        Account, Transaction, PlaidItem, TxnMatch, enums (+ merchant())
+      └ store    SQLite persistence (rusqlite); upsert rules; plaid batches;
+                 rule/category/match CRUD; sync_log
+          ├ query          spend_by_category, top_merchants, monthly_flow,
+          │                search_transactions (text/sort/filter/pagination)
           ├ subscriptions  normalize_payee (THE normalizer), detect(), detect_rhythms()
           ├ ledger         the rhythm-ledger view model (ledger() → LedgerView)
+          ├ transfers      detect_card_payments() — checking↔card pair matcher
           ├ categorize     RuleSet, precedence
+          ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
+          │                flag/category seeding from personal_finance_category)
           └ llm            Prompter trait, prompt build, response validation
 ```
 
-`ledger` sits on top of `subscriptions` + `query` + `store`: `ledger()` runs the
-stream detector, attaches per-stream `Source`s, and partitions a window **once**
-into the screen's zones (streams / committed / notable / transfers / noise) so
-nothing double-counts. It is the single source of truth for the ledger screen.
+Analysis (`query`, `subscriptions`, `ledger`) reads all transactions from the
+store and **aggregates in memory in Rust**, not in SQL. Months are bucketed on
+each transaction's behavioral date (`effective_date()`) in the machine's
+**local timezone** — `core` depends on `chrono` (pure computation, no network)
+for this DST-correct conversion. Aggregations exclude non-`Spending`
+transactions (transfers, card payments) by default.
 
-Analysis (`query`, `subscriptions`) reads all transactions from the store and
-**aggregates in memory in Rust**, not in SQL. Months are bucketed on each
-transaction's behavioral date (`effective_date()`) in the machine's **local
-timezone** — `core` depends on `chrono` (pure computation, no network, so
-invariant #3 holds) purely for this DST-correct conversion. Aggregations exclude
-non-`Spending` transactions (transfers, card payments) by default.
-
-Schema evolution on existing DBs runs through a **`PRAGMA user_version` migration
-runner** in `store::migrate` (`run_migrations` + `SCHEMA_VERSION`): fresh DBs get
-every column from the `CREATE TABLE`s, existing DBs get guarded `ALTER TABLE ADD
-COLUMN`s. This matters because a real encrypted production DB holds the user's
-data — `CREATE TABLE IF NOT EXISTS` alone never alters it.
+Schema evolution on existing DBs runs through a **`PRAGMA user_version`
+migration runner** in `store::migrate` (`run_migrations` + `SCHEMA_VERSION`,
+currently v3): fresh DBs get every column from the `CREATE TABLE`s, existing
+DBs get guarded `ALTER TABLE ADD COLUMN`s.
 
 ## Data flow
 
 ```
+Plaid /transactions/sync ──net::plaid──▶ core::plaid::parse_sync_page ─┐
+  (cursor loop per item)                  (validate→domain, sign flip)  │ apply_plaid_batch
+                                                                        ▼ (atomic incl. cursor)
 SimpleFIN JSON ──net::simplefin::fetch──▶ parse_account_set ──▶ Store.upsert_*
    (or --from-file / demo fixture)          (validate→domain)      (SQLite)
                                                                       │
-   Store.categorize_uncategorized(RuleSet) ◀── rule pass ────────────┤
-   LlmCategorizer(Prompter) over the tail  ◀── optional AI pass ─────┤
+   post-ingest: apply_flags ── categorize(RuleSet) ── transfers::detect_card_payments
+     (high-confidence pairs auto-flag CardPayment; ambiguous queue for review)
                                                                       ▼
-   query::* / subscriptions::detect ──▶ CLI stdout  |  Tauri commands ──▶ React dashboards
+   query::* / ledger / subscriptions ──▶ server /api/* ──▶ React SPA
+                                     └──▶ CLI stdout (tables or --json)
 ```
 
 ## Front-end wiring
 
-- **CLI** (`cli/src/main.rs`) — clap subcommands map 1:1 to core calls. Net paths
-  (`claim`, live `pull`, `categorize --llm`) are `#[cfg(feature = "net")]` thin
-  wrappers over `net`.
-- **GUI backend** (`app/src-tauri/src/main.rs`) — a `Mutex<Store>` in Tauri
-  managed state (rusqlite `Connection` is not `Sync`); each `#[tauri::command]`
-  locks it and calls core. Ledger commands: `ledger(window)`,
-  `stream_occurrences(merchant, window)`, `mark_stream`/`clear_stream_mark`;
-  editing: `set_category`, `set_flag`, `apply_flags`, `has_credit_account`; plus
-  `accounts`, `categorize`, `categorize_llm`, `pull_live`, `claim`, `reset_data`
-  (and legacy `spend_categories`/`merchants`/`flow`/`subscriptions`, still
-  registered). A window string (`3mo`/`6mo`/`12mo`/`all`) becomes a `since` bound.
-- **GUI frontend** (`app/src/`) — the primary screen is the **rhythm ledger**
-  (`App.tsx` + `components/ledger/*`, styled by `ledger.css`): an action bar
-  (connect/pull/categorize/reset + rolling-window control), the streams list with
-  hand-rolled flexbox rhythm strips (not Recharts) and By-size/By-change sort, the
-  Notable/Committed/Transfers/Noise zones, and a right slide-over for per-stream
-  drill-down and editing (reclassify, per-txn flag/categorize, card-payment
-  warning). `api.ts` wraps `invoke()`; `types.ts` mirrors the serde DTOs. The old
-  dashboard components remain in the tree but are no longer mounted. See
+- **Server** (`server/src/`) — `AppState { Arc<Mutex<Store>>, sync_lock, cfg }`
+  (rusqlite `Connection` is not `Sync`; blocking work runs via
+  `spawn_blocking`). `routes.rs` ports the former Tauri command set 1:1;
+  `plaid_routes.rs` handles Link token/exchange/items; `match_routes.rs` the
+  card-payment review; `sync.rs` is the engine — per-item Plaid cursor loops,
+  the SimpleFIN leg, post-ingest passes, `sync_log` writes, and a
+  `tokio::time::interval` background task (default 6h). Static serving:
+  `/assets` from `app/dist`, everything else falls back to `index.html` with a
+  200 (`/oauth-return` must load the SPA for Plaid OAuth resumption).
+- **CLI** (`cli/src/main.rs`) — clap subcommands map 1:1 to core calls. Net
+  paths (`claim`, live `pull`, `categorize --llm`) are `#[cfg(feature="net")]`;
+  `--server URL` (feature `client`, `cli/src/remote.rs`) redirects every
+  subcommand to the HTTP API and prints the server's JSON verbatim — identical
+  shapes to local `--json`, so agent consumers don't care which mode ran.
+- **Frontend** (`app/src/`) — four tabs in `App.tsx`: the **rhythm ledger**
+  (primary, `components/ledger/*`), **Outflows** (month bars + searchable/
+  sortable/filterable table, `components/Outflows.tsx`), **Review**
+  (card-payment matches, `components/MatchReview.tsx`), and **Connections**
+  (Plaid Link + item health + sync log, `components/Connections.tsx`).
+  `api.ts` is the single HTTP client; `types.ts` mirrors the serde DTOs. See
   DATA_MODEL.md for the serialization boundary.
 
-## Config resolution (the productionization crux)
+## Config resolution (headless server)
 
-A Finder-launched `.app` inherits **no shell environment**, so config cannot come
-from env vars. Each value has a production source and a dev/CLI env override:
+The server runs headless (launchd on a mac-mini): no shell env at login, no
+unlockable GUI keychain. Everything resolves from a launchd env block + 0600
+files. See DEPLOYMENT.md for the full recipe.
 
-| Value | Dev / CLI override | Production (`.app`) source | Code |
-|---|---|---|---|
-| DB path | `OUTFLOW_DB` | `app_data_dir()/outflow.db` (`~/Library/Application Support/com.outflow.app/`), created on first run | `resolve_db_path` (src-tauri) |
-| DB key (SQLCipher) | `OUTFLOW_DB_KEY` | keychain `outflow/db-key`, 32 random bytes, generated once | `resolve_db_key` (src-tauri) → `net::secrets::db_key_get_or_create` |
-| SimpleFIN access URL | `OUTFLOW_SFIN_URL`, or `OUTFLOW_SFIN_URL_FILE` (0600) | keychain `outflow/simplefin-access-url` (written by `claim`) | `net::secrets::access_url` |
-| LLM endpoint/model/key | `OUTFLOW_LLM_URL`, `OUTFLOW_LLM_MODEL`, `ANTHROPIC_API_KEY` | *(not yet — needs an in-app Settings panel; see GOTCHAS/deferred)* | `net::anthropic` |
+| Value | Env | Notes |
+|---|---|---|
+| DB path | `OUTFLOW_DB` (default `~/Library/Application Support/outflow/outflow.db`) | override dir with `OUTFLOW_DATA_DIR` |
+| Listen addr | `OUTFLOW_LISTEN` (default `127.0.0.1:8080`) | fronted by `tailscale serve` for HTTPS |
+| Web dir | `OUTFLOW_WEB_DIR` (default `app/dist`) | the built SPA |
+| Plaid creds | `OUTFLOW_PLAID_CLIENT_ID`, `OUTFLOW_PLAID_SECRET` or `OUTFLOW_PLAID_SECRET_FILE` (0600) | `OUTFLOW_PLAID_ENV` = `sandbox` (default) \| `production` |
+| Plaid access tokens | `OUTFLOW_PLAID_TOKENS_FILE` (default `<data-dir>/plaid-tokens.json`, 0600) | per-item map; never in the DB |
+| OAuth redirect | `OUTFLOW_OAUTH_REDIRECT` | `https://<mini>.<tailnet>.ts.net/oauth-return`, must match the Plaid dashboard exactly |
+| SimpleFIN access URL | `OUTFLOW_SFIN_URL` / `OUTFLOW_SFIN_URL_FILE` (0600) / keychain | `net::secrets::access_url` |
+| Sync cadence | `OUTFLOW_SYNC_INTERVAL_SECS` (default 21600) | background interval |
+| API auth | `OUTFLOW_API_TOKEN` (optional bearer) | tailnet is the primary boundary |
+| DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | keychain only in interactive CLI use |
+| LLM | `ANTHROPIC_API_KEY`, `OUTFLOW_LLM_URL`, `OUTFLOW_LLM_MODEL` | `net::anthropic` |
 
 ## Feature flags
 
@@ -116,20 +141,21 @@ zero features via `pull --from-file`.
 |---|---|---|
 | core | `encryption` | rusqlite `bundled-sqlcipher-vendored-openssl` → `Store::open_encrypted` |
 | net | `keychain` | `keyring` + `getrandom` (access-URL + DB-key keychain storage) |
-| cli | `net` / `keychain` / `encryption` | `dep:outflow-net` / `net`+`outflow-net/keychain` / `outflow-core/encryption` |
-| app/src-tauri | default `["net","keychain"]`; `encryption` opt-in | same; production bundle adds `encryption` via `npm run bundle` |
+| cli | `net` / `client` / `keychain` / `encryption` | SimpleFIN+LLM / HTTP mode against a server / keychain / SQLCipher |
+| server | `encryption` | SQLCipher via `OUTFLOW_DB_KEY[_FILE]` |
+
+`server` always has network (it is the network layer); it depends on `net`
+unconditionally.
 
 ## Deferred / roadmap (not bugs)
 
-- **Local-model LLM** — needs an in-app Settings panel (env is unavailable to a
-  double-clicked app) and likely an OpenAI-shaped `Prompter` (the current adapter
-  is Anthropic-Messages-only). The `core::llm` trait boundary makes this cheap.
-- **Transfer / card-payment handling** — handled by the `TxnFlag` suppression axis
-  (`Transfer`/`CardPayment` excluded from analytics) plus behavioral dating, which
-  nets a card payment against its underlying charges with no explicit payment↔charge
-  link. Still manual (flag + learn-a-rule); *automatic* both-leg matching is a
-  future refinement, and card-payment suppression assumes the card account is
-  ingested (the app warns otherwise).
+- **Brokerage accounts (Vanguard/Fidelity)** — Plaid Investments product. The
+  seam is ready: enable the product in the Plaid dashboard, add
+  `investments/holdings/get` + `investments/transactions/get` to `net::plaid`,
+  a `parse_investments` in `core::plaid`, and map `investment/*` account types
+  to a new `AccountKind`. Nothing else changes.
+- **Plaid webhooks** — skipped on purpose (server isn't internet-reachable);
+  periodic polling covers a personal archive. Tailscale Funnel could expose a
+  webhook path later.
+- **Local-model LLM** — an OpenAI-shaped `Prompter` behind the same trait.
 - **Annual subscriptions** — undetectable until the DB holds >1 year.
-- **Local-timezone month bucketing** — done: buckets use `chrono::Local` on
-  `effective_date()`.

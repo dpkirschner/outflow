@@ -1,76 +1,97 @@
 # Gotchas & hard-won lessons
 
-Non-obvious things that have already cost time. Skim before touching the GUI,
-keychain, encryption, or the demo setup.
+Non-obvious things that have already cost time. Skim before touching the API
+boundary, Plaid, secrets, encryption, or the demo setup.
 
-## Tauri boundary
+## API boundary (server ↔ SPA ↔ CLI)
 
-- **Argument casing.** Tauri v2 converts JS camelCase → Rust snake_case. A Rust
-  command param `txn_id` is called from JS as `{ txnId }`. Single-word params are
-  unaffected. (`app/src/api.ts` ↔ `app/src-tauri/src/main.rs`)
-- **`Money` is a number in JS.** serde-transparent newtype → bare number (cents).
-  Never expect an object; format with `formatCents`.
-- **`Store` is not `Sync`** (holds a rusqlite `Connection`). Tauri state is a
-  `Mutex<Store>`; every command locks it.
-- **Missing filter ≠ default filter.** A `None` filter must mean "everything"
-  (`TxnFilter::all()`). Do NOT rely on `FilterArg`'s derived `Default` — that
-  sets `include_pending = false` and silently drops pending rows. Use the
-  `to_filter` helper. (bug fixed once already)
-- **`cargo test` at the root fails** on `app/src-tauri` (needs a built frontend
-  for `generate_context!`). Test with `-p outflow-core -p outflow-net`.
+- **The wire format is snake_case serde, verbatim.** The old Tauri
+  camelCase↔snake_case translation is gone; `app/src/api.ts` (the single HTTP
+  client) sends Rust field names (`txn_id`, `setup_token`, `public_token`).
+- **`Money` is a number in JS.** serde-transparent newtype → bare number
+  (cents). Never expect an object.
+- **`Store` is not `Sync`** (holds a rusqlite `Connection`). The server keeps
+  it in `Arc<Mutex<Store>>` and does all store work inside `spawn_blocking`;
+  network calls happen **outside** the lock so reads stay responsive mid-sync.
+- **Missing filter ≠ default filter.** Absent query params must mean
+  "everything" (pending included). Do NOT derive a `Default` that sets
+  `include_pending = false` — that silently drops pending rows (bug fixed once
+  already). See `FilterParams::to_filter` in `server/src/routes.rs`.
+- **The SPA fallback must return 200.** tower-http's
+  `ServeDir::not_found_service` serves the fallback file but keeps the 404
+  status; the server uses an explicit axum `.fallback(spa_index)` instead.
+  `/oauth-return` must load the app with a 200 or Plaid OAuth resumption
+  breaks.
 
-## macOS packaging
+## Plaid
 
-- **Gatekeeper.** Because the app is **built locally** (not downloaded), macOS
-  usually doesn't set the quarantine flag, so a copied `.app` double-clicks fine.
-  If it ever balks: right-click → Open once, or
-  `xattr -dr com.apple.quarantine /Applications/outflow.app`. No paid Apple
-  Developer account is needed for personal use.
-- **Ad-hoc signing (`signingIdentity: "-"`) changes per build.** Keychain ACLs
-  are keyed to the code signature, so after a rebuild macOS may re-prompt for
-  keychain access — click **Always Allow**. A stable self-signed cert would end
-  the re-prompts if it becomes annoying.
-- **Finder launch has no shell env.** `OUTFLOW_*` vars are all unset when
-  double-clicked; that's why config resolves from app-data + keychain. Setting an
-  env var in your shell does NOT reach the `.app`.
+- **Sign conventions are inverted vs the domain.** Plaid transaction amounts:
+  positive = money out → negate at parse. Credit-account
+  `balances.current`: positive = owed → negate for `AccountKind::Credit`.
+  Both flips live in `core::plaid` only.
+- **Amounts are JSON doubles.** Never do f64 math — `Number::to_string()` →
+  `Money::from_decimal_str`. There's a cents-exactness test (`4.22` → `-422`).
+- **Pending→posted changes the transaction id.** The posted row carries
+  `pending_transaction_id`; the parser collects those and
+  `apply_plaid_batch` deletes them with the batch. Never run the SimpleFIN
+  pending sweep over Plaid rows.
+- **The cursor is part of the batch transaction.** Persisting a cursor whose
+  data didn't commit silently loses transactions forever. On
+  `TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION`, restart the whole loop from
+  the stored cursor (bounded retries in `server/src/sync.rs`).
+- **OAuth banks (Chase/Amex/CapOne) need the exact registered redirect URI** —
+  HTTPS, byte-for-byte match with the Plaid dashboard
+  (`https://<mini>.<tailnet>.ts.net/oauth-return`). The SPA stashes the
+  link_token in localStorage before redirect and re-initializes Link with
+  `receivedRedirectUri` on return.
+- **`ITEM_LOGIN_REQUIRED` is routine**, not fatal: the item's status flips to
+  `login_required`, the sync run continues with other items, and the
+  Connections screen offers Reconnect (update-mode link token, no re-exchange).
+- **Access tokens count against the Trial plan's 10-Item lifetime cap** —
+  removing items does NOT free slots. Don't link/unlink casually in
+  production; use sandbox for testing.
+- **Item removal at Plaid is best-effort on unlink** — local history is kept
+  on purpose (the archive outliving the connection is the point of the app).
+
+## Headless mac-mini (see DEPLOYMENT.md)
+
+- **launchd services get no shell env and no unlocked GUI keychain.** All
+  secrets via a plist env block + 0600 files: `OUTFLOW_PLAID_SECRET_FILE`,
+  `OUTFLOW_PLAID_TOKENS_FILE`, `OUTFLOW_SFIN_URL_FILE`, `OUTFLOW_DB_KEY_FILE`.
+  Setting env in your shell does NOT reach the daemon.
+- **Bind loopback; let `tailscale serve` do TLS.** The server listens on
+  `127.0.0.1:8080`; tailnet exposure + certs come from
+  `tailscale serve https / http://127.0.0.1:8080`.
 
 ## Encryption
 
-- **Plaintext ↔ encrypted are not interchangeable.** A DB created plaintext (dev)
-  cannot be opened with `open_encrypted`, and vice versa. If you switch a given
-  path's mode, delete the file first. Fresh installs are unaffected.
-- **Verifying encryption is real:** a plaintext `sqlite3` open of the encrypted
-  file must fail. The app-data DB lives at
-  `~/Library/Application Support/com.outflow.app/outflow.db`.
-- **Never regenerate the DB key except on `NoEntry`** — see INVARIANTS #8. A new
-  key orphans the existing encrypted DB forever.
+- **Plaintext ↔ encrypted are not interchangeable.** A DB created plaintext
+  cannot be opened with `open_encrypted`, and vice versa. Switching a path's
+  mode requires deleting the file first.
+- **Never regenerate the DB key except on keychain `NoEntry`** — see
+  INVARIANTS #8. A new key orphans the existing encrypted DB forever. On the
+  server, the key comes from a 0600 file — back that file up with the DB.
 
 ## Data / demo
 
-- **`/tmp` gets purged by macOS.** Don't stage the DB or secrets there — a purge
-  empties them and the app silently recreates an empty DB. Use a durable path
-  (`$HOME/...` or the app-data dir).
-- **Launch auto-pull uses whatever access URL is in the keychain.** This caused a
-  real contamination: during testing the keychain held the **demo** URL, so the
-  first launch auto-pulled demo data before the user connected their real bank;
-  the real Pull then layered on top (distinct SimpleFIN ids → both coexist). A
-  clean install can't hit this. Recovery: the **Reset** button
-  (`Store::reset_data` — clears transactions/accounts/sync_log, keeps learned
-  rules), or quit + `rm` the app-data DB + relaunch.
-- **SimpleFIN setup tokens are single-use.** `claim` consumes the token and
-  exchanges it for a durable access URL (stored in the keychain). Don't delete
-  that keychain item expecting to re-Connect with the same token — you'd need a
-  fresh token from SimpleFIN Bridge. The access URL is the durable secret.
-- **Connect from inside the app**, not the CLI, so the keychain item is owned by
-  the app's code signature (avoids cross-app keychain prompts).
-- **Demo / testing:** SimpleFIN publishes a public demo bridge
-  (`beta-bridge.simplefin.org`) with a `demo`/`demo` login — see SimpleFIN's own
-  docs for the current demo setup token. It's a public sandbox, not a secret; the
-  literal token is kept out of the repo so secret-scanners don't flag it. (The
-  local `agent.md`, which is git-ignored, has it stashed for convenience.)
+- **`/tmp` gets purged by macOS.** Don't stage the DB or secrets there — use a
+  durable path (`$HOME/...` or the data dir).
+- **The DB is the permanent archive.** Providers only serve a window
+  (SimpleFIN ~90 days; Plaid up to ~24 months on first sync). `reset_data`
+  clears transactions/accounts/sync_log/matches and resets Plaid cursors (so
+  the next sync replays what Plaid still has) but **cannot recover anything
+  older than the provider window** — back up the DB file before resetting.
+- **SimpleFIN setup tokens are single-use.** `claim` exchanges the token for a
+  durable access URL; the URL is the durable secret.
+- **Demo / testing:** SimpleFIN's public demo bridge
+  (`beta-bridge.simplefin.org`, `demo`/`demo`) for SimpleFIN; Plaid sandbox
+  (`user_good`/`pass_good`) for Plaid. Neither belongs in the repo.
 
 ## Known design limits (not bugs)
 
-- Transfers between your own accounts read as outflow (no transfer detection yet).
+- Card-payment auto-matching pairs **equal amounts within 5 days** — partial
+  payments and split payments don't match (flag manually; the learn-a-rule
+  path still works).
+- Own-account transfers (checking↔savings) auto-flag only when Plaid
+  classifies them (`TRANSFER_IN/OUT`); SimpleFIN-side transfers are manual.
 - Annual subscriptions are undetectable until the DB holds >1 year.
-- Months are bucketed in UTC, not local time.

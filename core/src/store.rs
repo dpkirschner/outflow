@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     balance_cents INTEGER NOT NULL,
     currency TEXT NOT NULL,
     last_synced INTEGER NOT NULL,
-    source TEXT NOT NULL DEFAULT 'simplefin'
+    source TEXT NOT NULL DEFAULT 'plaid'
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -242,7 +242,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     raw TEXT NOT NULL,
     transacted_at INTEGER,
     flag TEXT NOT NULL DEFAULT 'spending',
-    source TEXT NOT NULL DEFAULT 'simplefin'
+    source TEXT NOT NULL DEFAULT 'plaid'
 );
 CREATE INDEX IF NOT EXISTS idx_txn_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_txn_posted ON transactions(posted);
@@ -352,8 +352,9 @@ impl Store {
             // flag_rules is a new table → already created by SCHEMA, no ALTER.
         }
         if version < 3 {
-            // v3: source provenance on pulled rows. Everything before Plaid
-            // support came from SimpleFIN, so that's the backfill default.
+            // v3: source provenance on pulled rows. Everything before v3 came
+            // from the retired SimpleFIN integration — backfill stays
+            // 'simplefin' so old archives keep truthful provenance.
             self.add_column_if_missing(
                 "accounts",
                 "source",
@@ -467,20 +468,11 @@ impl Store {
         rows.collect()
     }
 
-    /// SimpleFIN-shaped upsert: every pull re-sends the full pending set, so
-    /// pending rows are delete-and-replace per synced account. Plaid batches go
-    /// through `apply_plaid_batch` instead, which never sweeps pending.
+    /// Plain id-keyed upsert (no pending lifecycle handling) — the offline
+    /// fixture path and tests. Live Plaid syncs go through `apply_plaid_batch`,
+    /// which also carries explicit deletions and the cursor advance.
     pub fn upsert_transactions(&self, txns: &[Transaction]) -> rusqlite::Result<UpsertResult> {
         let tx = self.conn.unchecked_transaction()?;
-
-        let account_ids: HashSet<&str> = txns.iter().map(|t| t.account_id.as_str()).collect();
-        for acct in &account_ids {
-            tx.execute(
-                "DELETE FROM transactions WHERE pending = 1 AND account_id = ?1",
-                params![acct],
-            )?;
-        }
-
         let result = insert_txn_batch(&tx, txns)?;
         tx.commit()?;
         Ok(result)
@@ -1050,22 +1042,6 @@ mod tests {
     }
 
     #[test]
-    fn pending_is_replaced_not_accumulated() {
-        let s = Store::open_in_memory().unwrap();
-        s.upsert_transactions(&[
-            txn("p1", "acct1", 100, -500, true),
-            txn("posted1", "acct1", 90, -900, false),
-        ])
-        .unwrap();
-        assert_eq!(s.count_transactions().unwrap(), 2);
-
-        s.upsert_transactions(&[txn("posted1", "acct1", 90, -900, false)]).unwrap();
-        let all = s.all_transactions().unwrap();
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].id, "posted1");
-    }
-
-    #[test]
     fn seeds_default_categories_and_respects_edits() {
         let s = Store::open_in_memory().unwrap();
         let seeded = s.categories().unwrap();
@@ -1110,14 +1086,6 @@ mod tests {
         s.upsert_accounts(&[a.clone()]).unwrap();
         let got = s.accounts().unwrap();
         assert_eq!(got, vec![a]);
-    }
-
-    #[test]
-    fn pending_delete_is_scoped_to_synced_account() {
-        let s = Store::open_in_memory().unwrap();
-        s.upsert_transactions(&[txn("p_a", "acctA", 100, -100, true)]).unwrap();
-        s.upsert_transactions(&[txn("p_b", "acctB", 100, -100, true)]).unwrap();
-        assert_eq!(s.count_transactions().unwrap(), 2);
     }
 
     #[test]

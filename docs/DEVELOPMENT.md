@@ -7,7 +7,7 @@ core/  net/  cli/  server/     Rust crates (the whole cargo workspace)
 app/                           npm project (NOT a cargo member)
   src/                         React + Vite + TS frontend
   dist/                        built SPA (served by outflow-server)
-examples/sample-accounts.json  SimpleFIN fixture for --from-file
+examples/plaid-fixture.json    offline ingest envelope for --from-file
 examples/plaid-accounts-get.json / plaid-sync-page.json   Plaid parser fixtures
 ```
 
@@ -29,19 +29,20 @@ pre-built-frontend requirement are gone). The `-p` form stays the fast path.
 
 ## CLI
 
-Features: `net` (live SimpleFIN + LLM), `client` (HTTP mode against a running
+Features: `net` (LLM categorizer), `client` (HTTP mode against a running
 server), `keychain`, `encryption`. Zero-feature builds still run the full
 pipeline from a file:
 
 ```
-cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/sample-accounts.json
+cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/plaid-fixture.json
 ```
 
 ```
 cargo build -p outflow-cli --features "net,client,keychain,encryption"
 ```
 
-Subcommands: `claim <token>`, `pull [--from-file P]`, `categorize [--llm]`,
+Subcommands: `pull --from-file P` (offline fixture ingest; live syncs are the
+server's job), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`,
 `subs`, `fix <id> <category> [--no-learn]`, `txns [--search --category
 --account --source --flag --sort --asc --limit --offset --since --until

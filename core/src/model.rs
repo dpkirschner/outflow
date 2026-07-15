@@ -29,11 +29,11 @@ impl AccountKind {
     }
 }
 
-/// Which upstream integration a row came from ("simplefin", "plaid"). Ids are
-/// stored raw — provenance lives here, not in id prefixes — so rows ingested
-/// before this field existed deserialize as SimpleFIN.
+/// Which upstream integration a row came from ("plaid" today; rows from the
+/// retired SimpleFIN era carry "simplefin"). Ids are stored raw — provenance
+/// lives here, not in id prefixes.
 pub fn default_source() -> String {
-    "simplefin".to_string()
+    "plaid".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,7 +51,6 @@ pub struct Account {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CategorySource {
-    SimpleFin,
     Plaid,
     Rule,
     Llm,
@@ -61,7 +60,6 @@ pub enum CategorySource {
 impl CategorySource {
     pub fn as_str(self) -> &'static str {
         match self {
-            CategorySource::SimpleFin => "simplefin",
             CategorySource::Plaid => "plaid",
             CategorySource::Rule => "rule",
             CategorySource::Llm => "llm",
@@ -71,11 +69,11 @@ impl CategorySource {
 
     pub fn from_str(s: &str) -> Option<CategorySource> {
         match s {
-            "simplefin" => Some(CategorySource::SimpleFin),
             "plaid" => Some(CategorySource::Plaid),
             "rule" => Some(CategorySource::Rule),
             "llm" => Some(CategorySource::Llm),
             "manual" => Some(CategorySource::Manual),
+            // Unknown historical values (e.g. "simplefin") degrade to None.
             _ => None,
         }
     }
@@ -148,7 +146,7 @@ pub struct Transaction {
     pub id: String,
     pub account_id: String,
     pub posted: i64,
-    /// When the purchase actually happened (SimpleFIN `transacted_at`), if the
+    /// When the purchase actually happened (Plaid `authorized_date`), if the
     /// bank supplied it. `None` when only the posting date is known.
     pub transacted_at: Option<i64>,
     pub amount: Money,

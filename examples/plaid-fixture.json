@@ -1,0 +1,172 @@
+{
+  "institution": "Demo Bank",
+  "accounts": {
+    "accounts": [
+      {
+        "account_id": "plaid-acct-checking",
+        "balances": {
+          "available": 100,
+          "current": 110.24,
+          "iso_currency_code": "USD",
+          "limit": null
+        },
+        "mask": "0000",
+        "name": "Plaid Checking",
+        "official_name": "Plaid Gold Standard 0% Interest Checking",
+        "subtype": "checking",
+        "type": "depository"
+      },
+      {
+        "account_id": "plaid-acct-savings",
+        "balances": {
+          "available": 200,
+          "current": 210.13,
+          "iso_currency_code": "USD",
+          "limit": null
+        },
+        "mask": "1111",
+        "name": "Plaid Saving",
+        "official_name": "Plaid Silver Standard 0.1% Interest Saving",
+        "subtype": "savings",
+        "type": "depository"
+      },
+      {
+        "account_id": "plaid-acct-card",
+        "balances": {
+          "available": 4590,
+          "current": 410.0,
+          "iso_currency_code": "USD",
+          "limit": 5000
+        },
+        "mask": "3333",
+        "name": "Plaid Credit Card",
+        "official_name": "Plaid Diamond 12.5% APR Interest Credit Card",
+        "subtype": "credit card",
+        "type": "credit"
+      }
+    ],
+    "item": {
+      "item_id": "item-sandbox-1",
+      "institution_id": "ins_3"
+    },
+    "request_id": "req-fixture"
+  },
+  "sync": {
+    "added": [
+      {
+        "transaction_id": "txn-coffee",
+        "account_id": "plaid-acct-card",
+        "amount": 4.22,
+        "iso_currency_code": "USD",
+        "date": "2026-06-02",
+        "authorized_date": "2026-06-01",
+        "name": "STARBUCKS STORE 12345",
+        "merchant_name": "Starbucks",
+        "payment_channel": "in store",
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "FOOD_AND_DRINK",
+          "detailed": "FOOD_AND_DRINK_COFFEE",
+          "confidence_level": "VERY_HIGH"
+        }
+      },
+      {
+        "transaction_id": "txn-payroll",
+        "account_id": "plaid-acct-checking",
+        "amount": -1234.56,
+        "iso_currency_code": "USD",
+        "date": "2026-06-05",
+        "authorized_date": null,
+        "name": "ACME CORP PAYROLL",
+        "merchant_name": null,
+        "payment_channel": "other",
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "INCOME",
+          "detailed": "INCOME_WAGES",
+          "confidence_level": "VERY_HIGH"
+        }
+      },
+      {
+        "transaction_id": "txn-ccpay",
+        "account_id": "plaid-acct-checking",
+        "amount": 500.0,
+        "iso_currency_code": "USD",
+        "date": "2026-06-10",
+        "authorized_date": null,
+        "name": "CHASE CREDIT CRD AUTOPAY",
+        "merchant_name": null,
+        "payment_channel": "online",
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "LOAN_PAYMENTS",
+          "detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT",
+          "confidence_level": "VERY_HIGH"
+        }
+      },
+      {
+        "transaction_id": "txn-mystery",
+        "account_id": "plaid-acct-checking",
+        "amount": 12.0,
+        "iso_currency_code": "USD",
+        "date": "2026-06-11",
+        "authorized_date": null,
+        "name": "CHECK 1042",
+        "merchant_name": null,
+        "payment_channel": "other",
+        "pending": false,
+        "pending_transaction_id": null,
+        "personal_finance_category": null
+      },
+      {
+        "transaction_id": "txn-posted",
+        "account_id": "plaid-acct-card",
+        "amount": 89.99,
+        "iso_currency_code": "USD",
+        "date": "2026-06-12",
+        "authorized_date": "2026-06-10",
+        "name": "AMAZON.COM*ORDER",
+        "merchant_name": "Amazon",
+        "payment_channel": "online",
+        "pending": false,
+        "pending_transaction_id": "txn-pending-old",
+        "personal_finance_category": {
+          "primary": "GENERAL_MERCHANDISE",
+          "detailed": "GENERAL_MERCHANDISE_ONLINE_MARKETPLACES",
+          "confidence_level": "HIGH"
+        }
+      },
+      {
+        "transaction_id": "txn-still-pending",
+        "account_id": "plaid-acct-card",
+        "amount": 23.5,
+        "iso_currency_code": "USD",
+        "date": "2026-06-13",
+        "authorized_date": "2026-06-13",
+        "name": "UBER TRIP PENDING",
+        "merchant_name": "Uber",
+        "payment_channel": "online",
+        "pending": true,
+        "pending_transaction_id": null,
+        "personal_finance_category": {
+          "primary": "TRANSPORTATION",
+          "detailed": "TRANSPORTATION_TAXIS_AND_RIDE_SHARES",
+          "confidence_level": "VERY_HIGH"
+        }
+      }
+    ],
+    "modified": [],
+    "removed": [
+      {
+        "transaction_id": "txn-gone",
+        "account_id": "plaid-acct-card"
+      }
+    ],
+    "next_cursor": "cursor-2",
+    "has_more": false,
+    "request_id": "req-fixture-sync"
+  }
+}

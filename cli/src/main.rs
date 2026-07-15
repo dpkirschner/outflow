@@ -1,8 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    detect, monthly_flow, parse_account_set, search_transactions, spend_by_category,
-    top_merchants, CategorySource, MatchStatus, Money, SortKey, Store, TxnFilter, TxnFlag,
-    TxnQuery,
+    detect, monthly_flow, parse_fixture, search_transactions, spend_by_category, top_merchants,
+    CategorySource, MatchStatus, Money, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -27,10 +26,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 pub(crate) enum Cmd {
-    /// Exchange a SimpleFIN setup token for a durable access URL.
-    Claim {
-        setup_token: String,
-    },
+    /// Ingest a Plaid fixture file offline (`--from-file`); live syncs run on
+    /// the server (use `--server URL pull`).
     Pull {
         #[arg(long)]
         from_file: Option<String>,
@@ -246,68 +243,43 @@ fn open_store(db: &str) -> Result<Store, String> {
     Store::open(db).map_err(|e| format!("open db {db}: {e}"))
 }
 
-#[cfg(feature = "net")]
-fn fetch_live() -> Result<String, String> {
-    let url = outflow_net::access_url()?;
-    outflow_net::fetch(&url)
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
-/// Exchange a base64 setup token for an access URL and persist it.
-#[cfg(feature = "net")]
-fn claim(setup_token: &str) -> Result<(), String> {
-    let access_url = outflow_net::claim_access_url(setup_token)?;
-    store_access_url(&access_url)
-}
-
-/// Persist the access URL and tell the user where it went. Precedence lives in
-/// `outflow_net::persist_access_url`; this only maps the outcome to a message.
-#[cfg(feature = "net")]
-fn store_access_url(access_url: &str) -> Result<(), String> {
-    use outflow_net::Persisted;
-    match outflow_net::persist_access_url(access_url)? {
-        Persisted::File(p) => println!(
-            "wrote access URL to {p} (0600); `pull` will read it via OUTFLOW_SFIN_URL_FILE"
-        ),
-        Persisted::Keychain => {
-            println!("stored access URL in keychain (service=outflow); `pull` will use it")
-        }
-        Persisted::Ephemeral => {
-            println!("access URL obtained. Persist it for future pulls, e.g.:");
-            println!("  export OUTFLOW_SFIN_URL='{access_url}'");
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(feature = "net"))]
-fn claim(_setup_token: &str) -> Result<(), String> {
-    Err("claim needs --features net".into())
-}
-
-#[cfg(not(feature = "net"))]
-fn fetch_live() -> Result<String, String> {
-    Err("live pull needs --features net; use `pull --from-file <path>` here".into())
-}
-
+/// Offline ingest of a Plaid fixture envelope (see `core::plaid::parse_fixture`)
+/// — the zero-feature, zero-credential pipeline. Live syncs are the server's
+/// job: `outflow --server URL pull`.
 fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
-    let json = match from_file {
-        Some(p) => std::fs::read_to_string(&p).map_err(|e| format!("read {p}: {e}"))?,
-        None => fetch_live()?,
+    let Some(path) = from_file else {
+        return Err(
+            "live sync runs on the server: use `--server URL pull`; for offline ingest use \
+             `pull --from-file examples/plaid-fixture.json`"
+                .into(),
+        );
     };
-    let fetched = parse_account_set(&json).map_err(|e| format!("parse: {e:?}"))?;
+    let json = std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))?;
+    let fixture = parse_fixture(&json, now_secs()).map_err(|e| format!("parse: {e:?}"))?;
     store
-        .upsert_accounts(&fetched.accounts)
+        .upsert_accounts(&fixture.accounts)
         .map_err(|e| format!("save accounts: {e}"))?;
+    let mut txns = fixture.sync.added;
+    txns.extend(fixture.sync.modified);
     let r = store
-        .upsert_transactions(&fetched.transactions)
+        .upsert_transactions(&txns)
         .map_err(|e| format!("save transactions: {e}"))?;
-    for w in &fetched.warnings {
-        eprintln!("warning: {w}");
-    }
-    for a in &fetched.accounts {
+    let mut removed = fixture.sync.removed_ids;
+    removed.extend(fixture.sync.pending_superseded);
+    let deleted = store
+        .delete_transactions(&removed)
+        .map_err(|e| format!("apply removals: {e}"))?;
+    for a in &fixture.accounts {
         println!("  {} [{}]  {}", a.name, a.kind.as_str(), dollars(a.balance.cents()));
     }
-    println!("added {}, updated {}", r.added, r.updated);
+    println!("added {}, updated {}, removed {}", r.added, r.updated, deleted);
     Ok(())
 }
 
@@ -649,13 +621,8 @@ fn run() -> Result<(), String> {
     if let Some(server) = &cli.server {
         return run_remote(server, &cli.cmd);
     }
-    // Claim is a bootstrap step that needs no database.
-    if let Cmd::Claim { setup_token } = &cli.cmd {
-        return claim(setup_token);
-    }
     let store = open_store(&cli.db)?;
     match cli.cmd {
-        Cmd::Claim { .. } => unreachable!("handled above"),
         Cmd::Pull { from_file } => cmd_pull(&store, from_file),
         Cmd::Categorize { llm } => cmd_categorize(&store, llm),
         Cmd::Report {

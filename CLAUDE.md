@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 outflow is a single-user spending analyzer for one person's own bank data.
 A server (target: an always-on mac-mini, exposed over Tailscale) pulls
-transactions from **Plaid** (checking/savings/credit cards) and **SimpleFIN**
-into local SQLite, categorizes them (rules + optional LLM), auto-detects
+transactions from **Plaid** (checking/savings/credit cards) into local SQLite,
+categorizes them (rules + optional LLM), auto-detects
 checking→card payments so spending isn't double-counted, and serves a web
 client + JSON API for outflow tracking. Analysis only — no budgets.
 
@@ -22,15 +22,16 @@ cargo test -p outflow-core -p outflow-net   # pure-crate suites (make test)
 cargo build                                  # whole workspace (no Tauri anymore)
 ```
 
-CLI (`outflow` binary). Features: `net` (live SimpleFIN + LLM), `client`
+CLI (`outflow` binary). Features: `net` (LLM categorizer), `client`
 (HTTP mode against a running server), `keychain`, `encryption`. With no
 features the full pipeline still runs via `--from-file`:
 
 ```
-cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/sample-accounts.json
+cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/plaid-fixture.json
 ```
 
-Subcommands: `claim <token>`, `pull [--from-file P]`, `categorize [--llm]`,
+Subcommands: `pull --from-file P` (offline fixture; live syncs run on the
+server), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`,
 `subs`, `fix <id> <category> [--no-learn]`, plus server/JSON mode (`--server
 URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
@@ -62,9 +63,9 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
   `llm` / `plaid` (pure Plaid JSON→domain parser) / `transfers` (card-payment
   matcher). Source of truth; every front-end calls it directly so **CLI and web
   run identical domain logic**.
-- **`net/`** — networked adapters (sync ureq): `simplefin` (fetch/claim),
-  `plaid` (Link/exchange/sync transport), `plaid_tokens` (0600 token file),
-  `secrets` (keychain + access-URL/DB-key resolution), `anthropic` (`Prompter`).
+- **`net/`** — networked adapters (sync ureq): `plaid` (Link/exchange/sync
+  transport), `plaid_tokens` (0600 token file), `secrets` (0600-file + DB-key
+  keychain helpers), `anthropic` (`Prompter`).
 - **`cli/`** — headless `outflow` binary; clap subcommands map to core calls
   (direct DB) or to the server API (`--server`, for agents/scripts).
 - **`server/`** — axum + tokio. `Arc<Mutex<Store>>` bridged with
@@ -74,9 +75,9 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
   Serves the SPA from `app/dist` with an index.html fallback (OAuth resumption
   at `/oauth-return`). Frontend in `app/src/` (React + Vite + TS).
 
-**Swappable ports:** transaction sources are free-function pipelines behind one
-shape — fetch JSON in `net`, parse pure in `core` (`source::parse_account_set`
-for SimpleFIN, `plaid::parse_sync_page`/`parse_accounts_get` for Plaid) — plus
+**Swappable ports:** the transaction source is a free-function pipeline —
+fetch JSON in `net`, parse pure in `core`
+(`plaid::parse_sync_page`/`parse_accounts_get`/`parse_fixture`) — plus
 `categorize::Categorizer` / `llm::Prompter` (rules today, LLM tail).
 
 Analysis (`query`, `subscriptions`, `ledger`) loads all transactions and
@@ -92,11 +93,11 @@ Violating these breaks data integrity or the domain contract:
    `serde_json::Number::to_string()` into that same path, never f64 math.
    Serde-transparent newtype → crosses to JS as a bare **number** (cents).
 2. **Dedup key is the provider transaction id** (+ a `source` column for
-   provenance; ids stay raw). SimpleFIN: posted upsert by id, **pending
-   delete-and-replace per synced account each pull**. Plaid: **no pending
-   sweep** — `store::apply_plaid_batch` applies upserts, explicit deletions
-   (`removed` + superseded `pending_transaction_id`s), and the cursor advance
-   in ONE SQLite transaction. Never persist a Plaid cursor outside that path.
+   provenance; ids stay raw). Live syncs commit through
+   `store::apply_plaid_batch`: upserts, explicit deletions (`removed` +
+   superseded `pending_transaction_id`s), and the cursor advance in ONE SQLite
+   transaction. Never persist a Plaid cursor outside that path.
+   `upsert_transactions` is the plain path for offline fixture ingest.
 3. **`core` stays network/GUI-free by default.** Network, keychain, encryption
    are cargo features; the pipeline must stay runnable via `pull --from-file`
    with zero features. Network code lives in `net`.
@@ -105,7 +106,7 @@ Violating these breaks data integrity or the domain contract:
    card-payment matcher all key off it. Do not add a second normalizer.
 5. **Boundary parsing.** External JSON deserializes then converts to domain
    types with explicit validation; malformed data returns `SourceError`, never
-   leaks defaults (`source::parse_account_set`, `plaid::parse_sync_page`).
+   leaks defaults (`plaid::parse_sync_page`, `plaid::parse_fixture`).
    Plaid sign conventions flip at this boundary: amounts negate (Plaid
    positive = money out), credit balances negate (positive-owed → negative).
 6. **Secrets never touch the DB or argv** — env, a 0600 file, or the keychain
@@ -120,13 +121,13 @@ Violating these breaks data integrity or the domain contract:
 
 - **The wire format is snake_case** (serde field names straight over HTTP).
   The old Tauri camelCase translation is gone; `app/src/api.ts` is the single
-  client and sends Rust field names (`txn_id`, `setup_token`).
+  client and sends Rust field names (`txn_id`, `public_token`).
 - **`None` filter must mean "everything"** (`TxnFilter::all()`). A derived
   `Default` would set `include_pending = false` and silently drop pending rows
   — `FilterParams::to_filter` defaults pending=true explicitly.
 - **Headless server ≠ interactive session.** launchd services get no keychain
   and no shell env — configure via a plist env block + 0600 files
-  (`OUTFLOW_PLAID_SECRET_FILE`, `OUTFLOW_SFIN_URL_FILE`, `OUTFLOW_DB_KEY_FILE`).
+  (`OUTFLOW_PLAID_SECRET_FILE`, `OUTFLOW_DB_KEY_FILE`).
 - **Plaintext and encrypted DBs are not interchangeable** — switching a path's
   mode requires deleting the file first.
 - **Don't stage the DB or secrets in `/tmp`** — macOS purges it and the app

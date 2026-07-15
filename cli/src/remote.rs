@@ -73,10 +73,6 @@ fn enc(s: &str) -> String {
 /// Dispatch a subcommand to the server; returns the response body to print.
 pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
     match cmd {
-        Cmd::Claim { setup_token } => remote.post(
-            "/claim",
-            Some(serde_json::json!({ "setup_token": setup_token })),
-        ),
         Cmd::Pull { from_file } => {
             if from_file.is_some() {
                 return Err("--from-file reads a LOCAL file; drop --server for it".into());

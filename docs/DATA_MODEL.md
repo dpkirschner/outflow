@@ -15,27 +15,27 @@ every amount as integer cents. See `core/src/money.rs`, `core/src/plaid.rs`.
 
 ```rust
 Account { id, org, name, kind: AccountKind, balance: Money, currency,
-          last_synced, source }        // source: "simplefin" | "plaid"
+          last_synced, source }        // source: provenance ("plaid")
 AccountKind = Checking | Savings | Credit | Other
-// SimpleFIN: name heuristic. Plaid: real type/subtype mapping — credit/* →
-// Credit (balance negated: Plaid reports positive-owed), depository/checking →
-// Checking, depository/savings|cd|money market|hsa → Savings.
+// Real Plaid type/subtype mapping — credit/* → Credit (balance negated: Plaid
+// reports positive-owed), depository/checking → Checking,
+// depository/savings|cd|money market|hsa → Savings.
 
 Transaction {
     id,               // provider transaction id — the dedup key (stored raw)
     account_id,
     posted: i64,      // epoch seconds — when the bank booked it
     transacted_at: Option<i64>,  // when the purchase happened, if known
-                      // (SimpleFIN transacted_at / Plaid authorized_date)
+                      // (Plaid authorized_date)
     amount: Money,    // outflow negative
-    description,      // SimpleFIN description / Plaid name
-    payee: Option<String>,       // SimpleFIN payee / Plaid merchant_name
+    description,      // Plaid name
+    payee: Option<String>,       // Plaid merchant_name
     category: Option<String>,
-    category_source: Option<CategorySource>, // SimpleFin | Plaid | Rule | Llm | Manual
+    category_source: Option<CategorySource>, // Plaid | Rule | Llm | Manual
     pending: bool,
     flag: TxnFlag,    // Spending (default) | Transfer | CardPayment
     raw: String,      // original provider JSON, retained (full Plaid payload)
-    source: String,   // "simplefin" | "plaid" — provenance, never id prefixes
+    source: String,   // provenance ("plaid"; "simplefin" on retired-era rows)
 }
 TxnFlag = Spending | Transfer | CardPayment   // suppression axis; see below
 
@@ -78,13 +78,13 @@ Schema changes run through the `PRAGMA user_version` migration runner
 ## Write invariants (these govern every upsert)
 
 1. **Dedup key = the provider transaction id** (+ `source` for provenance).
-   SimpleFIN (`upsert_transactions`): pending rows are **delete-and-replace per
-   synced account** each pull (the bridge re-sends the full pending set).
-   Plaid (`apply_plaid_batch`): **no pending sweep** — Plaid reports lifecycle
-   explicitly, so the batch carries explicit deletions (its `removed` list plus
-   the `pending_transaction_id`s superseded by posted rows) and everything —
-   account upserts, txn upserts, deletions, **cursor advance** — commits in one
-   SQLite transaction. `UpsertResult` counts only posted adds/updates.
+   Live syncs commit through `apply_plaid_batch`: Plaid reports pending
+   lifecycle explicitly, so the batch carries explicit deletions (its `removed`
+   list plus the `pending_transaction_id`s superseded by posted rows) and
+   everything — account upserts, txn upserts, deletions, **cursor advance** —
+   commits in one SQLite transaction. `upsert_transactions` is the plain
+   id-keyed path for offline fixture ingest. `UpsertResult` counts only posted
+   adds/updates.
 
 2. **One merchant normalizer everywhere: `subscriptions::normalize_payee`.**
    Lowercases, strips processor prefixes (`SQ *`, `TST*`, `PYPL*`, …), drops
@@ -148,7 +148,7 @@ Plaid migration except that Plaid account names carry their mask (e.g.
 Rule matching (`categorize::RuleSet`): **exact beats contains; among contains,
 longest pattern wins**, on the normalized merchant. `set_manual_category(id,
 cat, learn=true)` writes an exact rule so siblings follow on the next pass.
-Sources stamped: `SimpleFin | Plaid | Rule | Llm | Manual`. Plaid-seeded
+Sources stamped: `Plaid | Rule | Llm | Manual`. Plaid-seeded
 categories fill only otherwise-empty rows (the categorizer passes touch NULL
 categories only; manual fixes overwrite anything).
 

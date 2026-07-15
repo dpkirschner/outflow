@@ -110,11 +110,9 @@ export const api = {
     post<number | null>(`/txn/${encodeURIComponent(txnId)}/flag`, { flag, learn }),
   applyFlags: () => post<number>("/apply_flags"),
   hasCreditAccount: () => get<boolean>("/has_credit_account"),
-  pullFromFile: (path: string) => post<PullResult>("/pull_from_file", { path }),
-
   resetData: () => post<void>("/reset_data"),
 
-  // Sync every configured source (SimpleFIN + all linked Plaid items).
+  // Sync all linked Plaid items.
   pull: () => post<SyncReport>("/pull"),
   // Back-compat shape for callers that expect the old PullResult summary.
   pullLive: async (): Promise<PullResult> => {
@@ -126,7 +124,6 @@ export const api = {
       warnings: r.legs.flatMap((l) => (l.error ? [`${l.source}: ${l.error}`] : [])),
     };
   },
-  claim: (setupToken: string) => post<string>("/claim", { setup_token: setupToken }),
   categorizeLlm: () => post<number>("/categorize_llm"),
   syncLog: (limit?: number) =>
     get<SyncEntry[]>(`/sync_log${limit !== undefined ? `?limit=${limit}` : ""}`),

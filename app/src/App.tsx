@@ -8,14 +8,16 @@ import { StreamsCard, type SortMode } from "./components/ledger/Streams";
 import { StreamSlideOver } from "./components/ledger/SlideOver";
 import { coverageText } from "./components/ledger/labels";
 import { Connections } from "./components/Connections";
+import { MatchReview } from "./components/MatchReview";
 
-type Tab = "ledger" | "connections";
+type Tab = "ledger" | "review" | "connections";
 
 export default function App() {
   // A Plaid OAuth return must land on Connections so Link can resume there.
   const [tab, setTab] = useState<Tab>(
     window.location.pathname === "/oauth-return" ? "connections" : "ledger",
   );
+  const [reviewCount, setReviewCount] = useState(0);
   const [view, setView] = useState<LedgerView | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vocab, setVocab] = useState<string[]>([]);
@@ -35,16 +37,18 @@ export default function App() {
   const reload = useCallback(
     async (w: Window) => {
       try {
-        const [v, accts, cats, card] = await Promise.all([
+        const [v, accts, cats, card, pending] = await Promise.all([
           api.ledger(w),
           api.accounts(),
           api.categories(),
           api.hasCreditAccount(),
+          api.matches("proposed").catch(() => []),
         ]);
         setView(v);
         setAccounts(accts);
         setVocab(cats);
         setHasCard(card);
+        setReviewCount(pending.length);
         // Keep an open slide-over in sync with fresh data (or close it if the
         // stream moved out of the streams/committed lists, e.g. dismissed).
         setOpen((cur) =>
@@ -152,6 +156,12 @@ export default function App() {
             Ledger
           </span>
           <span
+            className={tab === "review" ? "on" : "lg-navlink"}
+            onClick={() => setTab("review")}
+          >
+            Review{reviewCount > 0 ? ` · ${reviewCount}` : ""}
+          </span>
+          <span
             className={tab === "connections" ? "on" : "lg-navlink"}
             onClick={() => setTab("connections")}
           >
@@ -163,6 +173,11 @@ export default function App() {
       {tab === "connections" ? (
         <>
           <Connections notify={notify} />
+          {toast && <Toast msg={toast} />}
+        </>
+      ) : tab === "review" ? (
+        <>
+          <MatchReview notify={notify} onChanged={() => void reload(win)} />
           {toast && <Toast msg={toast} />}
         </>
       ) : (

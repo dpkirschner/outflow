@@ -853,3 +853,79 @@ body:has(.lg-app) {
   color: var(--lg-text);
   min-width: 160px;
 }
+
+/* match review screen */
+.mr-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.mr-blurb {
+  color: var(--lg-dim);
+  font-size: 12px;
+  margin: 0;
+  max-width: 560px;
+}
+.mr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mr-item {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.mr-item.mr-dim {
+  opacity: 0.65;
+}
+.mr-amount {
+  font-size: 17px;
+  font-weight: 700;
+  min-width: 100px;
+  font-variant-numeric: tabular-nums;
+}
+.mr-legs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+}
+.mr-txn {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.mr-side {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--lg-faint);
+  min-width: 36px;
+}
+.mr-date {
+  color: var(--lg-faint);
+  font-size: 12px;
+}
+.mr-reason {
+  color: var(--lg-faint);
+  font-size: 11px;
+}
+.mr-missing {
+  color: var(--lg-faint);
+  font-style: italic;
+}
+.mr-accepted h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lg-dim);
+  margin: 12px 0 8px;
+}

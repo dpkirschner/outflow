@@ -197,3 +197,23 @@ export interface PlaidItem {
   created: number;
   last_synced: number | null;
 }
+
+export type MatchStatus = "Proposed" | "Accepted" | "Rejected";
+export type MatchConfidence = "High" | "Medium";
+
+// A detected checking→card payment pair awaiting/holding a decision.
+export interface TxnMatch {
+  id: number;
+  bank_txn_id: string;
+  card_txn_id: string;
+  status: MatchStatus;
+  confidence: MatchConfidence;
+  reason: string | null;
+  created: number;
+}
+
+// Match enriched with both legs for display (server flattens TxnMatch fields).
+export interface MatchView extends TxnMatch {
+  bank: Transaction | null;
+  card: Transaction | null;
+}

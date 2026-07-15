@@ -8,6 +8,7 @@ pub mod query;
 pub mod source;
 pub mod store;
 pub mod subscriptions;
+pub mod transfers;
 
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
@@ -30,3 +31,4 @@ pub use subscriptions::{
     detect, detect_rhythms, normalize_payee, Cadence, RhythmEntry, StreamCadence, Subscription,
     Trend,
 };
+pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};

@@ -6,6 +6,7 @@
 //! Headless posture: all config and secrets resolve from env / 0600 files —
 //! never the keychain (locked without a GUI session) and never the DB.
 
+mod match_routes;
 mod plaid_routes;
 mod routes;
 mod state;
@@ -136,6 +137,7 @@ async fn main() {
 
     let api = routes::api_router()
         .merge(plaid_routes::router())
+        .merge(match_routes::router())
         .layer(middleware::from_fn_with_state(state.clone(), require_bearer));
 
     // SPA fallback to index.html (status 200) is load-bearing: /oauth-return

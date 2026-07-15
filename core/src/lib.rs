@@ -3,6 +3,7 @@ pub mod ledger;
 pub mod llm;
 pub mod model;
 pub mod money;
+pub mod plaid;
 pub mod query;
 pub mod source;
 pub mod store;
@@ -15,6 +16,7 @@ pub use model::{
     SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
+pub use plaid::{parse_accounts_get, parse_sync_page, SyncPage};
 pub use query::{
     monthly_flow, spend_by_category, top_merchants, CategorySpend, MerchantSpend, MonthlyFlow,
     TxnFilter,

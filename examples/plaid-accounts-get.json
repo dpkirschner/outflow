@@ -1,0 +1,51 @@
+{
+  "accounts": [
+    {
+      "account_id": "plaid-acct-checking",
+      "balances": {
+        "available": 100,
+        "current": 110.24,
+        "iso_currency_code": "USD",
+        "limit": null
+      },
+      "mask": "0000",
+      "name": "Plaid Checking",
+      "official_name": "Plaid Gold Standard 0% Interest Checking",
+      "subtype": "checking",
+      "type": "depository"
+    },
+    {
+      "account_id": "plaid-acct-savings",
+      "balances": {
+        "available": 200,
+        "current": 210.13,
+        "iso_currency_code": "USD",
+        "limit": null
+      },
+      "mask": "1111",
+      "name": "Plaid Saving",
+      "official_name": "Plaid Silver Standard 0.1% Interest Saving",
+      "subtype": "savings",
+      "type": "depository"
+    },
+    {
+      "account_id": "plaid-acct-card",
+      "balances": {
+        "available": 4590,
+        "current": 410.0,
+        "iso_currency_code": "USD",
+        "limit": 5000
+      },
+      "mask": "3333",
+      "name": "Plaid Credit Card",
+      "official_name": "Plaid Diamond 12.5% APR Interest Credit Card",
+      "subtype": "credit card",
+      "type": "credit"
+    }
+  ],
+  "item": {
+    "item_id": "item-sandbox-1",
+    "institution_id": "ins_3"
+  },
+  "request_id": "req-fixture"
+}

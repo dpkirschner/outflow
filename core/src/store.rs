@@ -30,6 +30,7 @@ fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
             let f: String = r.get(11)?;
             TxnFlag::from_str(&f).unwrap_or(TxnFlag::Spending)
         },
+        source: r.get(12)?,
     })
 }
 
@@ -37,7 +38,7 @@ fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
 // `row_to_txn` indices and the `upsert_transactions` INSERT. New columns are
 // APPENDED, never inserted mid-list.
 const TXN_COLUMNS: &str = "id, account_id, posted, amount_cents, description, payee, \
-     category, category_source, pending, raw, transacted_at, flag";
+     category, category_source, pending, raw, transacted_at, flag, source";
 
 pub struct Store {
     conn: Connection,
@@ -47,6 +48,20 @@ pub struct Store {
 pub struct UpsertResult {
     pub added: usize,
     pub updated: usize,
+}
+
+/// One Plaid `/transactions/sync` run for a single item, applied atomically:
+/// account upserts, transaction upserts (no pending sweep — Plaid signals
+/// pending removal explicitly), deletions (`removed` + superseded pending
+/// predecessors), and the cursor advance all commit in one SQLite transaction
+/// so a crash can never persist the cursor without its data.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaidBatch {
+    pub item_id: String,
+    pub accounts: Vec<Account>,
+    pub upserts: Vec<Transaction>,
+    pub removed_ids: Vec<String>,
+    pub next_cursor: String,
 }
 
 /// A learned/manual rule that assigns a `TxnFlag` to transactions whose
@@ -82,6 +97,96 @@ fn match_flag<'a>(rules: &'a [FlagRule], merchant: &str) -> Option<&'a FlagRule>
         }
     }
     best
+}
+
+/// Account upsert loop shared by `upsert_accounts` and `apply_plaid_batch`;
+/// runs inside the caller's transaction.
+fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Result<()> {
+    for a in accounts {
+        conn.execute(
+            "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+                org=excluded.org, name=excluded.name, kind=excluded.kind,
+                balance_cents=excluded.balance_cents, currency=excluded.currency,
+                last_synced=excluded.last_synced, source=excluded.source",
+            params![
+                a.id,
+                a.org,
+                a.name,
+                a.kind.as_str(),
+                a.balance.cents(),
+                a.currency,
+                a.last_synced,
+                a.source
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Transaction upsert loop shared by `upsert_transactions` and
+/// `apply_plaid_batch`; runs inside the caller's transaction. Counts pending
+/// rows as neither added nor updated.
+fn insert_txn_batch(conn: &Connection, txns: &[Transaction]) -> rusqlite::Result<UpsertResult> {
+    let mut existing: HashSet<String> = HashSet::new();
+    {
+        let mut stmt = conn.prepare("SELECT id FROM transactions WHERE id = ?1")?;
+        for t in txns.iter().filter(|t| !t.pending) {
+            let found = stmt.exists(params![t.id])?;
+            if found {
+                existing.insert(t.id.clone());
+            }
+        }
+    }
+
+    let mut added = 0usize;
+    let mut updated = 0usize;
+
+    for t in txns {
+        let cat_src = t.category_source.map(|c| c.as_str());
+        // `flag` is intentionally absent from the conflict-update: a re-pull
+        // must not reset a manually-applied Transfer/CardPayment flag back to
+        // 'spending'. `transacted_at` IS updated so a later pull can fill it
+        // in if the bank starts supplying it.
+        conn.execute(
+            "INSERT INTO transactions
+                (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw, transacted_at, flag, source)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(id) DO UPDATE SET
+                account_id=excluded.account_id, posted=excluded.posted,
+                amount_cents=excluded.amount_cents, description=excluded.description,
+                payee=excluded.payee, category=excluded.category,
+                category_source=excluded.category_source, pending=excluded.pending,
+                raw=excluded.raw, transacted_at=excluded.transacted_at,
+                source=excluded.source",
+            params![
+                t.id,
+                t.account_id,
+                t.posted,
+                t.amount.cents(),
+                t.description,
+                t.payee,
+                t.category,
+                cat_src,
+                t.pending as i64,
+                t.raw,
+                t.transacted_at,
+                t.flag.as_str(),
+                t.source
+            ],
+        )?;
+        if t.pending {
+            continue;
+        }
+        if existing.contains(&t.id) {
+            updated += 1;
+        } else {
+            added += 1;
+        }
+    }
+
+    Ok(UpsertResult { added, updated })
 }
 
 /// Default category vocabulary, seeded on first open and used to constrain the
@@ -121,7 +226,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     kind TEXT NOT NULL,
     balance_cents INTEGER NOT NULL,
     currency TEXT NOT NULL,
-    last_synced INTEGER NOT NULL
+    last_synced INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'simplefin'
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -135,7 +241,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     pending INTEGER NOT NULL,
     raw TEXT NOT NULL,
     transacted_at INTEGER,
-    flag TEXT NOT NULL DEFAULT 'spending'
+    flag TEXT NOT NULL DEFAULT 'spending',
+    source TEXT NOT NULL DEFAULT 'simplefin'
 );
 CREATE INDEX IF NOT EXISTS idx_txn_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_txn_posted ON transactions(posted);
@@ -168,6 +275,24 @@ CREATE TABLE IF NOT EXISTS sync_log (
     updated INTEGER,
     note TEXT
 );
+CREATE TABLE IF NOT EXISTS plaid_items (
+    item_id TEXT PRIMARY KEY,
+    institution TEXT NOT NULL,
+    cursor TEXT,
+    status TEXT NOT NULL DEFAULT 'ok',
+    created INTEGER NOT NULL,
+    last_synced INTEGER
+);
+CREATE TABLE IF NOT EXISTS txn_matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_txn_id TEXT NOT NULL,
+    card_txn_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    reason TEXT,
+    created INTEGER NOT NULL,
+    UNIQUE(bank_txn_id, card_txn_id)
+);
 ";
 
 /// Current schema version, tracked via `PRAGMA user_version`. Bump this and add a
@@ -175,7 +300,8 @@ CREATE TABLE IF NOT EXISTS sync_log (
 /// (created via `CREATE TABLE IF NOT EXISTS` in `SCHEMA`) don't need an ALTER, but
 /// bumping documents the change.
 /// v1: transactions.transacted_at + transactions.flag. v2: merchant_overrides.
-const SCHEMA_VERSION: i64 = 2;
+/// v3: accounts.source + transactions.source (+ plaid_items, txn_matches tables).
+const SCHEMA_VERSION: i64 = 3;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -224,6 +350,21 @@ impl Store {
                 "TEXT NOT NULL DEFAULT 'spending'",
             )?;
             // flag_rules is a new table → already created by SCHEMA, no ALTER.
+        }
+        if version < 3 {
+            // v3: source provenance on pulled rows. Everything before Plaid
+            // support came from SimpleFIN, so that's the backfill default.
+            self.add_column_if_missing(
+                "accounts",
+                "source",
+                "TEXT NOT NULL DEFAULT 'simplefin'",
+            )?;
+            self.add_column_if_missing(
+                "transactions",
+                "source",
+                "TEXT NOT NULL DEFAULT 'simplefin'",
+            )?;
+            // plaid_items / txn_matches are new tables → created by SCHEMA.
         }
         self.conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -287,41 +428,27 @@ impl Store {
 
     pub fn upsert_accounts(&self, accounts: &[Account]) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
-        for a in accounts {
-            tx.execute(
-                "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-                 ON CONFLICT(id) DO UPDATE SET
-                    org=excluded.org, name=excluded.name, kind=excluded.kind,
-                    balance_cents=excluded.balance_cents, currency=excluded.currency,
-                    last_synced=excluded.last_synced",
-                params![
-                    a.id,
-                    a.org,
-                    a.name,
-                    a.kind.as_str(),
-                    a.balance.cents(),
-                    a.currency,
-                    a.last_synced
-                ],
-            )?;
-        }
+        insert_account_batch(&tx, accounts)?;
         tx.commit()
     }
 
-    /// Wipe pulled data — transactions, accounts, and the sync log — for a clean
-    /// re-pull, while keeping learned category rules and the vocabulary.
+    /// Wipe pulled data — transactions, accounts, the sync log, and detected
+    /// payment matches — for a clean re-pull, while keeping learned category
+    /// rules and the vocabulary. Plaid items survive (relinking is expensive)
+    /// but their cursors reset so the next sync replays full history.
     pub fn reset_data(&self) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM transactions", [])?;
         tx.execute("DELETE FROM accounts", [])?;
         tx.execute("DELETE FROM sync_log", [])?;
+        tx.execute("DELETE FROM txn_matches", [])?;
+        tx.execute("UPDATE plaid_items SET cursor = NULL, last_synced = NULL", [])?;
         tx.commit()
     }
 
     pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, org, name, kind, balance_cents, currency, last_synced
+            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source
              FROM accounts ORDER BY name",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -334,11 +461,15 @@ impl Store {
                 balance: Money::from_cents(r.get(4)?),
                 currency: r.get(5)?,
                 last_synced: r.get(6)?,
+                source: r.get(7)?,
             })
         })?;
         rows.collect()
     }
 
+    /// SimpleFIN-shaped upsert: every pull re-sends the full pending set, so
+    /// pending rows are delete-and-replace per synced account. Plaid batches go
+    /// through `apply_plaid_batch` instead, which never sweeps pending.
     pub fn upsert_transactions(&self, txns: &[Transaction]) -> rusqlite::Result<UpsertResult> {
         let tx = self.conn.unchecked_transaction()?;
 
@@ -350,63 +481,50 @@ impl Store {
             )?;
         }
 
-        let mut existing: HashSet<String> = HashSet::new();
-        {
-            let mut stmt = tx.prepare("SELECT id FROM transactions WHERE id = ?1")?;
-            for t in txns.iter().filter(|t| !t.pending) {
-                let found = stmt.exists(params![t.id])?;
-                if found {
-                    existing.insert(t.id.clone());
-                }
-            }
-        }
-
-        let mut added = 0usize;
-        let mut updated = 0usize;
-
-        for t in txns {
-            let cat_src = t.category_source.map(|c| c.as_str());
-            // `flag` is intentionally absent from the conflict-update: a re-pull
-            // must not reset a manually-applied Transfer/CardPayment flag back to
-            // 'spending'. `transacted_at` IS updated so a later pull can fill it
-            // in if the bank starts supplying it.
-            tx.execute(
-                "INSERT INTO transactions
-                    (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw, transacted_at, flag)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                 ON CONFLICT(id) DO UPDATE SET
-                    account_id=excluded.account_id, posted=excluded.posted,
-                    amount_cents=excluded.amount_cents, description=excluded.description,
-                    payee=excluded.payee, category=excluded.category,
-                    category_source=excluded.category_source, pending=excluded.pending,
-                    raw=excluded.raw, transacted_at=excluded.transacted_at",
-                params![
-                    t.id,
-                    t.account_id,
-                    t.posted,
-                    t.amount.cents(),
-                    t.description,
-                    t.payee,
-                    t.category,
-                    cat_src,
-                    t.pending as i64,
-                    t.raw,
-                    t.transacted_at,
-                    t.flag.as_str()
-                ],
-            )?;
-            if t.pending {
-                continue;
-            }
-            if existing.contains(&t.id) {
-                updated += 1;
-            } else {
-                added += 1;
-            }
-        }
-
+        let result = insert_txn_batch(&tx, txns)?;
         tx.commit()?;
-        Ok(UpsertResult { added, updated })
+        Ok(result)
+    }
+
+    /// Apply one Plaid sync run atomically. Unlike the SimpleFIN path there is
+    /// no blanket pending sweep: Plaid reports pending-row lifecycle explicitly,
+    /// so `removed_ids` (Plaid `removed` + pending predecessors superseded by
+    /// posted rows) carries every deletion. The item's cursor advances in the
+    /// same transaction — a crash can't persist one without the other.
+    pub fn apply_plaid_batch(
+        &self,
+        batch: &PlaidBatch,
+        synced_at: i64,
+    ) -> rusqlite::Result<UpsertResult> {
+        let tx = self.conn.unchecked_transaction()?;
+        insert_account_batch(&tx, &batch.accounts)?;
+        let result = insert_txn_batch(&tx, &batch.upserts)?;
+        {
+            let mut stmt = tx.prepare("DELETE FROM transactions WHERE id = ?1")?;
+            for id in &batch.removed_ids {
+                stmt.execute(params![id])?;
+            }
+        }
+        tx.execute(
+            "UPDATE plaid_items SET cursor = ?1, last_synced = ?2, status = 'ok'
+             WHERE item_id = ?3",
+            params![batch.next_cursor, synced_at, batch.item_id],
+        )?;
+        tx.commit()?;
+        Ok(result)
+    }
+
+    pub fn delete_transactions(&self, ids: &[String]) -> rusqlite::Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        {
+            let mut stmt = tx.prepare("DELETE FROM transactions WHERE id = ?1")?;
+            for id in ids {
+                n += stmt.execute(params![id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
     }
 
     pub fn all_transactions(&self) -> rusqlite::Result<Vec<Transaction>> {
@@ -680,6 +798,204 @@ impl Store {
         txns.sort_by(|a, b| b.effective_date().cmp(&a.effective_date()));
         Ok(txns)
     }
+
+    /// Register (or refresh) a linked Plaid item. Never touches the cursor —
+    /// cursor advances happen only inside `apply_plaid_batch`.
+    pub fn upsert_plaid_item(
+        &self,
+        item_id: &str,
+        institution: &str,
+        created: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO plaid_items (item_id, institution, status, created)
+             VALUES (?1, ?2, 'ok', ?3)
+             ON CONFLICT(item_id) DO UPDATE SET
+                institution=excluded.institution, status='ok'",
+            params![item_id, institution, created],
+        )?;
+        Ok(())
+    }
+
+    pub fn plaid_items(&self) -> rusqlite::Result<Vec<PlaidItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT item_id, institution, cursor, status, created, last_synced
+             FROM plaid_items ORDER BY created",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(PlaidItem {
+                item_id: r.get(0)?,
+                institution: r.get(1)?,
+                cursor: r.get(2)?,
+                status: r.get(3)?,
+                created: r.get(4)?,
+                last_synced: r.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Mark an item's health ("ok" | "login_required" | "error") so the UI can
+    /// surface a re-link affordance without failing the whole sync.
+    pub fn set_plaid_item_status(&self, item_id: &str, status: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE plaid_items SET status = ?1 WHERE item_id = ?2",
+            params![status, item_id],
+        )?;
+        Ok(())
+    }
+
+    /// Hard-reset an item's cursor so the next sync replays its full history.
+    /// (Pagination-mutation restarts don't use this — they resume from the
+    /// stored cursor, which only advances in `apply_plaid_batch`.)
+    pub fn clear_plaid_cursor(&self, item_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE plaid_items SET cursor = NULL WHERE item_id = ?1",
+            params![item_id],
+        )?;
+        Ok(())
+    }
+
+    /// Unlink an item's metadata. Historical transactions and accounts are kept
+    /// — the archive is the point of this app.
+    pub fn delete_plaid_item(&self, item_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "DELETE FROM plaid_items WHERE item_id = ?1",
+            params![item_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn log_sync_start(&self, source: &str, started: i64) -> rusqlite::Result<i64> {
+        self.conn.execute(
+            "INSERT INTO sync_log (started, source) VALUES (?1, ?2)",
+            params![started, source],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn log_sync_finish(
+        &self,
+        id: i64,
+        finished: i64,
+        added: usize,
+        updated: usize,
+        note: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE sync_log SET finished = ?1, added = ?2, updated = ?3, note = ?4
+             WHERE id = ?5",
+            params![finished, added as i64, updated as i64, note, id],
+        )?;
+        Ok(())
+    }
+
+    /// Most recent sync runs, newest first.
+    pub fn sync_log(&self, limit: usize) -> rusqlite::Result<Vec<SyncEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, started, finished, source, added, updated, note
+             FROM sync_log ORDER BY id DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(SyncEntry {
+                id: r.get(0)?,
+                started: r.get(1)?,
+                finished: r.get(2)?,
+                source: r.get(3)?,
+                added: r.get(4)?,
+                updated: r.get(5)?,
+                note: r.get(6)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Record a detected card-payment pair. The (bank, card) pair is UNIQUE —
+    /// re-detection of an already-decided pair is a no-op that preserves the
+    /// existing decision, so rejects are never re-proposed.
+    pub fn insert_match(
+        &self,
+        bank_txn_id: &str,
+        card_txn_id: &str,
+        status: MatchStatus,
+        confidence: MatchConfidence,
+        reason: Option<&str>,
+        created: i64,
+    ) -> rusqlite::Result<Option<i64>> {
+        let n = self.conn.execute(
+            "INSERT OR IGNORE INTO txn_matches
+                (bank_txn_id, card_txn_id, status, confidence, reason, created)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                bank_txn_id,
+                card_txn_id,
+                status.as_str(),
+                confidence.as_str(),
+                reason,
+                created
+            ],
+        )?;
+        if n == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(self.conn.last_insert_rowid()))
+        }
+    }
+
+    pub fn matches(&self, status: Option<MatchStatus>) -> rusqlite::Result<Vec<TxnMatch>> {
+        let sql = match status {
+            Some(_) => {
+                "SELECT id, bank_txn_id, card_txn_id, status, confidence, reason, created
+                 FROM txn_matches WHERE status = ?1 ORDER BY created DESC"
+            }
+            None => {
+                "SELECT id, bank_txn_id, card_txn_id, status, confidence, reason, created
+                 FROM txn_matches ORDER BY created DESC"
+            }
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let map = |r: &rusqlite::Row| -> rusqlite::Result<TxnMatch> {
+            let st: String = r.get(3)?;
+            let cf: String = r.get(4)?;
+            Ok(TxnMatch {
+                id: r.get(0)?,
+                bank_txn_id: r.get(1)?,
+                card_txn_id: r.get(2)?,
+                status: MatchStatus::from_str(&st).unwrap_or(MatchStatus::Proposed),
+                confidence: MatchConfidence::from_str(&cf).unwrap_or(MatchConfidence::Medium),
+                reason: r.get(5)?,
+                created: r.get(6)?,
+            })
+        };
+        let rows = match status {
+            Some(s) => stmt.query_map(params![s.as_str()], map)?.collect(),
+            None => stmt.query_map([], map)?.collect(),
+        };
+        rows
+    }
+
+    pub fn match_by_id(&self, id: i64) -> rusqlite::Result<Option<TxnMatch>> {
+        let all = self.matches(None)?;
+        Ok(all.into_iter().find(|m| m.id == id))
+    }
+
+    pub fn set_match_status(&self, id: i64, status: MatchStatus) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE txn_matches SET status = ?1 WHERE id = ?2",
+            params![status.as_str(), id],
+        )?;
+        Ok(())
+    }
+
+    /// Every (bank, card) pair that already has a row, regardless of status —
+    /// the detector must not re-propose any of these.
+    pub fn decided_pairs(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT bank_txn_id, card_txn_id FROM txn_matches")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
@@ -700,6 +1016,7 @@ mod tests {
             transacted_at: None,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            source: default_source(),
         }
     }
 
@@ -771,6 +1088,7 @@ mod tests {
             balance: Money::from_cents(123456),
             currency: "USD".into(),
             last_synced: 42,
+            source: default_source(),
         };
         s.upsert_accounts(&[a.clone()]).unwrap();
         let got = s.accounts().unwrap();
@@ -831,6 +1149,210 @@ mod tests {
 
         drop(s);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn migrates_v2_db_backfilling_source() {
+        // A DB with the v2 shape (no source columns) must gain them on open,
+        // with existing rows reading back as simplefin.
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-v2-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE accounts (
+                    id TEXT PRIMARY KEY, org TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
+                    balance_cents INTEGER NOT NULL, currency TEXT NOT NULL, last_synced INTEGER NOT NULL
+                );
+                CREATE TABLE transactions (
+                    id TEXT PRIMARY KEY, account_id TEXT NOT NULL, posted INTEGER NOT NULL,
+                    amount_cents INTEGER NOT NULL, description TEXT NOT NULL, payee TEXT,
+                    category TEXT, category_source TEXT, pending INTEGER NOT NULL, raw TEXT NOT NULL,
+                    transacted_at INTEGER, flag TEXT NOT NULL DEFAULT 'spending'
+                );
+                PRAGMA user_version = 2;",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO accounts VALUES ('a1', 'Bank', 'Checking', 'checking', 100, 'USD', 5)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO transactions
+                    (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw, transacted_at, flag)
+                 VALUES ('t1', 'a1', 100, -500, 'Old', NULL, NULL, NULL, 0, '{}', NULL, 'spending')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let s = Store::open(&path).unwrap();
+        let v: i64 = s.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        assert_eq!(s.transaction("t1").unwrap().unwrap().source, "simplefin");
+        assert_eq!(s.accounts().unwrap()[0].source, "simplefin");
+
+        drop(s);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn plaid_txn(id: &str, acct: &str, posted: i64, cents: i64, pending: bool) -> Transaction {
+        let mut t = txn(id, acct, posted, cents, pending);
+        t.source = "plaid".into();
+        t
+    }
+
+    #[test]
+    fn apply_plaid_batch_never_sweeps_pending_and_advances_cursor() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_plaid_item("item1", "Chase", 1000).unwrap();
+
+        // First sync: one pending, one posted.
+        let r1 = s
+            .apply_plaid_batch(
+                &PlaidBatch {
+                    item_id: "item1".into(),
+                    accounts: vec![],
+                    upserts: vec![
+                        plaid_txn("pend1", "acct1", 100, -500, true),
+                        plaid_txn("post1", "acct1", 90, -900, false),
+                    ],
+                    removed_ids: vec![],
+                    next_cursor: "cur1".into(),
+                },
+                2000,
+            )
+            .unwrap();
+        assert_eq!(r1.added, 1); // pending counts as neither
+
+        // Second sync touching the same account must NOT sweep the pending row
+        // (that's SimpleFIN semantics only).
+        s.apply_plaid_batch(
+            &PlaidBatch {
+                item_id: "item1".into(),
+                accounts: vec![],
+                upserts: vec![plaid_txn("post2", "acct1", 95, -700, false)],
+                removed_ids: vec![],
+                next_cursor: "cur2".into(),
+            },
+            3000,
+        )
+        .unwrap();
+        assert_eq!(s.count_transactions().unwrap(), 3);
+
+        // Third sync: pending posts under a new id; the predecessor id arrives
+        // in removed_ids and is deleted in the same transaction.
+        s.apply_plaid_batch(
+            &PlaidBatch {
+                item_id: "item1".into(),
+                accounts: vec![],
+                upserts: vec![plaid_txn("post3", "acct1", 100, -500, false)],
+                removed_ids: vec!["pend1".into()],
+                next_cursor: "cur3".into(),
+            },
+            4000,
+        )
+        .unwrap();
+        assert_eq!(s.count_transactions().unwrap(), 3);
+        assert!(s.transaction("pend1").unwrap().is_none());
+
+        let items = s.plaid_items().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].cursor.as_deref(), Some("cur3"));
+        assert_eq!(items[0].last_synced, Some(4000));
+        assert_eq!(items[0].status, "ok");
+    }
+
+    #[test]
+    fn plaid_item_status_and_delete_keep_history() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_plaid_item("item1", "Amex", 10).unwrap();
+        s.set_plaid_item_status("item1", "login_required").unwrap();
+        assert_eq!(s.plaid_items().unwrap()[0].status, "login_required");
+        // Relinking the same item resets status to ok.
+        s.upsert_plaid_item("item1", "Amex", 10).unwrap();
+        assert_eq!(s.plaid_items().unwrap()[0].status, "ok");
+
+        s.apply_plaid_batch(
+            &PlaidBatch {
+                item_id: "item1".into(),
+                accounts: vec![],
+                upserts: vec![plaid_txn("t1", "acct1", 100, -500, false)],
+                removed_ids: vec![],
+                next_cursor: "c".into(),
+            },
+            20,
+        )
+        .unwrap();
+        s.delete_plaid_item("item1").unwrap();
+        assert!(s.plaid_items().unwrap().is_empty());
+        // Transactions survive the unlink — the archive is permanent.
+        assert_eq!(s.count_transactions().unwrap(), 1);
+    }
+
+    #[test]
+    fn sync_log_round_trip() {
+        let s = Store::open_in_memory().unwrap();
+        let id = s.log_sync_start("plaid:item1", 100).unwrap();
+        s.log_sync_finish(id, 110, 5, 2, Some("ok")).unwrap();
+        let log = s.sync_log(10).unwrap();
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].source, "plaid:item1");
+        assert_eq!(log[0].started, 100);
+        assert_eq!(log[0].finished, Some(110));
+        assert_eq!(log[0].added, Some(5));
+        assert_eq!(log[0].updated, Some(2));
+    }
+
+    #[test]
+    fn matches_dedupe_and_status_flow() {
+        let s = Store::open_in_memory().unwrap();
+        let id = s
+            .insert_match("bank1", "card1", MatchStatus::Proposed, MatchConfidence::Medium, Some("same amount"), 100)
+            .unwrap()
+            .unwrap();
+        // Re-detection of the same pair is a no-op that preserves the decision.
+        assert!(s
+            .insert_match("bank1", "card1", MatchStatus::Proposed, MatchConfidence::High, None, 200)
+            .unwrap()
+            .is_none());
+
+        s.set_match_status(id, MatchStatus::Rejected).unwrap();
+        assert!(s.matches(Some(MatchStatus::Proposed)).unwrap().is_empty());
+        assert_eq!(s.matches(Some(MatchStatus::Rejected)).unwrap().len(), 1);
+        assert_eq!(s.decided_pairs().unwrap(), vec![("bank1".to_string(), "card1".to_string())]);
+        assert_eq!(s.match_by_id(id).unwrap().unwrap().status, MatchStatus::Rejected);
+    }
+
+    #[test]
+    fn reset_data_clears_matches_and_plaid_cursors_but_keeps_items() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_plaid_item("item1", "Chase", 10).unwrap();
+        s.apply_plaid_batch(
+            &PlaidBatch {
+                item_id: "item1".into(),
+                accounts: vec![],
+                upserts: vec![plaid_txn("t1", "acct1", 100, -500, false)],
+                removed_ids: vec![],
+                next_cursor: "cur".into(),
+            },
+            20,
+        )
+        .unwrap();
+        s.insert_match("b", "c", MatchStatus::Proposed, MatchConfidence::High, None, 30)
+            .unwrap();
+
+        s.reset_data().unwrap();
+
+        assert_eq!(s.count_transactions().unwrap(), 0);
+        assert!(s.matches(None).unwrap().is_empty());
+        let items = s.plaid_items().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].cursor, None);
     }
 
     #[test]
@@ -913,6 +1435,7 @@ mod tests {
             balance: Money::from_cents(0),
             currency: "USD".into(),
             last_synced: 0,
+            source: default_source(),
         }])
         .unwrap();
         assert!(s.has_credit_account().unwrap());
@@ -938,6 +1461,7 @@ mod categorize_tests {
             transacted_at: None,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            source: default_source(),
         }
     }
 
@@ -1003,6 +1527,7 @@ mod encryption_tests {
             transacted_at: None,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            source: default_source(),
         }
     }
 

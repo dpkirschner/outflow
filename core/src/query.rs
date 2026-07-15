@@ -208,6 +208,7 @@ mod tests {
             pending,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            source: crate::model::default_source(),
         }
     }
 

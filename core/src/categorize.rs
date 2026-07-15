@@ -108,6 +108,7 @@ mod tests {
             transacted_at: None,
             flag: crate::model::TxnFlag::Spending,
             raw: "{}".into(),
+            source: crate::model::default_source(),
         }
     }
 

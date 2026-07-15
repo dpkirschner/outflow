@@ -137,6 +137,7 @@ pub fn parse_account_set(json: &str) -> Result<Fetched, SourceError> {
             balance,
             currency: a.currency.clone().unwrap_or_else(|| "USD".into()),
             last_synced: a.balance_date.unwrap_or(0),
+            source: "simplefin".to_string(),
         });
 
         for t in &a.transactions {
@@ -167,6 +168,7 @@ pub fn parse_account_set(json: &str) -> Result<Fetched, SourceError> {
                 pending: t.pending,
                 flag: TxnFlag::Spending,
                 raw,
+                source: "simplefin".to_string(),
             });
         }
     }

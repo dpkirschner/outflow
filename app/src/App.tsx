@@ -7,8 +7,15 @@ import { StatStrip, LedgerZones } from "./components/ledger/Zones";
 import { StreamsCard, type SortMode } from "./components/ledger/Streams";
 import { StreamSlideOver } from "./components/ledger/SlideOver";
 import { coverageText } from "./components/ledger/labels";
+import { Connections } from "./components/Connections";
+
+type Tab = "ledger" | "connections";
 
 export default function App() {
+  // A Plaid OAuth return must land on Connections so Link can resume there.
+  const [tab, setTab] = useState<Tab>(
+    window.location.pathname === "/oauth-return" ? "connections" : "ledger",
+  );
   const [view, setView] = useState<LedgerView | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vocab, setVocab] = useState<string[]>([]);
@@ -138,12 +145,36 @@ export default function App() {
         <span className="lg-wm">outflow</span>
         <span className="lg-sub">where did my money go?</span>
         <span className="lg-nav">
-          <span className="on">Ledger</span>
-          <span>Flow · soon</span>
-          <span>Reconcile · soon</span>
+          <span
+            className={tab === "ledger" ? "on" : "lg-navlink"}
+            onClick={() => setTab("ledger")}
+          >
+            Ledger
+          </span>
+          <span
+            className={tab === "connections" ? "on" : "lg-navlink"}
+            onClick={() => setTab("connections")}
+          >
+            Connections
+          </span>
         </span>
       </div>
 
+      {tab === "connections" ? (
+        <>
+          <Connections notify={notify} />
+          {toast && <Toast msg={toast} />}
+        </>
+      ) : (
+        <LedgerTab />
+      )}
+    </div>
+  );
+
+  // Original single-screen ledger, unchanged, as a closure over the state above.
+  function LedgerTab() {
+    return (
+      <>
       <ActionBar
         accounts={accounts}
         busy={busy || loading}
@@ -195,6 +226,7 @@ export default function App() {
       />
 
       {toast && <Toast msg={toast} />}
-    </div>
-  );
+      </>
+    );
+  }
 }

@@ -11,6 +11,7 @@ import type {
   Mark,
   MerchantSpend,
   MonthlyFlow,
+  PlaidItem,
   PullResult,
   Subscription,
   SyncEntry,
@@ -103,4 +104,16 @@ export const api = {
   categorizeLlm: () => post<number>("/categorize_llm"),
   syncLog: (limit?: number) =>
     get<SyncEntry[]>(`/sync_log${limit !== undefined ? `?limit=${limit}` : ""}`),
+
+  // Plaid item lifecycle. Linking runs in the browser via Plaid Link.
+  plaidLinkToken: (itemId?: string) =>
+    post<{ link_token: string }>("/plaid/link_token", { item_id: itemId ?? null }),
+  plaidExchange: (publicToken: string, institution: string | null) =>
+    post<{ item_id: string; institution: string; added: number; updated: number }>(
+      "/plaid/exchange",
+      { public_token: publicToken, institution },
+    ),
+  plaidItems: () => get<PlaidItem[]>("/plaid/items"),
+  plaidRemoveItem: (itemId: string) =>
+    req<void>("DELETE", `/plaid/items/${encodeURIComponent(itemId)}`),
 };

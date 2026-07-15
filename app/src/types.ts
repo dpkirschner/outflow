@@ -187,3 +187,13 @@ export interface SyncEntry {
   updated: number | null;
   note: string | null;
 }
+
+// A linked Plaid connection (non-secret metadata only).
+export interface PlaidItem {
+  item_id: string;
+  institution: string;
+  cursor: string | null;
+  status: string; // "ok" | "login_required" | "error"
+  created: number;
+  last_synced: number | null;
+}

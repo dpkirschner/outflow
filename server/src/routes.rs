@@ -73,10 +73,18 @@ async fn accounts(State(state): State<AppState>) -> ApiResult<Vec<Account>> {
 
 /// Full search/sort/filter over the transaction list (the Outflows screen and
 /// the CLI `txns` subcommand). Semantics live in `core::query::search_transactions`.
+// NOTE: filter fields are inlined, NOT `#[serde(flatten)] FilterParams`. axum's
+// Query uses serde_urlencoded, whose flatten support buffers every value as a
+// string and then can't coerce it back to i64/bool — a flattened `since=...`
+// makes the whole query fail to deserialize (a 400 the SPA sees as broken
+// JSON). Inline fields deserialize directly. Keep the four names in sync with
+// FilterParams; `to_filter()` below reuses its single default-guard.
 #[derive(Debug, Default, Deserialize)]
 struct TxnQueryParams {
-    #[serde(flatten)]
-    filter: FilterParams,
+    since: Option<i64>,
+    until: Option<i64>,
+    pending: Option<bool>,
+    transfers: Option<bool>,
     q: Option<String>,
     account: Option<String>,
     category: Option<String>,
@@ -91,6 +99,18 @@ struct TxnQueryParams {
     limit: Option<usize>,
 }
 
+impl TxnQueryParams {
+    fn to_filter(&self) -> TxnFilter {
+        FilterParams {
+            since: self.since,
+            until: self.until,
+            pending: self.pending,
+            transfers: self.transfers,
+        }
+        .to_filter()
+    }
+}
+
 async fn transactions(
     State(state): State<AppState>,
     Query(p): Query<TxnQueryParams>,
@@ -100,7 +120,7 @@ async fn transactions(
         Some(s) => outflow_core::SortKey::from_str(s)
             .ok_or_else(|| ApiError::bad_request(format!("bad sort key {s:?}")))?,
     };
-    let mut filter = p.filter.to_filter();
+    let mut filter = p.to_filter();
     // Filtering BY a suppressed flag only makes sense with those rows visible.
     if matches!(p.flag, Some(TxnFlag::Transfer) | Some(TxnFlag::CardPayment)) {
         filter.include_non_spending = true;
@@ -149,10 +169,13 @@ async fn spend_categories(
         .map(Json)
 }
 
+// Inlined filter fields, not flatten — see the note on TxnQueryParams.
 #[derive(Deserialize)]
 struct MerchantParams {
-    #[serde(flatten)]
-    filter: FilterParams,
+    since: Option<i64>,
+    until: Option<i64>,
+    pending: Option<bool>,
+    transfers: Option<bool>,
     limit: Option<usize>,
 }
 
@@ -160,7 +183,13 @@ async fn merchants(
     State(state): State<AppState>,
     Query(params): Query<MerchantParams>,
 ) -> ApiResult<Vec<MerchantSpend>> {
-    let f = params.filter.to_filter();
+    let f = FilterParams {
+        since: params.since,
+        until: params.until,
+        pending: params.pending,
+        transfers: params.transfers,
+    }
+    .to_filter();
     let limit = params.limit.unwrap_or(15);
     with_store(&state, move |s| top_merchants(s, &f, limit).map_err(|e| e.to_string()))
         .await
@@ -218,6 +247,22 @@ async fn stream_occurrences(
     let since = window_since(p.window.as_deref().unwrap_or("6mo"), now_secs());
     with_store(&state, move |s| {
         s.stream_occurrences(&p.merchant, since).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+/// The `Stream` a noise merchant WOULD become if promoted — cadence, rate, and
+/// rhythm strip — without committing the mark. Powers the Noise popover preview.
+/// `null` when the merchant has no spending occurrences in the window.
+async fn stream_preview(
+    State(state): State<AppState>,
+    Query(p): Query<StreamParams>,
+) -> ApiResult<Option<outflow_core::Stream>> {
+    let now = now_secs();
+    let since = window_since(p.window.as_deref().unwrap_or("6mo"), now);
+    with_store(&state, move |s| {
+        outflow_core::stream_preview(s, &p.merchant, since, now).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -442,6 +487,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/subscriptions", get(subscriptions))
         .route("/ledger", get(ledger))
         .route("/stream_occurrences", get(stream_occurrences))
+        .route("/stream_preview", get(stream_preview))
         .route("/categories", get(categories))
         .route("/has_credit_account", get(has_credit_account))
         .route("/sync_log", get(sync_log))
@@ -455,4 +501,143 @@ pub fn api_router() -> Router<AppState> {
         .route("/pull", post(pull))
         .route("/pull_from_file", post(pull_from_file))
         .route("/reset_data", post(reset_data))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use outflow_core::{Money, Store};
+    use std::sync::{Arc, Mutex};
+    use tower::ServiceExt; // for `oneshot`
+
+    fn txn(id: &str, cents: i64, payee: &str) -> Transaction {
+        Transaction {
+            id: id.into(),
+            account_id: "acct-1".into(),
+            posted: 1_720_000_000,
+            transacted_at: Some(1_720_000_000),
+            amount: Money::from_cents(cents),
+            description: payee.into(),
+            payee: Some(payee.into()),
+            category: Some("Dining".into()),
+            category_source: Some(CategorySource::Rule),
+            pending: false,
+            flag: TxnFlag::Spending,
+            raw: "{}".into(),
+            source: "plaid".into(),
+        }
+    }
+
+    fn app_with_txns(txns: &[Transaction]) -> Router {
+        let store = Store::open_in_memory().expect("in-memory store");
+        store.upsert_transactions(txns).expect("seed txns");
+        let cfg = crate::state::Config {
+            db_path: ":memory:".into(),
+            listen: "127.0.0.1:0".into(),
+            web_dir: "app/dist".into(),
+            plaid_tokens_file: "/dev/null".into(),
+            oauth_redirect: None,
+            api_token: None,
+            sync_interval_secs: 21_600,
+        };
+        let state = AppState {
+            store: Arc::new(Mutex::new(store)),
+            sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            cfg: Arc::new(cfg),
+        };
+        api_router().with_state(state)
+    }
+
+    async fn get_json(app: Router, uri: &str) -> (StatusCode, serde_json::Value) {
+        let res = app
+            .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                panic!("body was not JSON ({e}): {:?}", String::from_utf8_lossy(&bytes))
+            })
+        };
+        (status, body)
+    }
+
+    // Regression: the Outflows tab query carries flattened FilterParams fields
+    // (since/until, i64) alongside sort/dir/offset/limit. axum's serde_urlencoded
+    // Query rejected these with a 400 plaintext "Failed to deserialize query
+    // string" body; axum_extra's serde_html_form Query must accept them.
+    #[tokio::test]
+    async fn transactions_accepts_flattened_filter_params() {
+        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle"), txn("t2", -900, "Sightglass")]);
+        let (status, body) = get_json(
+            app,
+            "/transactions?since=1719810000&until=1722488400&sort=date&dir=desc&offset=0&limit=50",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert_eq!(body["total"], 2);
+        assert_eq!(body["items"].as_array().unwrap().len(), 2);
+    }
+
+    // The category filter (also on the Outflows tab) rides on the same handler.
+    #[tokio::test]
+    async fn transactions_filters_by_category() {
+        let mut other = txn("t3", -2000, "Whole Foods");
+        other.category = Some("Groceries".into());
+        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle"), other]);
+        let (status, body) = get_json(app, "/transactions?category=Dining&limit=50").await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert_eq!(body["total"], 1);
+        assert_eq!(body["items"][0]["payee"], "Blue Bottle");
+    }
+
+    // The /merchants handler flattens FilterParams too — same fix, same guard.
+    #[tokio::test]
+    async fn merchants_accepts_flattened_filter_params() {
+        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle"), txn("t2", -900, "Sightglass")]);
+        let (status, body) =
+            get_json(app, "/merchants?since=1719810000&until=1722488400&limit=5").await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert!(body.is_array());
+    }
+
+    // A bad sort key is still a clean 400 with a JSON error body (handler-level
+    // validation), not an extractor rejection.
+    #[tokio::test]
+    async fn transactions_bad_sort_key_is_json_400() {
+        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle")]);
+        let (status, body) = get_json(app, "/transactions?sort=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("bogus"));
+    }
+
+    // The Noise popover preview: /stream_preview synthesizes a Stream for a
+    // merchant keyed by its normalized name, with no min-occurrence gate.
+    #[tokio::test]
+    async fn stream_preview_returns_a_stream_for_a_noise_merchant() {
+        let app = app_with_txns(&[
+            txn("u1", -600, "Uber"),
+            txn("u2", -700, "Uber"),
+            txn("u3", -650, "Uber"),
+        ]);
+        let (status, body) = get_json(app, "/stream_preview?merchant=uber&window=all").await;
+        assert_eq!(status, StatusCode::OK, "body: {body}");
+        assert_eq!(body["merchant"], "uber");
+        assert_eq!(body["occurrence_count"], 3);
+        assert!(body["cadence"].is_string());
+    }
+
+    // Unknown merchant → null (JSON `null`, a 200), not an error.
+    #[tokio::test]
+    async fn stream_preview_null_for_unknown_merchant() {
+        let app = app_with_txns(&[txn("u1", -600, "Uber")]);
+        let (status, body) = get_json(app, "/stream_preview?merchant=nobody&window=all").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.is_null());
+    }
 }

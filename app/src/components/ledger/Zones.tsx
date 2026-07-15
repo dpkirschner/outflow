@@ -38,10 +38,11 @@ export function StatStrip({ stats }: { stats: LedgerStats }) {
   );
 }
 
-// A single transaction row (used in the Noise list).
-function LineRow({ item }: { item: LineItem }) {
+// A single transaction row (used in the Noise list). Clicking opens the
+// promote popover keyed on the merchant (not the individual transaction).
+function LineRow({ item, onOpen }: { item: LineItem; onOpen: (key: string) => void }) {
   return (
-    <div className="lg-line">
+    <div className="lg-line click" onClick={() => onOpen(item.merchant_key)}>
       <span className="d">{formatDate(item.date)}</span>
       <span className="nm">{item.merchant}</span>
       <SourceChip s={item.source} />
@@ -69,21 +70,30 @@ function NotableBlock({ rows }: { rows: LineItem[] }) {
   );
 }
 
+// `open`/`onToggle` optional: when supplied the fold is controlled by the
+// parent (the Noise fold, so App can keep it open across a click and collapse
+// it on promote); otherwise it self-manages.
 function Fold({
   label,
   note,
   amount,
   children,
+  open: openProp,
+  onToggle,
 }: {
   label: string;
   note: string;
   amount: string;
   children: React.ReactNode;
+  open?: boolean;
+  onToggle?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openLocal, setOpenLocal] = useState(false);
+  const open = openProp ?? openLocal;
+  const toggle = onToggle ?? (() => setOpenLocal((o) => !o));
   return (
     <>
-      <div className="lg-foldrow" onClick={() => setOpen((o) => !o)}>
+      <div className="lg-foldrow" onClick={toggle}>
         <span className={`car${open ? " open" : ""}`}>▶</span>
         <span className="lbl">{label}</span>
         <span className="note">{note}</span>
@@ -97,9 +107,15 @@ function Fold({
 export function LedgerZones({
   view,
   onOpen,
+  onOpenNoise,
+  noiseOpen,
+  onNoiseToggle,
 }: {
   view: LedgerView;
   onOpen: (s: Stream) => void;
+  onOpenNoise: (merchantKey: string) => void;
+  noiseOpen: boolean;
+  onNoiseToggle: () => void;
 }) {
   const { committed, transfers, notable, noise_items, stats } = view;
   const committedTotal = committed.reduce((a, s) => a + s.monthly_estimate_cents, 0);
@@ -151,6 +167,8 @@ export function LedgerZones({
             stats.noise_count === 1 ? "" : "s"
           }`}
           amount={dollars(stats.noise_total_cents)}
+          open={noiseOpen}
+          onToggle={onNoiseToggle}
         >
           {noise_items.length === 0 ? (
             <div className="lg-note">
@@ -158,7 +176,7 @@ export function LedgerZones({
               surfaced up in Notable.
             </div>
           ) : (
-            noise_items.map((i) => <LineRow key={i.id} item={i} />)
+            noise_items.map((i) => <LineRow key={i.id} item={i} onOpen={onOpenNoise} />)
           )}
         </Fold>
       </div>

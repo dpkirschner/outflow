@@ -9,6 +9,8 @@ import { RhythmStrip, SourceChip } from "./Streams";
 export function StreamSlideOver({
   stream,
   committed,
+  candidate = false,
+  onPromote,
   win,
   accounts,
   vocab,
@@ -19,6 +21,12 @@ export function StreamSlideOver({
 }: {
   stream: Stream | null;
   committed: boolean;
+  /// Candidate = a Noise merchant being previewed, not yet a real stream. Shows
+  /// context stats + a "Promote to stream" action instead of Committed/Dismiss.
+  candidate?: boolean;
+  /// Called with the merchant key when the candidate is promoted. The parent
+  /// owns the reload + open-the-new-stream flow (this panel just closes).
+  onPromote?: (merchantKey: string) => void | Promise<void>;
   win: import("../../types").Window;
   accounts: Account[];
   vocab: string[];
@@ -98,6 +106,19 @@ export function StreamSlideOver({
     run(() => api.markStream(stream.merchant, "Kept" as Mark), "Returned to the hunt", true);
   const dismiss = () =>
     run(() => api.markStream(stream.merchant, "Dismissed" as Mark), "Dismissed to noise", true);
+  const promote = async () => {
+    if (!onPromote) return;
+    setWorking(true);
+    try {
+      await onPromote(stream.merchant);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  // Context stats for the candidate header, from the loaded occurrences.
+  const total = occ.reduce((a, t) => a + Math.abs(t.amount), 0);
+  const avg = occ.length ? Math.round(total / occ.length) : 0;
 
   // Per-occurrence flag, with the card-payment guard.
   const flagTxn = (t: Transaction, flag: TxnFlag) => {
@@ -131,8 +152,14 @@ export function StreamSlideOver({
           </div>
           <div className="subline">
             {stream.occurrence_count} visits
-            {primary && <SourceChip s={primary} />}· {committed ? "committed" : "in the hunt"}
+            {primary && <SourceChip s={primary} />}·{" "}
+            {candidate ? "candidate" : committed ? "committed" : "in the hunt"}
           </div>
+          {candidate && (
+            <div className="subline">
+              seen {occ.length}× · {dollars(total)} total · {dollars(avg)} avg
+            </div>
+          )}
           <div className="bignum">
             {dollars(stream.monthly_estimate_cents)}{" "}
             <small>
@@ -144,9 +171,15 @@ export function StreamSlideOver({
         </div>
 
         <div className="lg-sect">
-          <h4>Reclassify this stream</h4>
+          <h4>{candidate ? "This looks recurring" : "Reclassify this stream"}</h4>
           <div className="lg-acts">
-            {committed ? (
+            {candidate ? (
+              <button className="lg-act" disabled={working} onClick={promote}>
+                <span className="ic">↥</span>
+                <span className="grow">Promote to stream</span>
+                <span className="hint">out of noise</span>
+              </button>
+            ) : committed ? (
               <button className="lg-act" disabled={working} onClick={returnToHunt}>
                 <span className="ic">↩</span>
                 <span className="grow">Return to the hunt</span>
@@ -164,11 +197,13 @@ export function StreamSlideOver({
               <span className="grow">Flag as Transfer</span>
               <span className="hint">not spending</span>
             </button>
-            <button className="lg-act danger" disabled={working} onClick={dismiss}>
-              <span className="ic">×</span>
-              <span className="grow">Dismiss to Noise</span>
-              <span className="hint">not a real stream</span>
-            </button>
+            {!candidate && (
+              <button className="lg-act danger" disabled={working} onClick={dismiss}>
+                <span className="ic">×</span>
+                <span className="grow">Dismiss to Noise</span>
+                <span className="hint">not a real stream</span>
+              </button>
+            )}
           </div>
           {!hasCard && (
             <div className="lg-warn">

@@ -142,6 +142,10 @@ pub enum StreamCadence {
     FewPerMonth, // "~4×/mo"
     Monthly,     // "monthly"
     Yearly,      // "yearly"
+    /// Spacing too erratic to classify. The auto-detector never emits this
+    /// (it rejects irregular streams); it's only produced when the user
+    /// force-promotes a noise merchant into a stream via `rhythm_for_items`.
+    Irregular, // "irregular"
 }
 
 /// Direction of a stream's monthly-rate change, derived from `trend_pct` for
@@ -322,44 +326,91 @@ pub fn detect_rhythms(txns: &[Transaction], now: i64) -> Vec<RhythmEntry> {
             continue;
         }
         items.sort_by_key(|t| t.effective_date());
-
         let dates: Vec<i64> = items.iter().map(|t| t.effective_date()).collect();
+        // Gate: only regular spacing qualifies for auto-detection.
         let (cadence, med_gap) = match classify_stream_cadence(&dates) {
             Some(c) => c,
             None => continue,
         };
-
-        let mut amounts: Vec<i64> = items.iter().map(|t| t.amount.cents().abs()).collect();
-        let amount_min = *amounts.iter().min().unwrap();
-        let amount_max = *amounts.iter().max().unwrap();
-        amounts.sort_unstable();
-        let med_amount = median(&amounts);
-
-        let ms = monthly_spend(&items, now);
-        let (mut monthly_estimate, trend_pct) = rate_and_trend(&ms.completed);
-        // Fallback when there isn't a completed month yet: median × frequency.
-        if monthly_estimate == 0 {
-            let per_month = (MONTH_DAYS / med_gap.max(0.5)).min(31.0);
-            monthly_estimate = (med_amount as f64 * per_month).round() as i64;
-        }
-
-        out.push(RhythmEntry {
-            merchant,
-            cadence,
-            occurrence_count: items.len(),
-            median_amount_cents: med_amount,
-            amount_min_cents: amount_min,
-            amount_max_cents: amount_max,
-            monthly_estimate_cents: monthly_estimate,
-            last_seen: *dates.last().unwrap(),
-            trend_pct,
-            trend: trend_dir(trend_pct),
-            spark_cents: ms.spark,
-        });
+        out.push(build_rhythm(merchant, &items, cadence, med_gap, now));
     }
 
     out.sort_by(|a, b| b.monthly_estimate_cents.cmp(&a.monthly_estimate_cents));
     out
+}
+
+/// Assemble a `RhythmEntry` from a merchant's occurrences (assumed sorted by
+/// behavioral date), given an already-decided cadence and median gap. Shared by
+/// the auto-detector and the force-promote path so their numbers can't diverge.
+fn build_rhythm(
+    merchant: String,
+    items: &[&Transaction],
+    cadence: StreamCadence,
+    med_gap: f64,
+    now: i64,
+) -> RhythmEntry {
+    let mut amounts: Vec<i64> = items.iter().map(|t| t.amount.cents().abs()).collect();
+    let amount_min = *amounts.iter().min().unwrap();
+    let amount_max = *amounts.iter().max().unwrap();
+    amounts.sort_unstable();
+    let med_amount = median(&amounts);
+
+    let ms = monthly_spend(items, now);
+    let (mut monthly_estimate, trend_pct) = rate_and_trend(&ms.completed);
+    // Fallback when there isn't a completed month yet: median × frequency.
+    if monthly_estimate == 0 {
+        let per_month = (MONTH_DAYS / med_gap.max(0.5)).min(31.0);
+        monthly_estimate = (med_amount as f64 * per_month).round() as i64;
+    }
+
+    RhythmEntry {
+        merchant,
+        cadence,
+        occurrence_count: items.len(),
+        median_amount_cents: med_amount,
+        amount_min_cents: amount_min,
+        amount_max_cents: amount_max,
+        monthly_estimate_cents: monthly_estimate,
+        last_seen: items.last().map(|t| t.effective_date()).unwrap_or(0),
+        trend_pct,
+        trend: trend_dir(trend_pct),
+        spark_cents: ms.spark,
+    }
+}
+
+/// Build a `RhythmEntry` for a merchant's occurrences WITHOUT the
+/// min-occurrences / regularity gates `detect_rhythms` enforces — the user has
+/// asserted this is a stream (force-promote from Noise). Cadence is the detected
+/// one when the spacing happens to be regular, else `Irregular`. Returns `None`
+/// only when `items` is empty. `items` need not be pre-sorted.
+pub fn rhythm_for_items(merchant: String, items: &[&Transaction], now: i64) -> Option<RhythmEntry> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut items: Vec<&Transaction> = items.to_vec();
+    items.sort_by_key(|t| t.effective_date());
+    let dates: Vec<i64> = items.iter().map(|t| t.effective_date()).collect();
+    let (cadence, med_gap) = match classify_stream_cadence(&dates) {
+        Some(c) => c,
+        // Erratic (or too few) spacing: label Irregular and derive the median
+        // gap directly for the monthly-rate fallback. A lone occurrence has no
+        // gap, so assume ~monthly rather than divide by zero.
+        None => (StreamCadence::Irregular, median_gap_days(&dates).unwrap_or(MONTH_DAYS)),
+    };
+    Some(build_rhythm(merchant, &items, cadence, med_gap, now))
+}
+
+/// Median gap (in days) between consecutive dates; `None` for fewer than two.
+fn median_gap_days(sorted_dates: &[i64]) -> Option<f64> {
+    if sorted_dates.len() < 2 {
+        return None;
+    }
+    let mut gaps: Vec<f64> = sorted_dates
+        .windows(2)
+        .map(|w| (w[1] - w[0]) as f64 / DAY as f64)
+        .collect();
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    Some(f64_median(&gaps))
 }
 
 #[cfg(test)]
@@ -544,5 +595,51 @@ mod tests {
             t.flag = TxnFlag::CardPayment;
         }
         assert!(detect_rhythms(&txns, LATER).is_empty());
+    }
+
+    #[test]
+    fn rhythm_for_items_uses_detected_cadence_when_regular() {
+        // Uber-shaped: alternating 17/13-day gaps → regular FewPerMonth, NOT Irregular.
+        let txns = vec![
+            charge("1", 0, -633, "Uber"),
+            charge("2", 17, -540, "Uber"),
+            charge("3", 30, -633, "Uber"),
+            charge("4", 47, -540, "Uber"),
+            charge("5", 60, -633, "Uber"),
+            charge("6", 77, -540, "Uber"),
+        ];
+        let items: Vec<&Transaction> = txns.iter().collect();
+        let e = rhythm_for_items("uber".into(), &items, LATER).unwrap();
+        assert_eq!(e.cadence, StreamCadence::FewPerMonth);
+        assert_eq!(e.occurrence_count, 6);
+    }
+
+    #[test]
+    fn rhythm_for_items_is_irregular_when_scattered() {
+        // The exact scatter detect_rhythms rejects — force-promote labels it Irregular.
+        let txns = vec![
+            charge("1", 0, -1200, "Corner Store"),
+            charge("2", 3, -4500, "Corner Store"),
+            charge("3", 47, -800, "Corner Store"),
+        ];
+        assert!(detect_rhythms(&txns, LATER).is_empty());
+        let items: Vec<&Transaction> = txns.iter().collect();
+        let e = rhythm_for_items("corner store".into(), &items, LATER).unwrap();
+        assert_eq!(e.cadence, StreamCadence::Irregular);
+        assert_eq!(e.occurrence_count, 3);
+    }
+
+    #[test]
+    fn rhythm_for_items_single_occurrence_is_irregular() {
+        let txns = vec![charge("1", 0, -900, "One Off")];
+        let items: Vec<&Transaction> = txns.iter().collect();
+        let e = rhythm_for_items("one off".into(), &items, LATER).unwrap();
+        assert_eq!(e.cadence, StreamCadence::Irregular);
+        assert_eq!(e.occurrence_count, 1);
+    }
+
+    #[test]
+    fn rhythm_for_items_empty_is_none() {
+        assert!(rhythm_for_items("nobody".into(), &[], LATER).is_none());
     }
 }

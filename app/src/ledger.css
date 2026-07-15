@@ -476,6 +476,13 @@ body:has(.lg-app) {
 .lg-line:last-child {
   border: 0;
 }
+.lg-line.click {
+  cursor: pointer;
+}
+.lg-line.click:hover .nm {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .lg-line .d {
   color: var(--lg-faint);
   width: 74px;

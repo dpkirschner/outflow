@@ -1,6 +1,7 @@
-// Typed wrappers around the Tauri command layer. Tauri v2 converts snake_case
-// Rust argument names to camelCase on the JS side (so `txn_id` -> `txnId`).
-import { invoke } from "@tauri-apps/api/core";
+// Typed HTTP client for the outflow server. Same wire shapes as before (serde
+// snake_case fields, enum variant names, cents as bare numbers) — only the
+// transport changed from Tauri IPC to fetch. Bodies use the Rust field names
+// directly (snake_case): there is no camelCase translation layer anymore.
 import type {
   Account,
   CategorizeResult,
@@ -12,43 +13,94 @@ import type {
   MonthlyFlow,
   PullResult,
   Subscription,
+  SyncEntry,
+  SyncReport,
   Transaction,
   TxnFlag,
   Window,
 } from "./types";
 
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      throw new Error(parsed.error ?? `${res.status} ${res.statusText}`);
+    } catch (e) {
+      if (e instanceof Error && e.message !== text) throw e;
+      throw new Error(`${res.status} ${res.statusText}`);
+    }
+  }
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+const get = <T>(path: string) => req<T>("GET", path);
+const post = <T>(path: string, body?: unknown) => req<T>("POST", path, body);
+
+// Filter → query params. Server defaults mirror the old to_filter guard:
+// missing params mean "everything" (pending included, transfers excluded).
+function filterQuery(filter?: Filter, extra?: Record<string, string>): string {
+  const q = new URLSearchParams(extra);
+  if (filter?.since !== undefined) q.set("since", String(filter.since));
+  if (filter?.until !== undefined) q.set("until", String(filter.until));
+  if (filter?.includePending !== undefined) q.set("pending", String(filter.includePending));
+  if (filter?.includeNonSpending !== undefined)
+    q.set("transfers", String(filter.includeNonSpending));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
 export const api = {
-  accounts: () => invoke<Account[]>("accounts"),
-  transactions: (filter?: Filter) => invoke<Transaction[]>("transactions", { filter }),
-  categorize: () => invoke<CategorizeResult>("categorize"),
+  accounts: () => get<Account[]>("/accounts"),
+  transactions: (filter?: Filter) => get<Transaction[]>(`/transactions${filterQuery(filter)}`),
+  categorize: () => post<CategorizeResult>("/categorize"),
   spendCategories: (filter?: Filter) =>
-    invoke<CategorySpend[]>("spend_categories", { filter }),
+    get<CategorySpend[]>(`/spend/categories${filterQuery(filter)}`),
   merchants: (filter?: Filter, limit?: number) =>
-    invoke<MerchantSpend[]>("merchants", { filter, limit }),
-  flow: (filter?: Filter) => invoke<MonthlyFlow[]>("flow", { filter }),
-  subscriptions: () => invoke<Subscription[]>("subscriptions"),
+    get<MerchantSpend[]>(
+      `/merchants${filterQuery(filter, limit !== undefined ? { limit: String(limit) } : undefined)}`,
+    ),
+  flow: (filter?: Filter) => get<MonthlyFlow[]>(`/flow${filterQuery(filter)}`),
+  subscriptions: () => get<Subscription[]>("/subscriptions"),
   // Rhythm ledger — the primary screen query.
-  ledger: (window: Window) => invoke<LedgerView>("ledger", { window }),
+  ledger: (window: Window) => get<LedgerView>(`/ledger?window=${window}`),
   streamOccurrences: (merchant: string, window: Window) =>
-    invoke<Transaction[]>("stream_occurrences", { merchant, window }),
-  markStream: (merchant: string, mark: Mark) =>
-    invoke<void>("mark_stream", { merchant, mark }),
-  clearStreamMark: (merchant: string) =>
-    invoke<void>("clear_stream_mark", { merchant }),
-  categories: () => invoke<string[]>("categories"),
+    get<Transaction[]>(
+      `/stream_occurrences?merchant=${encodeURIComponent(merchant)}&window=${window}`,
+    ),
+  markStream: (merchant: string, mark: Mark) => post<void>("/mark_stream", { merchant, mark }),
+  clearStreamMark: (merchant: string) => post<void>("/clear_stream_mark", { merchant }),
+  categories: () => get<string[]>("/categories"),
   setCategory: (txnId: string, category: string, learn: boolean) =>
-    invoke<number | null>("set_category", { txnId, category, learn }),
+    post<number | null>(`/txn/${encodeURIComponent(txnId)}/category`, { category, learn }),
   // flag is the serde variant name, e.g. "Transfer" | "CardPayment" | "Spending".
   setFlag: (txnId: string, flag: TxnFlag, learn: boolean) =>
-    invoke<number | null>("set_flag", { txnId, flag, learn }),
-  applyFlags: () => invoke<number>("apply_flags"),
-  hasCreditAccount: () => invoke<boolean>("has_credit_account"),
-  pullFromFile: (path: string) => invoke<PullResult>("pull_from_file", { path }),
+    post<number | null>(`/txn/${encodeURIComponent(txnId)}/flag`, { flag, learn }),
+  applyFlags: () => post<number>("/apply_flags"),
+  hasCreditAccount: () => get<boolean>("/has_credit_account"),
+  pullFromFile: (path: string) => post<PullResult>("/pull_from_file", { path }),
 
-  resetData: () => invoke<void>("reset_data"),
+  resetData: () => post<void>("/reset_data"),
 
-  // networked (require the `net` feature build)
-  pullLive: () => invoke<PullResult>("pull_live"),
-  claim: (setupToken: string) => invoke<string>("claim", { setupToken }),
-  categorizeLlm: () => invoke<number>("categorize_llm"),
+  // Sync every configured source (SimpleFIN + all linked Plaid items).
+  pull: () => post<SyncReport>("/pull"),
+  // Back-compat shape for callers that expect the old PullResult summary.
+  pullLive: async (): Promise<PullResult> => {
+    const r = await post<SyncReport>("/pull");
+    return {
+      added: r.legs.reduce((n, l) => n + l.added, 0),
+      updated: r.legs.reduce((n, l) => n + l.updated, 0),
+      accounts: r.legs.filter((l) => !l.error).length,
+      warnings: r.legs.flatMap((l) => (l.error ? [`${l.source}: ${l.error}`] : [])),
+    };
+  },
+  claim: (setupToken: string) => post<string>("/claim", { setup_token: setupToken }),
+  categorizeLlm: () => post<number>("/categorize_llm"),
+  syncLog: (limit?: number) =>
+    get<SyncEntry[]>(`/sync_log${limit !== undefined ? `?limit=${limit}` : ""}`),
 };

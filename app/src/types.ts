@@ -3,7 +3,7 @@
 // cents (i64); outflows are negative.
 
 export type AccountKind = "Checking" | "Savings" | "Credit" | "Other";
-export type CategorySource = "SimpleFin" | "Rule" | "Llm" | "Manual";
+export type CategorySource = "SimpleFin" | "Plaid" | "Rule" | "Llm" | "Manual";
 export type Cadence = "Monthly" | "Yearly";
 // Suppression flag: how spend analytics treat a transaction. Non-Spending rows
 // (money moved between the user's own accounts) are hidden from the charts.
@@ -29,6 +29,7 @@ export interface Account {
   balance: number; // cents
   currency: string;
   last_synced: number; // epoch seconds
+  source: string; // "simplefin" | "plaid"
 }
 
 export interface Transaction {
@@ -44,6 +45,7 @@ export interface Transaction {
   pending: boolean;
   flag: TxnFlag;
   raw: string;
+  source: string; // "simplefin" | "plaid"
 }
 
 export interface CategorySpend {
@@ -160,4 +162,28 @@ export interface Filter {
   until?: number; // epoch seconds, exclusive
   includePending?: boolean;
   includeNonSpending?: boolean; // charts hide transfers/card payments by default
+}
+
+// One source's outcome within a sync run.
+export interface LegReport {
+  source: string; // "simplefin" | "plaid:<institution>"
+  added: number;
+  updated: number;
+  error: string | null;
+}
+
+export interface SyncReport {
+  legs: LegReport[];
+  flags_applied: number;
+  categorized: number;
+}
+
+export interface SyncEntry {
+  id: number;
+  started: number;
+  finished: number | null;
+  source: string;
+  added: number | null;
+  updated: number | null;
+  note: string | null;
 }

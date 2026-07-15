@@ -10,7 +10,7 @@ at the repo root.
 
 A single-user spending analyzer for one person's own bank data. A server
 (target: an always-on mac-mini on a tailnet) pulls transactions from **Plaid**
-(checking/savings/credit cards) and **SimpleFIN** into local SQLite,
+(checking/savings/credit cards) into local SQLite,
 categorizes them, auto-detects checking→card payments so nothing double-counts,
 and answers "where did my money go?", "how much at merchant X?", and "what
 subscriptions am I paying for?". Analysis only — no budgets or targets. Ships
@@ -31,9 +31,9 @@ mode), all over one shared domain core.
 ## One-paragraph architecture
 
 Ports-and-adapters over a pure domain `core`, in one Cargo workspace. `core`
-has zero GUI/network deps by default. Transaction sources follow one shape —
-transport in `net`, pure JSON→domain parsing in `core` (`parse_account_set` for
-SimpleFIN, `plaid::parse_sync_page`/`parse_accounts_get` for Plaid) — and the
+has zero GUI/network deps by default. The transaction source follows one shape —
+transport in `net`, pure JSON→domain parsing in `core`
+(`plaid::parse_sync_page`/`parse_accounts_get`) — and the
 categorizer is a trait (rules today, LLM tail). Two front-ends, the axum
 `server` (which also serves the React SPA) and the `cli`, depend on `core`
 directly and share `net`, so they run identical logic. See ARCHITECTURE.md.

@@ -138,6 +138,14 @@ async fn main() {
     let api = routes::api_router()
         .merge(plaid_routes::router())
         .merge(match_routes::router())
+        // Unknown /api paths must 404 as JSON — never fall through to the SPA
+        // shell (a 200 HTML page masquerading as an API response).
+        .fallback(|| async {
+            (
+                StatusCode::NOT_FOUND,
+                axum::Json(serde_json::json!({ "error": "no such API route" })),
+            )
+        })
         .layer(middleware::from_fn_with_state(state.clone(), require_bearer));
 
     // SPA fallback to index.html (status 200) is load-bearing: /oauth-return

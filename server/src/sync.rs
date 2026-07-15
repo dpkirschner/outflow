@@ -10,7 +10,7 @@
 
 use axum::http::StatusCode;
 use outflow_core::store::PlaidBatch;
-use outflow_core::{parse_account_set, parse_accounts_get, parse_sync_page, PlaidItem, Store};
+use outflow_core::{parse_accounts_get, parse_sync_page, PlaidItem, Store};
 use outflow_net::{plaid, plaid_tokens, PlaidConfig};
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -52,11 +52,6 @@ pub async fn sync_all(state: &AppState) -> Result<SyncReport, ApiError> {
 
 fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
     let mut legs = Vec::new();
-
-    // SimpleFIN leg — only when an access URL is configured.
-    if let Ok(url) = outflow_net::access_url() {
-        legs.push(sync_simplefin(store, &url));
-    }
 
     // Plaid legs — one per linked item.
     let items = lock(store, |s| s.plaid_items().map_err(|e| e.to_string()))
@@ -162,43 +157,6 @@ fn lock<T>(
 ) -> Result<T, String> {
     let guard = store.lock().map_err(|e| format!("store lock poisoned: {e}"))?;
     f(&guard)
-}
-
-fn sync_simplefin(store: &Arc<Mutex<Store>>, url: &str) -> LegReport {
-    let mut report = LegReport {
-        source: "simplefin".into(),
-        added: 0,
-        updated: 0,
-        error: None,
-    };
-    let log_id = lock(store, |s| {
-        s.log_sync_start("simplefin", now_secs()).map_err(|e| e.to_string())
-    })
-    .ok();
-
-    let outcome = outflow_net::fetch(url)
-        .and_then(|json| parse_account_set(&json).map_err(|e| format!("parse: {e:?}")))
-        .and_then(|fetched| {
-            lock(store, |s| {
-                s.upsert_accounts(&fetched.accounts).map_err(|e| e.to_string())?;
-                s.upsert_transactions(&fetched.transactions).map_err(|e| e.to_string())
-            })
-        });
-
-    match outcome {
-        Ok(r) => {
-            report.added = r.added;
-            report.updated = r.updated;
-        }
-        Err(e) => report.error = Some(e),
-    }
-    if let Some(id) = log_id {
-        let _ = lock(store, |s| {
-            s.log_sync_finish(id, now_secs(), report.added, report.updated, report.error.as_deref())
-                .map_err(|e| e.to_string())
-        });
-    }
-    report
 }
 
 fn sync_plaid_item(

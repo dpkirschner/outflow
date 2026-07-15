@@ -9,13 +9,12 @@ data integrity or the domain contract — treat them as load-bearing.
    never f64 arithmetic. (`core/src/money.rs`, `core/src/plaid.rs`)
 
 2. **Dedup key is the provider transaction id**, stored raw; provenance lives
-   in the `source` column ("simplefin" | "plaid"), never in id prefixes.
-   SimpleFIN: posted rows upsert by id, **pending rows are delete-and-replace
-   per synced account** each pull. Plaid: **no pending sweep** —
-   `store::apply_plaid_batch` applies upserts, explicit deletions (Plaid
-   `removed` + superseded `pending_transaction_id`s), and the cursor advance in
-   **one SQLite transaction**. (`store::upsert_transactions`,
-   `store::apply_plaid_batch`)
+   in the `source` column ("plaid"; "simplefin" on rows from the retired era),
+   never in id prefixes. Live syncs go through `store::apply_plaid_batch`,
+   which applies upserts, explicit deletions (Plaid `removed` + superseded
+   `pending_transaction_id`s), and the cursor advance in **one SQLite
+   transaction**. `upsert_transactions` is the plain id-keyed path for offline
+   fixture ingest.
 
 3. **`core` has zero GUI/network deps by default.** Network, keychain, and
    encryption are cargo features. The full pipeline must stay runnable via
@@ -30,16 +29,16 @@ data integrity or the domain contract — treat them as load-bearing.
    types with explicit validation; malformed data returns `SourceError`, never
    leaks defaults. Plaid sign conventions flip at this boundary: amounts negate
    (Plaid positive = money out), credit balances negate (positive-owed →
-   negative). (`source::parse_account_set`, `plaid::parse_sync_page`,
-   `plaid::parse_accounts_get`)
+   negative). (`plaid::parse_sync_page`, `plaid::parse_accounts_get`,
+   `plaid::parse_fixture`)
 
 6. **The ports stay swappable.** Sources follow the fetch-in-net / parse-in-core
    shape; `Categorizer`/`Prompter` are traits. Keep transport/IO out of the
    domain.
 
-7. **Secrets never touch the DB or argv.** SimpleFIN access URL, Plaid client
-   secret, Plaid access tokens, and the SQLCipher DB key come from env, a 0600
-   file, or the keychain only. Plaid access tokens live in the 0600 tokens file
+7. **Secrets never touch the DB or argv.** The Plaid client secret, Plaid
+   access tokens, and the SQLCipher DB key come from env, a 0600 file, or the
+   keychain only. Plaid access tokens live in the 0600 tokens file
    keyed by item_id (`net::plaid_tokens`); the DB's `plaid_items` table holds
    only non-secret metadata (institution, cursor, status).
 

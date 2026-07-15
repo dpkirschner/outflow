@@ -1,100 +1,106 @@
 # Development
 
-## Agent constraint (read first)
-
-The agent's sandbox shell **cannot run `cargo` or `node`** — they aren't on the
-non-interactive PATH. Ask the user to run build/test/run commands themselves
-(via the `!` prefix or their terminal) and report output. `cargo` is via rustup
-(`~/.cargo/bin`); Node + npm are present. Give commands as **one single-line
-command per code block** — the user copy-pastes and wrapped/multi-line blocks
-break (this preference is also in the user's memory).
-
 ## Layout
 
 ```
-core/  net/  cli/         Rust crates
-app/                      npm project (NOT a cargo member)
-  src/                    React + Vite + TS frontend
-  src-tauri/              Rust Tauri backend (a cargo member)
-examples/sample-accounts.json   SimpleFIN fixture (12 txns) for --from-file
+core/  net/  cli/  server/     Rust crates (the whole cargo workspace)
+app/                           npm project (NOT a cargo member)
+  src/                         React + Vite + TS frontend
+  dist/                        built SPA (served by outflow-server)
+examples/sample-accounts.json  SimpleFIN fixture for --from-file
+examples/plaid-accounts-get.json / plaid-sync-page.json   Plaid parser fixtures
 ```
 
-## Test
+Give shell commands as **one single-line command per code block** — the user
+copy-pastes, and wrapped/multi-line blocks break.
+
+## Test / build
 
 ```
 cargo test -p outflow-core -p outflow-net
 ```
 
-Do NOT run bare `cargo test` at the root — it tries to compile `app/src-tauri`,
-whose `generate_context!` needs a built frontend (`../dist`), which fails without
-a prior `vite build`. Test the pure crates by `-p`.
+```
+cargo build
+```
+
+Bare `cargo build`/`cargo test` at the root work now (the Tauri crate and its
+pre-built-frontend requirement are gone). The `-p` form stays the fast path.
 
 ## CLI
 
-Build with the features you need (`net` = live SimpleFIN + LLM, `keychain`,
-`encryption`):
-
-```
-cargo build -p outflow-cli --features "net,keychain,encryption"
-```
-
-Run subcommands (`--db` / `OUTFLOW_DB` selects the database):
+Features: `net` (live SimpleFIN + LLM), `client` (HTTP mode against a running
+server), `keychain`, `encryption`. Zero-feature builds still run the full
+pipeline from a file:
 
 ```
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/sample-accounts.json
 ```
 
 ```
-cargo run -p outflow-cli --features "net,keychain" -- --db "$HOME/outflow.db" claim <setup-token>
+cargo build -p outflow-cli --features "net,client,keychain,encryption"
 ```
 
 Subcommands: `claim <token>`, `pull [--from-file P]`, `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`,
-`subs`, `fix <id> <category> [--no-learn]`.
+`subs`, `fix <id> <category> [--no-learn]`, `txns [--search --category
+--account --source --flag --sort --asc --limit --offset --since --until
+--posted-only --show-excluded]`, `accounts`, `matches list|accept <id>|reject
+<id>`, `status [--limit]`.
 
-## GUI — dev
+Global: `--db`/`OUTFLOW_DB`, `--json` (machine-readable; same serde shapes as
+the HTTP API), `--server URL`/`OUTFLOW_SERVER` (needs `--features client`;
+every command becomes one API call and prints the server's JSON verbatim;
+bearer auth via `OUTFLOW_API_TOKEN`).
 
-Runs plaintext (no `encryption`), net+keychain on by default. Point `OUTFLOW_DB`
-at a populated DB to see data:
-
-```
-cd app && npm install
-```
-
-```
-cd app && OUTFLOW_DB="$HOME/outflow.db" npm run tauri dev
-```
-
-The backend prints `outflow: opened db <path> (<N> transactions)` on startup — a
-one-glance check of which DB was opened. An empty/fresh file is the usual reason
-"no data shows".
-
-## GUI — production `.app`
-
-One command produces the encrypted, ad-hoc-signed bundle:
+Agent usage over the tailnet:
 
 ```
-cd app && npm run bundle
+OUTFLOW_SERVER=https://mini.tailnet.ts.net outflow txns --search starbucks --since 2026-06-01 --json
 ```
 
-(= `tauri build --features encryption`.) Output:
-`app/src-tauri/target/release/bundle/macos/outflow.app` (+ `.dmg`). Install:
+## Server + web client
+
+First-time frontend setup, then build the SPA:
 
 ```
-cp -R app/src-tauri/target/release/bundle/macos/outflow.app /Applications/
+cd app && npm install && npm run build
 ```
 
-The production app resolves its DB path and encryption key itself (app-data dir +
-keychain) — no env needed. See ARCHITECTURE.md "Config resolution" and GOTCHAS.md.
+Run the server (serves `app/dist` + `/api`):
+
+```
+OUTFLOW_DB="$HOME/outflow-dev.db" cargo run -p outflow-server
+```
+
+Frontend hot-reload during UI work (vite on :1420 proxies `/api` → :8080; run
+the server alongside):
+
+```
+cd app && npm run dev
+```
+
+The server logs `opened database` with the path and row count on startup — a
+one-glance check of which DB it opened. An empty/fresh file is the usual
+reason "no data shows".
+
+Plaid against sandbox: set `OUTFLOW_PLAID_CLIENT_ID`, `OUTFLOW_PLAID_SECRET`,
+`OUTFLOW_PLAID_ENV=sandbox`, open the Connections tab, link institution
+`user_good`/`pass_good`. Production setup lives in DEPLOYMENT.md.
+
+Makefile shortcuts: `make test` / `make web` / `make server` / `make run` /
+`make dev` / `make deps`.
 
 ## Definition of done (project)
 
-`cargo test` green; release build with `net,keychain,encryption` succeeds on
-macOS; live `pull` populates the DB from the real SimpleFIN endpoint; the GUI
-shows the dashboards and recategorization persists and learns rules; CLI is
-cron-runnable headless.
+`cargo test` green; `cargo build` (workspace) clean; sandbox Plaid link →
+transactions land with `source='plaid'`, correct signs and kinds, second sync
+incremental; card-payment pairs auto-match and monthly outflows exclude them;
+web UI works from another tailnet device; CLI (both modes) emits identical
+JSON.
 
 ## Toolchain note
 
-`cli/Cargo.toml` pins `clap = "=4.4.18"` only because it was first built on Rust
-1.75. On current stable, loosen to `clap = "4"`. Nothing else depends on the pin.
+`cli/Cargo.toml` pins `clap = "=4.4.18"` only because it was first built on
+Rust 1.75. On current stable, loosen to `clap = "4"`. Nothing else depends on
+the pin.

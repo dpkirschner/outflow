@@ -49,6 +49,8 @@ export function cadenceLabel(c: StreamCadence): string {
       return "monthly";
     case "Yearly":
       return "yearly";
+    case "Irregular":
+      return "irregular";
   }
 }
 

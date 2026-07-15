@@ -14,6 +14,7 @@ import type {
   MonthlyFlow,
   PlaidItem,
   PullResult,
+  Stream,
   Subscription,
   SyncEntry,
   SyncReport,
@@ -99,6 +100,11 @@ export const api = {
   streamOccurrences: (merchant: string, window: Window) =>
     get<Transaction[]>(
       `/stream_occurrences?merchant=${encodeURIComponent(merchant)}&window=${window}`,
+    ),
+  // The stream a noise merchant would become if promoted (preview, no mutation).
+  streamPreview: (merchant: string, window: Window) =>
+    get<Stream | null>(
+      `/stream_preview?merchant=${encodeURIComponent(merchant)}&window=${window}`,
     ),
   markStream: (merchant: string, mark: Mark) => post<void>("/mark_stream", { merchant, mark }),
   clearStreamMark: (merchant: string) => post<void>("/clear_stream_mark", { merchant }),

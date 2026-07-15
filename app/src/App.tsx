@@ -26,6 +26,13 @@ export default function App() {
   const [win, setWin] = useState<Window>("6mo");
   const [sort, setSort] = useState<SortMode>("size");
   const [open, setOpen] = useState<Stream | null>(null);
+  // A Noise merchant being previewed for promotion: the clicked normalized key,
+  // and the synthesized stream fetched for it.
+  const [noiseKey, setNoiseKey] = useState<string | null>(null);
+  const [preview, setPreview] = useState<Stream | null>(null);
+  // The Noise fold's open state lives here (not in the fold) so it survives
+  // opening the promote popover and can be collapsed on promotion.
+  const [noiseOpen, setNoiseOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
@@ -59,13 +66,67 @@ export default function App() {
               null
             : null,
         );
+        return v;
       } catch (err) {
         notify({ kind: "err", text: `Load failed: ${String(err)}` });
+        return undefined;
       } finally {
         setLoading(false);
       }
     },
     [notify],
+  );
+
+  // Fetch the promote-preview stream whenever a noise merchant is opened (or the
+  // window changes while it's open). Clearing noiseKey closes the popover.
+  useEffect(() => {
+    if (!noiseKey) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    api
+      .streamPreview(noiseKey, win)
+      .then((s) => {
+        if (!live) return;
+        if (s) setPreview(s);
+        else {
+          notify({ kind: "err", text: "No occurrences to preview." });
+          setNoiseKey(null);
+        }
+      })
+      .catch((err) => {
+        if (live) {
+          notify({ kind: "err", text: String(err) });
+          setNoiseKey(null);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [noiseKey, win, notify]);
+
+  // Promote a noise merchant to a stream: mark Kept, reload, then close the
+  // candidate popover, collapse the Noise fold, and open the promoted stream's
+  // own sidebar so the user lands on what they just created.
+  const promoteNoise = useCallback(
+    async (merchantKey: string) => {
+      try {
+        await api.markStream(merchantKey, "Kept");
+        const v = await reload(win);
+        const promoted =
+          v?.streams.find((s) => s.merchant === merchantKey) ??
+          v?.committed.find((s) => s.merchant === merchantKey) ??
+          null;
+        setNoiseKey(null);
+        setNoiseOpen(false);
+        setOpen(promoted);
+        notify({ kind: "ok", text: `Promoted “${merchantKey}” to a stream` });
+      } catch (err) {
+        notify({ kind: "err", text: String(err) });
+      }
+    },
+    [reload, win, notify],
   );
 
   const launched = useRef(false);
@@ -192,12 +253,16 @@ export default function App() {
           {toast && <Toast msg={toast} />}
         </>
       ) : (
-        <LedgerTab />
+        // Called as a function, NOT <LedgerTab/>: a nested component rendered as
+        // an element gets a fresh identity each render and remounts its whole
+        // subtree (resetting fold/expand state). Inlining keeps that state.
+        LedgerTab()
       )}
     </div>
   );
 
-  // Original single-screen ledger, unchanged, as a closure over the state above.
+  // Original single-screen ledger, as a closure over the state above. Contains
+  // no hooks, so calling it inline is safe (see the call site above).
   function LedgerTab() {
     return (
       <>
@@ -231,7 +296,13 @@ export default function App() {
               activeMerchant={open?.merchant ?? null}
               onOpen={setOpen}
             >
-              <LedgerZones view={view} onOpen={setOpen} />
+              <LedgerZones
+                view={view}
+                onOpen={setOpen}
+                onOpenNoise={setNoiseKey}
+                noiseOpen={noiseOpen}
+                onNoiseToggle={() => setNoiseOpen((o) => !o)}
+              />
             </StreamsCard>
           </>
         )
@@ -245,6 +316,21 @@ export default function App() {
         vocab={vocab}
         hasCard={hasCard}
         onClose={() => setOpen(null)}
+        onEdited={() => reload(win)}
+        notify={notify}
+      />
+
+      {/* Promote-from-Noise popover — same slide-over in candidate mode. */}
+      <StreamSlideOver
+        stream={preview}
+        committed={false}
+        candidate
+        onPromote={promoteNoise}
+        win={win}
+        accounts={accounts}
+        vocab={vocab}
+        hasCard={hasCard}
+        onClose={() => setNoiseKey(null)}
         onEdited={() => reload(win)}
         notify={notify}
       />

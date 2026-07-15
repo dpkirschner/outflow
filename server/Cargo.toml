@@ -1,0 +1,24 @@
+[package]
+name = "outflow-server"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP server for outflow: JSON API + web client, for a headless always-on box"
+
+[[bin]]
+name = "outflow-server"
+path = "src/main.rs"
+
+[dependencies]
+outflow-core = { path = "../core" }
+outflow-net = { path = "../net" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tower-http = { version = "0.6", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = []
+encryption = ["outflow-core/encryption"]

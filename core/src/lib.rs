@@ -19,8 +19,8 @@ pub use model::{
 pub use money::{Money, MoneyParseError};
 pub use plaid::{parse_accounts_get, parse_sync_page, SyncPage};
 pub use query::{
-    monthly_flow, spend_by_category, top_merchants, CategorySpend, MerchantSpend, MonthlyFlow,
-    TxnFilter,
+    monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,
+    MerchantSpend, MonthlyFlow, SortKey, TxnFilter, TxnPage, TxnQuery,
 };
 pub use ledger::{
     ledger, Coverage, LedgerStats, LedgerView, LineItem, Source, SourceKind, Stream, TransferGroup,

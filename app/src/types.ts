@@ -217,3 +217,30 @@ export interface MatchView extends TxnMatch {
   bank: Transaction | null;
   card: Transaction | null;
 }
+
+export type SortKey = "date" | "amount" | "merchant" | "category";
+
+// Search/sort/filter over the transaction list (GET /api/transactions).
+export interface TxnSearch {
+  since?: number;
+  until?: number;
+  includePending?: boolean;
+  includeNonSpending?: boolean;
+  q?: string;
+  account?: string;
+  category?: string;
+  source?: string;
+  flag?: TxnFlag;
+  minCents?: number;
+  maxCents?: number;
+  sort?: SortKey;
+  dir?: "asc" | "desc";
+  offset?: number;
+  limit?: number;
+}
+
+export interface TxnPage {
+  total: number;
+  total_cents: number; // signed sum over ALL matches, not just this page
+  items: Transaction[];
+}

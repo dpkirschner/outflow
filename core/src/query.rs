@@ -58,6 +58,126 @@ fn passes(t: &Transaction, f: &TxnFilter) -> bool {
     true
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortKey {
+    Date,
+    Amount,
+    Merchant,
+    Category,
+}
+
+impl SortKey {
+    pub fn from_str(s: &str) -> Option<SortKey> {
+        match s {
+            "date" => Some(SortKey::Date),
+            "amount" => Some(SortKey::Amount),
+            "merchant" => Some(SortKey::Merchant),
+            "category" => Some(SortKey::Category),
+            _ => None,
+        }
+    }
+}
+
+/// Search/sort/filter over the transaction list. Lives in core so the CLI and
+/// the web client run the identical query semantics. All in-memory over
+/// `all_transactions()` — the standing pattern, fine at personal scale.
+pub struct TxnQuery {
+    pub filter: TxnFilter,
+    /// Case-insensitive substring over payee, description, category, and the
+    /// normalized merchant.
+    pub text: Option<String>,
+    pub account_id: Option<String>,
+    pub category: Option<String>,
+    pub source: Option<String>,
+    /// Keep only this flag. Filtering on Transfer/CardPayment requires
+    /// `filter.include_non_spending = true` or the rows are dropped first.
+    pub flag: Option<TxnFlag>,
+    pub min_cents: Option<i64>,
+    pub max_cents: Option<i64>,
+    pub sort: SortKey,
+    pub descending: bool,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+impl Default for TxnQuery {
+    fn default() -> Self {
+        TxnQuery {
+            filter: TxnFilter::all(),
+            text: None,
+            account_id: None,
+            category: None,
+            source: None,
+            flag: None,
+            min_cents: None,
+            max_cents: None,
+            sort: SortKey::Date,
+            descending: true,
+            offset: 0,
+            limit: 100,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TxnPage {
+    /// Matching rows before pagination.
+    pub total: usize,
+    /// Signed sum over ALL matching rows (not just this page).
+    pub total_cents: i64,
+    pub items: Vec<Transaction>,
+}
+
+pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnPage> {
+    let needle = q.text.as_deref().map(|s| s.to_lowercase());
+    let mut matched: Vec<Transaction> = store
+        .all_transactions()?
+        .into_iter()
+        .filter(|t| passes(t, &q.filter))
+        .filter(|t| q.account_id.as_deref().map_or(true, |a| t.account_id == a))
+        .filter(|t| q.category.as_deref().map_or(true, |c| t.category.as_deref() == Some(c)))
+        .filter(|t| q.source.as_deref().map_or(true, |s| t.source == s))
+        .filter(|t| q.flag.map_or(true, |f| t.flag == f))
+        .filter(|t| q.min_cents.map_or(true, |m| t.amount.cents().abs() >= m))
+        .filter(|t| q.max_cents.map_or(true, |m| t.amount.cents().abs() <= m))
+        .filter(|t| {
+            let Some(n) = &needle else { return true };
+            t.payee.as_deref().unwrap_or("").to_lowercase().contains(n)
+                || t.description.to_lowercase().contains(n)
+                || t.category.as_deref().unwrap_or("").to_lowercase().contains(n)
+                || normalize_payee(t.merchant()).contains(n)
+        })
+        .collect();
+
+    // Stable ordering: primary key, then date (newest first), then id — so
+    // pagination never shuffles under equal keys.
+    matched.sort_by(|a, b| {
+        let primary = match q.sort {
+            SortKey::Date => a.effective_date().cmp(&b.effective_date()),
+            SortKey::Amount => a.amount.cents().cmp(&b.amount.cents()),
+            SortKey::Merchant => normalize_payee(a.merchant()).cmp(&normalize_payee(b.merchant())),
+            SortKey::Category => a.category.cmp(&b.category),
+        };
+        let primary = if q.descending { primary.reverse() } else { primary };
+        primary
+            .then_with(|| b.effective_date().cmp(&a.effective_date()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+
+    let total = matched.len();
+    let total_cents = matched.iter().map(|t| t.amount.cents()).sum();
+    let items: Vec<Transaction> = matched
+        .into_iter()
+        .skip(q.offset)
+        .take(q.limit.max(1))
+        .collect();
+    Ok(TxnPage {
+        total,
+        total_cents,
+        items,
+    })
+}
+
 /// (year, month) of an epoch-seconds instant in the machine's local timezone.
 /// Local (not UTC) so a late-night purchase buckets into the day/month the user
 /// actually made it, and DST-correct because each instant gets its own offset.
@@ -224,6 +344,99 @@ mod tests {
         ])
         .unwrap();
         s
+    }
+
+    #[test]
+    fn search_matches_text_over_payee_and_normalized_merchant() {
+        let s = seed();
+        // "spotify" only matches after processor-prefix normalization.
+        let q = TxnQuery {
+            text: Some("spotify".into()),
+            ..TxnQuery::default()
+        };
+        let page = search_transactions(&s, &q).unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.total_cents, -2900);
+
+        // Category text also hits.
+        let q = TxnQuery {
+            text: Some("stream".into()),
+            ..TxnQuery::default()
+        };
+        assert_eq!(search_transactions(&s, &q).unwrap().total, 1);
+    }
+
+    #[test]
+    fn search_sorts_and_paginates_stably() {
+        let s = seed();
+        let q = TxnQuery {
+            sort: SortKey::Amount,
+            descending: false, // most negative first
+            offset: 0,
+            limit: 2,
+            ..TxnQuery::default()
+        };
+        let page = search_transactions(&s, &q).unwrap();
+        assert_eq!(page.total, 6);
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.items[0].amount.cents(), -5000);
+        assert_eq!(page.items[1].amount.cents(), -3000);
+        // total_cents covers ALL matches, not the page.
+        assert_eq!(page.total_cents, -5000 - 1500 - 2000 - 3000 + 250000 - 900);
+
+        let next = search_transactions(
+            &s,
+            &TxnQuery {
+                sort: SortKey::Amount,
+                descending: false,
+                offset: 2,
+                limit: 2,
+                ..TxnQuery::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(next.items[0].amount.cents(), -2000);
+    }
+
+    #[test]
+    fn search_filters_amount_band_category_and_pending() {
+        let s = seed();
+        let q = TxnQuery {
+            min_cents: Some(1500),
+            max_cents: Some(3000),
+            ..TxnQuery::default()
+        };
+        // 1500, 2000, 3000, 900(pending, excluded by band), 250000 out of band.
+        assert_eq!(search_transactions(&s, &q).unwrap().total, 3);
+
+        let q = TxnQuery {
+            category: Some("Groceries".into()),
+            ..TxnQuery::default()
+        };
+        assert_eq!(search_transactions(&s, &q).unwrap().total, 2);
+
+        let mut q = TxnQuery::default();
+        q.filter.include_pending = false;
+        assert_eq!(search_transactions(&s, &q).unwrap().total, 5);
+    }
+
+    #[test]
+    fn search_flag_filter_needs_non_spending_included() {
+        let s = seed();
+        s.set_flag("1", TxnFlag::Transfer, false).unwrap();
+        // Default filter drops non-Spending rows before the flag test.
+        let q = TxnQuery {
+            flag: Some(TxnFlag::Transfer),
+            ..TxnQuery::default()
+        };
+        assert_eq!(search_transactions(&s, &q).unwrap().total, 0);
+        // The transfers view sets include_non_spending.
+        let mut q = TxnQuery {
+            flag: Some(TxnFlag::Transfer),
+            ..TxnQuery::default()
+        };
+        q.filter.include_non_spending = true;
+        assert_eq!(search_transactions(&s, &q).unwrap().total, 1);
     }
 
     #[test]

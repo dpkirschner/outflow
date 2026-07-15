@@ -19,6 +19,8 @@ import type {
   SyncReport,
   Transaction,
   TxnFlag,
+  TxnPage,
+  TxnSearch,
   Window,
 } from "./types";
 
@@ -59,7 +61,30 @@ function filterQuery(filter?: Filter, extra?: Record<string, string>): string {
 
 export const api = {
   accounts: () => get<Account[]>("/accounts"),
-  transactions: (filter?: Filter) => get<Transaction[]>(`/transactions${filterQuery(filter)}`),
+  // Search/sort/filter over the whole archive; returns one page + totals.
+  transactions: (s?: TxnSearch) => {
+    const q = new URLSearchParams();
+    const set = (k: string, v: unknown) => {
+      if (v !== undefined && v !== "" && v !== null) q.set(k, String(v));
+    };
+    set("since", s?.since);
+    set("until", s?.until);
+    set("pending", s?.includePending);
+    set("transfers", s?.includeNonSpending);
+    set("q", s?.q);
+    set("account", s?.account);
+    set("category", s?.category);
+    set("source", s?.source);
+    set("flag", s?.flag);
+    set("min_cents", s?.minCents);
+    set("max_cents", s?.maxCents);
+    set("sort", s?.sort);
+    set("dir", s?.dir);
+    set("offset", s?.offset);
+    set("limit", s?.limit);
+    const qs = q.toString();
+    return get<TxnPage>(`/transactions${qs ? `?${qs}` : ""}`);
+  },
   categorize: () => post<CategorizeResult>("/categorize"),
   spendCategories: (filter?: Filter) =>
     get<CategorySpend[]>(`/spend/categories${filterQuery(filter)}`),

@@ -9,8 +9,21 @@ use crate::model::{
     Account, AccountKind, CategorySource, Transaction, TxnFlag,
 };
 use crate::money::Money;
-use crate::source::SourceError;
 use chrono::{Local, NaiveDate, TimeZone};
+
+/// Why external JSON couldn't become domain data. Malformed input surfaces
+/// here explicitly — it never leaks defaults into the archive (invariant #5).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SourceError {
+    /// Structurally bad JSON or a missing/mistyped required field.
+    Json(String),
+    /// An amount that couldn't parse to exact cents.
+    Amount {
+        account: String,
+        field: &'static str,
+        value: String,
+    },
+}
 
 /// One page of `/transactions/sync`. `pending_superseded` carries the
 /// `pending_transaction_id` of every non-pending row — the pending predecessor
@@ -291,12 +304,62 @@ pub fn parse_sync_page(json: &str) -> Result<SyncPage, SourceError> {
     })
 }
 
+/// An offline ingest bundle: a Plaid `/accounts/get` response and one
+/// `/transactions/sync` page wrapped in an envelope, so the full pipeline runs
+/// with zero features and no credentials (`pull --from-file`) — the dev/test
+/// path that used to ride on SimpleFIN fixtures.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Fixture {
+    pub accounts: Vec<Account>,
+    pub sync: SyncPage,
+}
+
+/// Parse a fixture envelope: `{ "institution": "...", "accounts": <accounts/get
+/// response>, "sync": <transactions/sync response> }`. `institution` defaults
+/// to "Demo Bank"; `synced_at` stamps `Account::last_synced`.
+pub fn parse_fixture(json: &str, synced_at: i64) -> Result<Fixture, SourceError> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
+    let institution = str_field(&v, "institution").unwrap_or("Demo Bank").to_string();
+    let accounts_raw = v
+        .get("accounts")
+        .ok_or_else(|| SourceError::Json("fixture: missing \"accounts\" object".into()))?
+        .to_string();
+    let sync_raw = v
+        .get("sync")
+        .ok_or_else(|| SourceError::Json("fixture: missing \"sync\" object".into()))?
+        .to_string();
+    Ok(Fixture {
+        accounts: parse_accounts_get(&accounts_raw, &institution, synced_at)?,
+        sync: parse_sync_page(&sync_raw)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const ACCOUNTS: &str = include_str!("../../examples/plaid-accounts-get.json");
     const SYNC: &str = include_str!("../../examples/plaid-sync-page.json");
+    const FIXTURE: &str = include_str!("../../examples/plaid-fixture.json");
+
+    #[test]
+    fn fixture_envelope_parses_both_halves() {
+        let f = parse_fixture(FIXTURE, 42).unwrap();
+        assert_eq!(f.accounts.len(), 3);
+        assert_eq!(f.accounts[0].org, "Demo Bank");
+        assert_eq!(f.accounts[0].last_synced, 42);
+        assert!(f.sync.added.iter().any(|t| t.id == "txn-coffee"));
+        assert_eq!(f.sync.removed_ids, vec!["txn-gone".to_string()]);
+    }
+
+    #[test]
+    fn fixture_missing_half_errors() {
+        assert!(matches!(
+            parse_fixture(r#"{"accounts":{"accounts":[]}}"#, 0),
+            Err(SourceError::Json(_))
+        ));
+    }
 
     #[test]
     fn accounts_map_kind_sign_and_mask() {

@@ -5,15 +5,14 @@
 One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
-core/    pure domain — money, model, store, source, plaid, categorize, query,
+core/    pure domain — money, model, store, plaid, categorize, query,
          subscriptions, ledger, transfers, llm. Zero GUI/network deps by
          default. Source of truth.
-net/     networked adapters (sync ureq) — simplefin (fetch/claim), plaid
-         (Link/exchange/sync transport), plaid_tokens (0600 token file),
-         secrets (keychain + access-URL/DB-key resolution), anthropic
-         (Prompter impl). Depends on core.
-cli/     headless binary `outflow` — pull, categorize, report, subs, fix,
-         claim, txns, accounts, matches, status; direct-DB or HTTP client
+net/     networked adapters (sync ureq) — plaid (Link/exchange/sync
+         transport), plaid_tokens (0600 token file), secrets (0600-file +
+         DB-key keychain helpers), anthropic (Prompter impl). Depends on core.
+cli/     headless binary `outflow` — pull --from-file, categorize, report,
+         subs, fix, txns, accounts, matches, status; direct-DB or HTTP client
          mode (--server) against a running server.
 server/  axum + tokio HTTP server — JSON API + serves the built React SPA.
          The always-on deployment target (mac-mini behind tailscale serve).
@@ -30,13 +29,11 @@ call it.
 The volatile externals are seams so they can be swapped without touching the
 domain:
 
-- **Transaction sources** — one shape, two implementations: raw JSON is fetched
-  in `net` (`simplefin::fetch`, `plaid::transactions_sync_page`/`accounts_get`)
-  and parsed pure in `core` (`source::parse_account_set`,
-  `plaid::parse_sync_page`/`parse_accounts_get`), both producing domain
-  `Account`/`Transaction` values. A future source (e.g. Plaid Investments for
-  brokerage) follows the same pattern. (The `source::TransactionSource` trait
-  exists but the free-function pipeline is the working convention.)
+- **The transaction source** — one shape: raw JSON is fetched in `net`
+  (`plaid::transactions_sync_page`/`accounts_get`) and parsed pure in `core`
+  (`plaid::parse_sync_page`/`parse_accounts_get`/`parse_fixture`), producing
+  domain `Account`/`Transaction` values. A future source (e.g. Plaid
+  Investments for brokerage) follows the same pattern.
 - `categorize::Categorizer` — assigns a category to a transaction. `RuleSet`
   (deterministic) implements it. The LLM tail uses a second port,
   `llm::Prompter` (pure prompt build + response validation in core; the HTTP
@@ -78,8 +75,8 @@ DBs get guarded `ALTER TABLE ADD COLUMN`s.
 Plaid /transactions/sync ──net::plaid──▶ core::plaid::parse_sync_page ─┐
   (cursor loop per item)                  (validate→domain, sign flip)  │ apply_plaid_batch
                                                                         ▼ (atomic incl. cursor)
-SimpleFIN JSON ──net::simplefin::fetch──▶ parse_account_set ──▶ Store.upsert_*
-   (or --from-file / demo fixture)          (validate→domain)      (SQLite)
+fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ Store.upsert_*
+   (offline dev/test path)              (validate→domain)             (SQLite)
                                                                       │
    post-ingest: apply_flags ── categorize(RuleSet) ── transfers::detect_card_payments
      (high-confidence pairs auto-flag CardPayment; ambiguous queue for review)
@@ -95,12 +92,12 @@ SimpleFIN JSON ──net::simplefin::fetch──▶ parse_account_set ──▶ 
   `spawn_blocking`). `routes.rs` ports the former Tauri command set 1:1;
   `plaid_routes.rs` handles Link token/exchange/items; `match_routes.rs` the
   card-payment review; `sync.rs` is the engine — per-item Plaid cursor loops,
-  the SimpleFIN leg, post-ingest passes, `sync_log` writes, and a
+  post-ingest passes, `sync_log` writes, and a
   `tokio::time::interval` background task (default 6h). Static serving:
   `/assets` from `app/dist`, everything else falls back to `index.html` with a
   200 (`/oauth-return` must load the SPA for Plaid OAuth resumption).
-- **CLI** (`cli/src/main.rs`) — clap subcommands map 1:1 to core calls. Net
-  paths (`claim`, live `pull`, `categorize --llm`) are `#[cfg(feature="net")]`;
+- **CLI** (`cli/src/main.rs`) — clap subcommands map 1:1 to core calls. The
+  LLM pass (`categorize --llm`) is `#[cfg(feature="net")]`;
   `--server URL` (feature `client`, `cli/src/remote.rs`) redirects every
   subcommand to the HTTP API and prints the server's JSON verbatim — identical
   shapes to local `--json`, so agent consumers don't care which mode ran.
@@ -126,7 +123,6 @@ files. See DEPLOYMENT.md for the full recipe.
 | Plaid creds | `OUTFLOW_PLAID_CLIENT_ID`, `OUTFLOW_PLAID_SECRET` or `OUTFLOW_PLAID_SECRET_FILE` (0600) | `OUTFLOW_PLAID_ENV` = `sandbox` (default) \| `production` |
 | Plaid access tokens | `OUTFLOW_PLAID_TOKENS_FILE` (default `<data-dir>/plaid-tokens.json`, 0600) | per-item map; never in the DB |
 | OAuth redirect | `OUTFLOW_OAUTH_REDIRECT` | `https://<mini>.<tailnet>.ts.net/oauth-return`, must match the Plaid dashboard exactly |
-| SimpleFIN access URL | `OUTFLOW_SFIN_URL` / `OUTFLOW_SFIN_URL_FILE` (0600) / keychain | `net::secrets::access_url` |
 | Sync cadence | `OUTFLOW_SYNC_INTERVAL_SECS` (default 21600) | background interval |
 | API auth | `OUTFLOW_API_TOKEN` (optional bearer) | tailnet is the primary boundary |
 | DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | keychain only in interactive CLI use |
@@ -140,8 +136,8 @@ zero features via `pull --from-file`.
 | Crate | Feature | Enables |
 |---|---|---|
 | core | `encryption` | rusqlite `bundled-sqlcipher-vendored-openssl` → `Store::open_encrypted` |
-| net | `keychain` | `keyring` + `getrandom` (access-URL + DB-key keychain storage) |
-| cli | `net` / `client` / `keychain` / `encryption` | SimpleFIN+LLM / HTTP mode against a server / keychain / SQLCipher |
+| net | `keychain` | `keyring` + `getrandom` (DB-key keychain storage) |
+| cli | `net` / `client` / `keychain` / `encryption` | LLM categorizer / HTTP mode against a server / keychain / SQLCipher |
 | server | `encryption` | SQLCipher via `OUTFLOW_DB_KEY[_FILE]` |
 
 `server` always has network (it is the network layer); it depends on `net`

@@ -120,7 +120,6 @@ export default function App() {
       const m = await api.categorizeLlm();
       return `Categorized ${r.rule} by rule · ${m} by AI`;
     });
-  const onConnect = (token: string) => act(() => api.claim(token));
   const onReset = () => {
     if (
       !window.confirm(
@@ -207,7 +206,6 @@ export default function App() {
         busy={busy || loading}
         window={win}
         onWindow={onWindow}
-        onConnect={onConnect}
         onPull={onPull}
         onRefresh={() => reload(win)}
         onCategorize={onCategorize}
@@ -219,8 +217,7 @@ export default function App() {
         <div className="lg-empty">Loading…</div>
       ) : empty ? (
         <div className="lg-empty">
-          No data yet — click <b>Connect</b> to link your bank with a SimpleFIN setup token, then
-          hit <b>Pull</b>.
+          No data yet — open <b>Connections</b> to link your banks through Plaid.
         </div>
       ) : (
         view && (

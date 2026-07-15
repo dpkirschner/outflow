@@ -33,8 +33,7 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   `Money::from_decimal_str`. There's a cents-exactness test (`4.22` → `-422`).
 - **Pending→posted changes the transaction id.** The posted row carries
   `pending_transaction_id`; the parser collects those and
-  `apply_plaid_batch` deletes them with the batch. Never run the SimpleFIN
-  pending sweep over Plaid rows.
+  `apply_plaid_batch` deletes them with the batch.
 - **The cursor is part of the batch transaction.** Persisting a cursor whose
   data didn't commit silently loses transactions forever. On
   `TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION`, restart the whole loop from
@@ -57,7 +56,7 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 
 - **launchd services get no shell env and no unlocked GUI keychain.** All
   secrets via a plist env block + 0600 files: `OUTFLOW_PLAID_SECRET_FILE`,
-  `OUTFLOW_PLAID_TOKENS_FILE`, `OUTFLOW_SFIN_URL_FILE`, `OUTFLOW_DB_KEY_FILE`.
+  `OUTFLOW_PLAID_TOKENS_FILE`, `OUTFLOW_DB_KEY_FILE`.
   Setting env in your shell does NOT reach the daemon.
 - **Bind loopback; let `tailscale serve` do TLS.** The server listens on
   `127.0.0.1:8080`; tailnet exposure + certs come from
@@ -76,16 +75,14 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 
 - **`/tmp` gets purged by macOS.** Don't stage the DB or secrets there — use a
   durable path (`$HOME/...` or the data dir).
-- **The DB is the permanent archive.** Providers only serve a window
-  (SimpleFIN ~90 days; Plaid up to ~24 months on first sync). `reset_data`
+- **The DB is the permanent archive.** Plaid only serves a window (up to
+  ~24 months on first sync). `reset_data`
   clears transactions/accounts/sync_log/matches and resets Plaid cursors (so
   the next sync replays what Plaid still has) but **cannot recover anything
   older than the provider window** — back up the DB file before resetting.
-- **SimpleFIN setup tokens are single-use.** `claim` exchanges the token for a
-  durable access URL; the URL is the durable secret.
-- **Demo / testing:** SimpleFIN's public demo bridge
-  (`beta-bridge.simplefin.org`, `demo`/`demo`) for SimpleFIN; Plaid sandbox
-  (`user_good`/`pass_good`) for Plaid. Neither belongs in the repo.
+- **Demo / testing:** Plaid sandbox (`user_good`/`pass_good`), or the offline
+  fixture (`pull --from-file examples/plaid-fixture.json`) for a
+  zero-credential pipeline run.
 
 ## Known design limits (not bugs)
 
@@ -93,5 +90,5 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   payments and split payments don't match (flag manually; the learn-a-rule
   path still works).
 - Own-account transfers (checking↔savings) auto-flag only when Plaid
-  classifies them (`TRANSFER_IN/OUT`); SimpleFIN-side transfers are manual.
+  classifies them (`TRANSFER_IN/OUT`); anything else is a manual flag.
 - Annual subscriptions are undetectable until the DB holds >1 year.

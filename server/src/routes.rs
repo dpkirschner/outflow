@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    detect, monthly_flow, parse_account_set, spend_by_category, top_merchants, Account,
+    detect, monthly_flow, parse_fixture, spend_by_category, top_merchants, Account,
     CategorySource, CategorySpend, LedgerView, Mark, MerchantSpend, MonthlyFlow, Subscription,
     SyncEntry, Transaction, TxnFilter, TxnFlag,
 };
@@ -340,27 +340,33 @@ struct PullFromFileBody {
     path: String,
 }
 
-/// Dev/offline pull: load a SimpleFIN JSON file (the `--from-file` path).
+/// Dev/offline pull: ingest a Plaid fixture envelope from a local file (the
+/// `--from-file` path) — accounts + one sync page, no credentials needed.
 async fn pull_from_file(
     State(state): State<AppState>,
     Json(body): Json<PullFromFileBody>,
 ) -> ApiResult<PullResult> {
     let json = std::fs::read_to_string(&body.path)
         .map_err(|err| ApiError::bad_request(format!("read {}: {err}", body.path)))?;
-    let fetched =
-        parse_account_set(&json).map_err(|err| ApiError::bad_request(format!("parse: {err:?}")))?;
     let started = now_secs();
+    let fixture = parse_fixture(&json, started)
+        .map_err(|err| ApiError::bad_request(format!("parse: {err:?}")))?;
     with_store(&state, move |s| {
-        let log_id = s.log_sync_start("simplefin:file", started).map_err(|e| e.to_string())?;
-        s.upsert_accounts(&fetched.accounts).map_err(|e| e.to_string())?;
-        let r = s.upsert_transactions(&fetched.transactions).map_err(|e| e.to_string())?;
+        let log_id = s.log_sync_start("plaid:file", started).map_err(|e| e.to_string())?;
+        s.upsert_accounts(&fixture.accounts).map_err(|e| e.to_string())?;
+        let mut txns = fixture.sync.added;
+        txns.extend(fixture.sync.modified);
+        let r = s.upsert_transactions(&txns).map_err(|e| e.to_string())?;
+        let mut removed = fixture.sync.removed_ids;
+        removed.extend(fixture.sync.pending_superseded);
+        s.delete_transactions(&removed).map_err(|e| e.to_string())?;
         s.log_sync_finish(log_id, now_secs(), r.added, r.updated, None)
             .map_err(|e| e.to_string())?;
         Ok(PullResult {
             added: r.added,
             updated: r.updated,
-            accounts: fetched.accounts.len(),
-            warnings: fetched.warnings,
+            accounts: fixture.accounts.len(),
+            warnings: Vec::new(),
         })
     })
     .await
@@ -371,30 +377,6 @@ async fn pull_from_file(
 /// engine (Phase 5 wiring lives in `sync.rs`; this route delegates there).
 async fn pull(State(state): State<AppState>) -> ApiResult<crate::sync::SyncReport> {
     crate::sync::sync_all(&state).await.map(Json)
-}
-
-#[derive(Deserialize)]
-struct ClaimBody {
-    setup_token: String,
-}
-
-/// Exchange a SimpleFIN setup token for a durable access URL and persist it.
-async fn claim(Json(body): Json<ClaimBody>) -> ApiResult<String> {
-    tokio::task::spawn_blocking(move || {
-        let url = outflow_net::claim_access_url(body.setup_token.trim())?;
-        let placed = match outflow_net::persist_access_url(&url)? {
-            outflow_net::Persisted::File(p) => format!("saved to {p}"),
-            outflow_net::Persisted::Keychain => "saved to keychain".into(),
-            outflow_net::Persisted::Ephemeral => {
-                "obtained but not persisted (set OUTFLOW_SFIN_URL_FILE)".into()
-            }
-        };
-        Ok::<String, String>(format!("Connected — access URL {placed}. Now hit Pull."))
-    })
-    .await
-    .map_err(|e| ApiError::internal(format!("blocking task: {e}")))?
-    .map_err(ApiError::internal)
-    .map(Json)
 }
 
 /// LLM pass over the merchants the rule pass couldn't match. Needs
@@ -472,6 +454,5 @@ pub fn api_router() -> Router<AppState> {
         .route("/clear_stream_mark", post(clear_stream_mark))
         .route("/pull", post(pull))
         .route("/pull_from_file", post(pull_from_file))
-        .route("/claim", post(claim))
         .route("/reset_data", post(reset_data))
 }

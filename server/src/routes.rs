@@ -71,40 +71,56 @@ async fn accounts(State(state): State<AppState>) -> ApiResult<Vec<Account>> {
         .map(Json)
 }
 
-/// Filter for the transaction LIST. Mirrors the query-layer date/pending
-/// semantics (filtering on the behavioral date), but deliberately does NOT drop
-/// non-Spending rows -- the list is where the user sees and reclassifies
-/// transfers and card payments, so they must remain visible even though the
-/// charts hide them.
-fn passes(t: &Transaction, f: &TxnFilter) -> bool {
-    if !f.include_pending && t.pending {
-        return false;
-    }
-    let d = t.effective_date();
-    if let Some(s) = f.since {
-        if d < s {
-            return false;
-        }
-    }
-    if let Some(u) = f.until {
-        if d >= u {
-            return false;
-        }
-    }
-    true
+/// Full search/sort/filter over the transaction list (the Outflows screen and
+/// the CLI `txns` subcommand). Semantics live in `core::query::search_transactions`.
+#[derive(Debug, Default, Deserialize)]
+struct TxnQueryParams {
+    #[serde(flatten)]
+    filter: FilterParams,
+    q: Option<String>,
+    account: Option<String>,
+    category: Option<String>,
+    source: Option<String>,
+    /// serde variant name, e.g. "Transfer" — implies include_non_spending.
+    flag: Option<TxnFlag>,
+    min_cents: Option<i64>,
+    max_cents: Option<i64>,
+    sort: Option<String>,
+    dir: Option<String>, // "asc" | "desc" (default desc)
+    offset: Option<usize>,
+    limit: Option<usize>,
 }
 
 async fn transactions(
     State(state): State<AppState>,
-    Query(params): Query<FilterParams>,
-) -> ApiResult<Vec<Transaction>> {
-    let f = params.to_filter();
+    Query(p): Query<TxnQueryParams>,
+) -> ApiResult<outflow_core::TxnPage> {
+    let sort = match p.sort.as_deref() {
+        None => outflow_core::SortKey::Date,
+        Some(s) => outflow_core::SortKey::from_str(s)
+            .ok_or_else(|| ApiError::bad_request(format!("bad sort key {s:?}")))?,
+    };
+    let mut filter = p.filter.to_filter();
+    // Filtering BY a suppressed flag only makes sense with those rows visible.
+    if matches!(p.flag, Some(TxnFlag::Transfer) | Some(TxnFlag::CardPayment)) {
+        filter.include_non_spending = true;
+    }
+    let q = outflow_core::TxnQuery {
+        filter,
+        text: p.q.filter(|s| !s.trim().is_empty()),
+        account_id: p.account,
+        category: p.category,
+        source: p.source,
+        flag: p.flag,
+        min_cents: p.min_cents,
+        max_cents: p.max_cents,
+        sort,
+        descending: p.dir.as_deref() != Some("asc"),
+        offset: p.offset.unwrap_or(0),
+        limit: p.limit.unwrap_or(100).min(1000),
+    };
     with_store(&state, move |s| {
-        let all = s.all_transactions().map_err(|e| e.to_string())?;
-        // Newest first for the list view.
-        let mut out: Vec<Transaction> = all.into_iter().filter(|t| passes(t, &f)).collect();
-        out.reverse();
-        Ok(out)
+        outflow_core::search_transactions(s, &q).map_err(|e| e.to_string())
     })
     .await
     .map(Json)

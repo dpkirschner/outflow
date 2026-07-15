@@ -31,6 +31,9 @@ pub struct SyncReport {
     /// Flag rules applied + rule categorization run after ingest.
     pub flags_applied: usize,
     pub categorized: usize,
+    /// Card-payment pairs auto-accepted (high confidence) / queued for review.
+    pub matches_auto: usize,
+    pub matches_proposed: usize,
 }
 
 /// Run every source once. Errors per leg are captured in the report, not
@@ -83,11 +86,72 @@ fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
             .map_err(|e| e.to_string())
     })
     .unwrap_or(0);
-SyncReport {
+    let (matches_auto, matches_proposed) =
+        lock(store, detect_and_record_matches).unwrap_or((0, 0));
+
+    SyncReport {
         legs,
         flags_applied,
         categorized,
+        matches_auto,
+        matches_proposed,
     }
+}
+
+/// Run the card-payment detector over the whole archive. High-confidence pairs
+/// auto-accept (flag both legs immediately); the rest queue as proposals for
+/// the Review screen. Previously decided pairs never re-enter.
+fn detect_and_record_matches(s: &Store) -> Result<(usize, usize), String> {
+    use outflow_core::{detect_card_payments, MatchConfidence, MatchOptions, MatchStatus, TxnFlag};
+
+    let accounts = s.accounts().map_err(|e| e.to_string())?;
+    let txns = s.all_transactions().map_err(|e| e.to_string())?;
+    let decided = s.decided_pairs().map_err(|e| e.to_string())?;
+    let proposals = detect_card_payments(&accounts, &txns, &decided, &MatchOptions::default());
+
+    let mut auto = 0usize;
+    let mut queued = 0usize;
+    for p in proposals {
+        match p.confidence {
+            MatchConfidence::High => {
+                let id = s
+                    .insert_match(
+                        &p.bank_txn_id,
+                        &p.card_txn_id,
+                        MatchStatus::Accepted,
+                        p.confidence,
+                        Some(&p.reason),
+                        now_secs(),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if let Some(id) = id {
+                    s.set_flag(&p.bank_txn_id, TxnFlag::CardPayment, false)
+                        .map_err(|e| e.to_string())?;
+                    s.set_flag(&p.card_txn_id, TxnFlag::CardPayment, false)
+                        .map_err(|e| e.to_string())?;
+                    s.reject_conflicting_proposals(id, &p.bank_txn_id, &p.card_txn_id)
+                        .map_err(|e| e.to_string())?;
+                    auto += 1;
+                }
+            }
+            MatchConfidence::Medium => {
+                let inserted = s
+                    .insert_match(
+                        &p.bank_txn_id,
+                        &p.card_txn_id,
+                        MatchStatus::Proposed,
+                        p.confidence,
+                        Some(&p.reason),
+                        now_secs(),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if inserted.is_some() {
+                    queued += 1;
+                }
+            }
+        }
+    }
+    Ok((auto, queued))
 }
 
 /// Lock the store for one operation; network calls happen outside the lock so

@@ -9,6 +9,7 @@ import type {
   Filter,
   LedgerView,
   Mark,
+  MatchView,
   MerchantSpend,
   MonthlyFlow,
   PlaidItem,
@@ -116,4 +117,10 @@ export const api = {
   plaidItems: () => get<PlaidItem[]>("/plaid/items"),
   plaidRemoveItem: (itemId: string) =>
     req<void>("DELETE", `/plaid/items/${encodeURIComponent(itemId)}`),
+
+  // Card-payment match review.
+  matches: (status?: string) =>
+    get<MatchView[]>(`/matches${status ? `?status=${status}` : ""}`),
+  acceptMatch: (id: number) => post<void>(`/matches/${id}/accept`),
+  rejectMatch: (id: number) => post<void>(`/matches/${id}/reject`),
 };

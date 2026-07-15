@@ -987,6 +987,23 @@ impl Store {
         Ok(())
     }
 
+    /// After accepting a match, retire every other proposal that shares either
+    /// leg — those pairings are stale once the legs are flagged. Returns the
+    /// count retired.
+    pub fn reject_conflicting_proposals(
+        &self,
+        accepted_id: i64,
+        bank_txn_id: &str,
+        card_txn_id: &str,
+    ) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE txn_matches SET status = 'rejected'
+             WHERE status = 'proposed' AND id != ?1
+               AND (bank_txn_id = ?2 OR card_txn_id = ?3)",
+            params![accepted_id, bank_txn_id, card_txn_id],
+        )
+    }
+
     /// Every (bank, card) pair that already has a row, regardless of status —
     /// the detector must not re-propose any of these.
     pub fn decided_pairs(&self) -> rusqlite::Result<Vec<(String, String)>> {

@@ -29,6 +29,13 @@ impl AccountKind {
     }
 }
 
+/// Which upstream integration a row came from ("simplefin", "plaid"). Ids are
+/// stored raw — provenance lives here, not in id prefixes — so rows ingested
+/// before this field existed deserialize as SimpleFIN.
+pub fn default_source() -> String {
+    "simplefin".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Account {
     pub id: String,
@@ -38,11 +45,14 @@ pub struct Account {
     pub balance: Money,
     pub currency: String,
     pub last_synced: i64,
+    #[serde(default = "default_source")]
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CategorySource {
     SimpleFin,
+    Plaid,
     Rule,
     Llm,
     Manual,
@@ -52,6 +62,7 @@ impl CategorySource {
     pub fn as_str(self) -> &'static str {
         match self {
             CategorySource::SimpleFin => "simplefin",
+            CategorySource::Plaid => "plaid",
             CategorySource::Rule => "rule",
             CategorySource::Llm => "llm",
             CategorySource::Manual => "manual",
@@ -61,6 +72,7 @@ impl CategorySource {
     pub fn from_str(s: &str) -> Option<CategorySource> {
         match s {
             "simplefin" => Some(CategorySource::SimpleFin),
+            "plaid" => Some(CategorySource::Plaid),
             "rule" => Some(CategorySource::Rule),
             "llm" => Some(CategorySource::Llm),
             "manual" => Some(CategorySource::Manual),
@@ -147,6 +159,98 @@ pub struct Transaction {
     pub pending: bool,
     pub flag: TxnFlag,
     pub raw: String,
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+/// Non-secret metadata for a linked Plaid Item (one bank connection). The
+/// access token is a secret and lives in a 0600 file outside the DB; the sync
+/// cursor lives here because it must commit atomically with the transaction
+/// batch it produced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlaidItem {
+    pub item_id: String,
+    pub institution: String,
+    pub cursor: Option<String>,
+    /// "ok" | "login_required" | "error" — drives the re-link affordance.
+    pub status: String,
+    pub created: i64,
+    pub last_synced: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MatchStatus {
+    Proposed,
+    Accepted,
+    Rejected,
+}
+
+impl MatchStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MatchStatus::Proposed => "proposed",
+            MatchStatus::Accepted => "accepted",
+            MatchStatus::Rejected => "rejected",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<MatchStatus> {
+        match s {
+            "proposed" => Some(MatchStatus::Proposed),
+            "accepted" => Some(MatchStatus::Accepted),
+            "rejected" => Some(MatchStatus::Rejected),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MatchConfidence {
+    High,
+    Medium,
+}
+
+impl MatchConfidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MatchConfidence::High => "high",
+            MatchConfidence::Medium => "medium",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<MatchConfidence> {
+        match s {
+            "high" => Some(MatchConfidence::High),
+            "medium" => Some(MatchConfidence::Medium),
+            _ => None,
+        }
+    }
+}
+
+/// A detected checking→card payment pair. `bank_txn_id` is the outflow leg on a
+/// checking/savings account; `card_txn_id` the offsetting inflow on a credit
+/// account. Accepting one flags both legs `CardPayment`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TxnMatch {
+    pub id: i64,
+    pub bank_txn_id: String,
+    pub card_txn_id: String,
+    pub status: MatchStatus,
+    pub confidence: MatchConfidence,
+    pub reason: Option<String>,
+    pub created: i64,
+}
+
+/// One row of the sync history (`sync_log`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SyncEntry {
+    pub id: i64,
+    pub started: i64,
+    pub finished: Option<i64>,
+    pub source: String,
+    pub added: Option<i64>,
+    pub updated: Option<i64>,
+    pub note: Option<String>,
 }
 
 impl Transaction {

@@ -379,6 +379,7 @@ mod tests {
             balance: Money::from_cents(0),
             currency: "USD".into(),
             last_synced: 0,
+            source: crate::model::default_source(),
         }
     }
 
@@ -396,6 +397,7 @@ mod tests {
             pending: false,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            source: crate::model::default_source(),
         }
     }
 

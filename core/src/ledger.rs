@@ -6,7 +6,7 @@
 
 use crate::model::{Account, AccountKind, Mark, Transaction, TxnFlag};
 use crate::store::Store;
-use crate::subscriptions::{detect_rhythms, normalize_payee, RhythmEntry};
+use crate::subscriptions::{detect_rhythms, normalize_payee, rhythm_for_items, RhythmEntry};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -60,6 +60,10 @@ pub struct Stream {
 pub struct LineItem {
     pub id: String,
     pub merchant: String,
+    /// Normalized merchant (`normalize_payee`) — the key the frontend groups
+    /// noise rows by and addresses promote/preview with, since it must not run
+    /// the normalizer itself (invariant #4).
+    pub merchant_key: String,
     pub date: i64,
     pub amount_cents: i64,
     pub category: Option<String>,
@@ -201,6 +205,7 @@ fn line_item(t: &Transaction, accounts: &HashMap<String, Account>) -> LineItem {
     LineItem {
         id: t.id.clone(),
         merchant: t.merchant().to_string(),
+        merchant_key: normalize_payee(t.merchant()),
         date: t.effective_date(),
         amount_cents: t.amount.cents().abs(),
         category: t.category.clone(),
@@ -296,6 +301,23 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
         }
     }
 
+    // Force-promoted merchants: a `Kept` mark the auto-detector didn't already
+    // account for (too few occurrences, or irregular spacing). Synthesize a
+    // stream from its occurrences so it leaves Noise. Runs BEFORE the
+    // notable/noise partition so `accounted` suppresses its rows there.
+    for (key, mark) in &marks {
+        if *mark != Mark::Kept || accounted.contains(key) {
+            continue;
+        }
+        let items = groups.get(key).cloned().unwrap_or_default();
+        if let Some(rhythm) = rhythm_for_items(key.clone(), &items, now) {
+            accounted.insert(key.clone());
+            let category = dominant_category(&items);
+            let sources = stream_sources(&items, &accounts);
+            streams.push(Stream { rhythm, sources, category });
+        }
+    }
+
     // Non-stream spending outflows → Notable (≥ threshold) or Noise (below).
     let mut notable: Vec<LineItem> = Vec::new();
     let mut noise_items: Vec<LineItem> = Vec::new();
@@ -358,6 +380,43 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
         noise_items,
         transfers,
     })
+}
+
+/// Synthesize the `Stream` a merchant WOULD become if force-promoted, without
+/// touching any mark — powers the Noise popover's cadence/rate preview. Uses the
+/// same Spending-only grouping and normalized key as `ledger()`, so the preview
+/// matches what promoting actually produces. `None` when the merchant has no
+/// spending occurrences in the window.
+pub fn stream_preview(
+    store: &Store,
+    merchant_key: &str,
+    since: Option<i64>,
+    now: i64,
+) -> rusqlite::Result<Option<Stream>> {
+    let accounts: HashMap<String, Account> = store
+        .accounts()?
+        .into_iter()
+        .map(|a| (a.id.clone(), a))
+        .collect();
+    let all = store.all_transactions()?;
+    let items: Vec<&Transaction> = all
+        .iter()
+        .filter(|t| {
+            t.amount.is_outflow()
+                && t.flag == TxnFlag::Spending
+                && normalize_payee(t.merchant()) == merchant_key
+                && since.map_or(true, |s| t.effective_date() >= s)
+        })
+        .collect();
+    Ok(rhythm_for_items(merchant_key.to_string(), &items, now).map(|rhythm| {
+        let category = dominant_category(&items);
+        let sources = stream_sources(&items, &accounts);
+        Stream {
+            rhythm,
+            sources,
+            category,
+        }
+    }))
 }
 
 #[cfg(test)]
@@ -568,5 +627,105 @@ mod tests {
         assert_eq!(v.transfers[0].count, 2);
         // The transfer isn't in noise (only the $20 coffee is).
         assert_eq!(v.stats.noise_total_cents, 2000);
+    }
+
+    #[test]
+    fn line_item_carries_normalized_merchant_key() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_transactions(&[tx("n1", "chk", 2, -1200, "SQ *RANDOM CAFE 991")]).unwrap();
+        let v = ledger(&s, None, NOW).unwrap();
+        assert_eq!(v.noise_items.len(), 1);
+        assert_eq!(v.noise_items[0].merchant, "SQ *RANDOM CAFE 991"); // raw, for display
+        assert_eq!(v.noise_items[0].merchant_key, "random cafe"); // normalized, for promote
+    }
+
+    #[test]
+    fn kept_promotes_an_undetected_merchant_out_of_noise() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        // Erratic spacing: the detector never makes this a stream.
+        let txns = vec![
+            tx("c1", "chk", 0, -1200, "Corner Store"),
+            tx("c2", "chk", 3, -4500, "Corner Store"),
+            tx("c3", "chk", 47, -800, "Corner Store"),
+        ];
+        s.upsert_transactions(&txns).unwrap();
+        let before = ledger(&s, None, NOW).unwrap();
+        assert!(before.streams.is_empty());
+        assert_eq!(before.stats.noise_count, 3);
+
+        // Force-promote: a Kept mark synthesizes an Irregular stream.
+        s.set_merchant_mark("corner store", Mark::Kept).unwrap();
+        let after = ledger(&s, None, NOW).unwrap();
+        assert_eq!(after.streams.len(), 1);
+        assert_eq!(after.streams[0].rhythm.merchant, "corner store");
+        assert_eq!(after.streams[0].rhythm.cadence, crate::StreamCadence::Irregular);
+        // Its rows are pulled out of noise — no double-count.
+        assert_eq!(after.stats.noise_count, 0);
+        assert!(after.noise_items.is_empty());
+    }
+
+    #[test]
+    fn dismissed_then_kept_round_trips_a_real_rhythm() {
+        // Uber-shaped: a genuine FewPerMonth rhythm, dismissed to noise, then promoted back.
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        let days = [0i64, 17, 30, 47, 60, 77];
+        let txns: Vec<_> = days
+            .iter()
+            .enumerate()
+            .map(|(i, d)| tx(&format!("u{i}"), "chk", *d, -600, "Uber"))
+            .collect();
+        s.upsert_transactions(&txns).unwrap();
+        assert_eq!(ledger(&s, None, NOW).unwrap().streams.len(), 1, "detected as a stream");
+
+        s.set_merchant_mark("uber", Mark::Dismissed).unwrap();
+        let dismissed = ledger(&s, None, NOW).unwrap();
+        assert!(dismissed.streams.is_empty());
+        assert_eq!(dismissed.stats.noise_count, 6);
+
+        s.set_merchant_mark("uber", Mark::Kept).unwrap();
+        let promoted = ledger(&s, None, NOW).unwrap();
+        assert_eq!(promoted.streams.len(), 1);
+        assert_eq!(promoted.streams[0].rhythm.merchant, "uber");
+        // Regular spacing → the real cadence survives, not Irregular.
+        assert_eq!(promoted.streams[0].rhythm.cadence, crate::StreamCadence::FewPerMonth);
+        assert_eq!(promoted.stats.noise_count, 0);
+    }
+
+    #[test]
+    fn stream_preview_matches_what_promotion_produces() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        let txns = vec![
+            tx("c1", "chk", 0, -1200, "Corner Store"),
+            tx("c2", "chk", 3, -4500, "Corner Store"),
+            tx("c3", "chk", 47, -800, "Corner Store"),
+        ];
+        s.upsert_transactions(&txns).unwrap();
+
+        let preview = stream_preview(&s, "corner store", None, NOW).unwrap().unwrap();
+        assert_eq!(preview.rhythm.merchant, "corner store");
+        assert_eq!(preview.rhythm.occurrence_count, 3);
+        assert_eq!(preview.rhythm.cadence, crate::StreamCadence::Irregular);
+
+        // Preview is read-only: no stream materializes until the mark is set.
+        assert!(ledger(&s, None, NOW).unwrap().streams.is_empty());
+
+        // And it equals the real stream once promoted.
+        s.set_merchant_mark("corner store", Mark::Kept).unwrap();
+        let real = &ledger(&s, None, NOW).unwrap().streams[0].rhythm;
+        assert_eq!(real.cadence, preview.rhythm.cadence);
+        assert_eq!(real.occurrence_count, preview.rhythm.occurrence_count);
+        assert_eq!(real.monthly_estimate_cents, preview.rhythm.monthly_estimate_cents);
+    }
+
+    #[test]
+    fn stream_preview_none_for_unknown_merchant() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_transactions(&[tx("c1", "chk", 0, -1200, "Corner Store")]).unwrap();
+        assert!(stream_preview(&s, "nonexistent", None, NOW).unwrap().is_none());
     }
 }

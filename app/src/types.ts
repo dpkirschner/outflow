@@ -16,7 +16,8 @@ export type StreamCadence =
   | "Weekly"
   | "FewPerMonth"
   | "Monthly"
-  | "Yearly";
+  | "Yearly"
+  | "Irregular"; // only from a force-promoted noise merchant
 export type SourceKind = "Card" | "Ach";
 export type Mark = "Committed" | "Dismissed" | "Kept";
 export type Window = "3mo" | "6mo" | "12mo" | "all";
@@ -106,6 +107,7 @@ export interface Stream {
 export interface LineItem {
   id: string;
   merchant: string;
+  merchant_key: string; // normalized merchant; the key for promote/preview
   date: number; // epoch seconds
   amount_cents: number;
   category: string | null;

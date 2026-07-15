@@ -22,7 +22,8 @@ pub use query::{
     MerchantSpend, MonthlyFlow, SortKey, TxnFilter, TxnPage, TxnQuery,
 };
 pub use ledger::{
-    ledger, Coverage, LedgerStats, LedgerView, LineItem, Source, SourceKind, Stream, TransferGroup,
+    ledger, stream_preview, Coverage, LedgerStats, LedgerView, LineItem, Source, SourceKind,
+    Stream, TransferGroup,
 };
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{

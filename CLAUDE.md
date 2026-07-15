@@ -12,8 +12,8 @@ checking→card payments so spending isn't double-counted, and serves a web
 client + JSON API for outflow tracking. Analysis only — no budgets.
 
 Deeper reference lives in `docs/` (all tracked; read these for depth):
-ARCHITECTURE, DATA_MODEL, INVARIANTS, GOTCHAS, DEVELOPMENT. An untracked
-`agent.md` holds volatile session status and demo credentials — never `git add` it.
+ARCHITECTURE, DATA_MODEL, INVARIANTS, GOTCHAS, DEVELOPMENT, DEPLOYMENT. An
+untracked `agent.md` holds volatile session status/handoff — never `git add` it.
 
 ## Commands
 

@@ -58,8 +58,11 @@ Server env: `OUTFLOW_DB`, `OUTFLOW_LISTEN` (default 127.0.0.1:8080),
 `OUTFLOW_PLAID_SECRET[_FILE]`, `OUTFLOW_PLAID_ENV=sandbox|production`,
 `OUTFLOW_PLAID_TOKENS_FILE`, `OUTFLOW_OAUTH_REDIRECT` (the ts.net HTTPS URL +
 `/oauth-return`, required for OAuth banks), `OUTFLOW_SYNC_INTERVAL_SECS`
-(default 21600), optional `OUTFLOW_API_TOKEN`, and with `--features
-encryption`: `OUTFLOW_DB_KEY[_FILE]`.
+(default 21600), optional `OUTFLOW_API_TOKEN` (full access) and
+`OUTFLOW_API_TOKEN_RO` (GET only, 403 on mutations — for agents/scripts), and
+with `--features encryption`: `OUTFLOW_DB_KEY[_FILE]`. Setting **either** token
+flips all of `/api/*` to deny-by-default; with neither, the API is open to
+anything that can reach the port.
 
 ## Architecture
 

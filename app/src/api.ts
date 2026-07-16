@@ -25,12 +25,51 @@ import type {
   Window,
 } from "./types";
 
+const TOKEN_KEY = "outflow_token";
+
+// The server's OUTFLOW_API_TOKEN, typed in once via AuthGate and kept in
+// localStorage so it survives reloads. Deliberately not a build-time constant:
+// /assets is served without auth, so a token baked into the bundle would be
+// readable by anything that can reach the port — which includes any agent or
+// container on the box, i.e. exactly what the token is meant to keep out.
+export const token = {
+  get: () => localStorage.getItem(TOKEN_KEY) ?? "",
+  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+// The app never asks the server whether auth is on — it just calls, and treats
+// a 401 as "prompt for a token". So a server with no token configured (the dev
+// default) never shows a gate, and a rotated token re-prompts on the next call.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn;
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  const t = token.get();
+  if (t) headers.authorization = `Bearer ${t}`;
+
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
+  // Absent, wrong, or rotated token: drop it so the gate asks again rather than
+  // retrying a dead credential on every call.
+  if (res.status === 401) {
+    token.clear();
+    onUnauthorized?.();
+    throw new Error("Unauthorized — enter the API token.");
+  }
+  // A read-only token reaching a mutation. Distinct from 401: the token is
+  // real, the action isn't allowed.
+  if (res.status === 403) {
+    throw new Error("This token is read-only — that action needs the full token.");
+  }
   const text = await res.text();
   if (!res.ok) {
     try {

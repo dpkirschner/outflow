@@ -540,6 +540,7 @@ mod tests {
             plaid_tokens_file: "/dev/null".into(),
             oauth_redirect: None,
             api_token: None,
+            api_token_ro: None,
             sync_interval_secs: 21_600,
         };
         let state = AppState {

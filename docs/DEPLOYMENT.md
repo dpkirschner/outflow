@@ -65,8 +65,13 @@ are not interchangeable — see GOTCHAS).
 ## 4. Tailscale serve (HTTPS on the tailnet)
 
 ```
-tailscale serve --bg https / http://127.0.0.1:8080
+tailscale serve --bg 8080
 ```
+
+`<target>` is just the local port (or `localhost:8080`, or a full URL); serve
+mounts it at `/` on HTTPS 443 for the tailnet. Tailscale ≤1.9x took a
+positional `https / <url>` form — that syntax is gone, and the CLI will tell
+you so if you reach for it out of muscle memory.
 
 Verify: `https://<mini>.<tailnet>.ts.net` from another tailnet device. This
 URL (plus `/oauth-return`) is what goes in the Plaid dashboard redirect list

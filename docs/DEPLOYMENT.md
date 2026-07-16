@@ -30,18 +30,23 @@ read-only token.
 brew install rustup node tailscale
 ```
 
+- `brew install rustup` installs the *installer*, not a compiler — `cargo` does
+  not exist until you run `rustup default stable`, and **toolchains are
+  per-user**, so run it as the account that will build (§5).
 - Tailscale: log in, enable **MagicDNS** and **HTTPS certificates** in the
   admin console.
-- Clone the repo, then build:
-
-```
-cd app && npm install && npm run build && cd .. && cargo build --release -p outflow-server -p outflow-cli
-```
+- The clone and the build belong to the account that will run the daemon.
+  Where they live is not a detail — see §5.
 
 (Add `--features encryption` to the server build for SQLCipher; then also
 provision `OUTFLOW_DB_KEY_FILE` below and never lose that file.)
 
 ## 3. Secrets & data dir (all 0600, no keychain)
+
+Run this **as the account that will run the daemon** (§5): `~` below is that
+account's home, and these paths go verbatim into the plist. If the box has more
+than one account, running this as the wrong one puts your bank credentials in
+the wrong home — the 0600 modes only protect you from *other* users.
 
 ```
 mkdir -p ~/Library/"Application Support"/outflow && chmod 700 ~/Library/"Application Support"/outflow
@@ -66,6 +71,10 @@ tailscale serve --bg https / http://127.0.0.1:8080
 Verify: `https://<mini>.<tailnet>.ts.net` from another tailnet device. This
 URL (plus `/oauth-return`) is what goes in the Plaid dashboard redirect list
 and in `OUTFLOW_OAUTH_REDIRECT`.
+
+`--bg` config is stored by `tailscaled` (itself a system daemon), not by your
+login session, so it survives reboots with nobody logged in — which is what
+lets the whole posture work headless.
 
 ## 5. launchd daemon
 
@@ -214,9 +223,31 @@ months). The background sync then runs every `OUTFLOW_SYNC_INTERVAL_SECS`;
 
 ## 7. Agent / CLI access over the tailnet
 
+Give an agent the **read-only** token, never the full one:
+
 ```
-OUTFLOW_SERVER=https://MINI.TAILNET.ts.net outflow txns --search starbucks --since 2026-06-01 --json
+export OUTFLOW_SERVER=https://MINI.TAILNET.ts.net
+export OUTFLOW_API_TOKEN=<the api-token-ro value>
+outflow txns --search starbucks --since 2026-06-01 --json
 ```
+
+The read-only token goes in the same `OUTFLOW_API_TOKEN` variable: the CLI just
+forwards whatever bearer it is given and the server decides the tier. Read
+subcommands work; mutating ones (`pull`, `fix`, `matches accept`) come back
+403 saying the token is read-only.
+
+**From a container on the mini**, MagicDNS usually isn't configured inside the
+container, so the `ts.net` name won't resolve. Reach the server on the host's
+loopback instead — under colima and Docker Desktop the VM forwards
+`host.docker.internal` into the host's loopback, so a `127.0.0.1`-bound server
+is reachable:
+
+```
+export OUTFLOW_SERVER=http://host.docker.internal:8080
+```
+
+That hop is plain HTTP but never leaves the machine. It still requires the
+token — being on the box is not authorization.
 
 (Build the CLI with `--features client`. `report`, `subs`, `accounts`,
 `matches`, `status`, `pull`, `fix` all work in server mode and print the same
@@ -224,6 +255,12 @@ JSON shapes as local `--json`.)
 
 ## 8. Backups
 
-The DB is the permanent archive — back up
-`~/Library/Application Support/outflow/` (DB + plaid-tokens.json + key file if
-encrypted). Time Machine covers it if the mini has a backup target.
+The DB is the permanent archive — back up the daemon user's
+`~/Library/Application Support/outflow/` (DB + plaid-tokens.json + the API
+token files + key file if encrypted). Time Machine covers it if the mini has a
+backup target.
+
+Only one of those is unrecoverable: **the DB key**. Re-linking banks re-mints
+Plaid tokens and the API tokens are one `openssl rand` away, but a lost
+`OUTFLOW_DB_KEY[_FILE]` orphans the encrypted archive permanently, and Plaid
+only backfills ~24 months of it. Back that key up somewhere other than the mini.

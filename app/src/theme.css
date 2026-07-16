@@ -314,6 +314,9 @@ select.cat:focus {
   position: fixed;
   bottom: 22px;
   right: 22px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   background: var(--card-2);
   border: 1px solid var(--accent);
   color: var(--text);
@@ -325,6 +328,21 @@ select.cat:focus {
 }
 .toast.err {
   border-color: var(--neg);
+}
+.toast-action {
+  flex: none;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toast-action:hover {
+  background: var(--accent);
+  color: var(--card-2);
 }
 
 /* subtle scrollbars */

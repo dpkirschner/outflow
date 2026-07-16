@@ -144,6 +144,12 @@ export function Outflows({
       notify({
         kind: "ok",
         text: flag === "Spending" ? "Counted as spending again." : `Excluded as ${flag}.`,
+        // Excluding hides the row from the default view; offer a one-click way
+        // back instead of making the user hunt for the "show excluded" chip.
+        action:
+          flag === "Spending"
+            ? undefined
+            : { label: "Undo", run: () => void setTxnFlag(t, "Spending") },
       });
       await Promise.all([loadPage(), loadFlow()]);
     } catch (err) {

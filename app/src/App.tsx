@@ -240,17 +240,17 @@ export default function App() {
       {tab === "connections" ? (
         <>
           <Connections notify={notify} />
-          {toast && <Toast msg={toast} />}
+          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "review" ? (
         <>
           <MatchReview notify={notify} onChanged={() => void reload(win)} />
-          {toast && <Toast msg={toast} />}
+          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "outflows" ? (
         <>
           <Outflows accounts={accounts} vocab={vocab} notify={notify} />
-          {toast && <Toast msg={toast} />}
+          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : (
         // Called as a function, NOT <LedgerTab/>: a nested component rendered as
@@ -335,7 +335,7 @@ export default function App() {
         notify={notify}
       />
 
-      {toast && <Toast msg={toast} />}
+      {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
       </>
     );
   }

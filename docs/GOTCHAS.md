@@ -60,7 +60,8 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   Setting env in your shell does NOT reach the daemon.
 - **Bind loopback; let `tailscale serve` do TLS.** The server listens on
   `127.0.0.1:8080`; tailnet exposure + certs come from
-  `tailscale serve https / http://127.0.0.1:8080`.
+  `tailscale serve --bg 8080` (the old positional `serve https / <url>` form
+  was removed — modern serve takes just the target).
 - **A loopback bind is not a boundary against the local machine.** Other
   accounts and containers reach `127.0.0.1:8080` too — colima's user-mode
   networking forwards `host.docker.internal` straight into the host's loopback.

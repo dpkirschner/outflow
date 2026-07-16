@@ -40,10 +40,18 @@ DB path from `--db` or `OUTFLOW_DB`.
 Server + web client:
 
 ```
-cd app && npm install && npm run build      # frontend → app/dist (make web)
-cargo run -p outflow-server                 # serves app/dist + /api (make run)
+cd app && npm install                       # first-time frontend deps (make deps)
+cd app && npm run build                     # frontend → app/dist (make web)
+cargo run -p outflow-server                 # serves app/dist + /api (make serve)
 cd app && npm run dev                       # hot-reload UI, proxies /api → :8080 (make dev)
 ```
+
+A tracked `Makefile` wraps these — `make help` lists all targets. The one
+gotcha the raw commands hide: **`make run` rebuilds `app/dist` first, then
+serves** (reach for it after a UI change); **`make serve` skips the rebuild**
+and serves whatever's already in `app/dist` (backend-only iteration). Running
+the bare server binary never rebuilds the frontend, so a stale `app/dist`
+serves the old bundle. `make check` is the fmt-check + clippy + test gate.
 
 Server env: `OUTFLOW_DB`, `OUTFLOW_LISTEN` (default 127.0.0.1:8080),
 `OUTFLOW_WEB_DIR` (default app/dist), `OUTFLOW_PLAID_CLIENT_ID`,

@@ -1035,7 +1035,28 @@ body:has(.lg-app) {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  /* Fixed layout so column widths don't reflow when row content changes
+     (e.g. toggling "show excluded" swaps in different merchants/actions).
+     Merchant (col 2) has no width set, so it absorbs the remaining space and
+     clips with an ellipsis; every other column is pinned. */
+  table-layout: fixed;
 }
+.of-table th:nth-child(1),
+.of-table td:nth-child(1) { width: 88px; }   /* date */
+.of-table th:nth-child(3),
+.of-table td:nth-child(3) {
+  width: 150px;  /* category */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.of-table td:nth-child(3) .of-select { max-width: 100%; }
+.of-table th:nth-child(4),
+.of-table td:nth-child(4) { width: 132px; }  /* account */
+.of-table th:nth-child(5),
+.of-table td:nth-child(5) { width: 112px; }  /* amount */
+.of-table th:nth-child(6),
+.of-table td:nth-child(6) { width: 96px; }   /* row action */
 .of-table th {
   text-align: left;
   font-size: 10px;

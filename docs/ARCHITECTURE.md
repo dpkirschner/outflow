@@ -9,8 +9,8 @@ core/    pure domain — money, model, store, plaid, categorize, query,
          subscriptions, ledger, transfers, llm. Zero GUI/network deps by
          default. Source of truth.
 net/     networked adapters (sync ureq) — plaid (Link/exchange/sync
-         transport), plaid_tokens (0600 token file), secrets (0600-file +
-         DB-key keychain helpers), anthropic (Prompter impl). Depends on core.
+         transport), plaid_tokens (0600 token file), secrets (0600-file
+         helpers), anthropic (Prompter impl). Depends on core.
 cli/     headless binary `outflow` — pull --from-file, categorize, report,
          subs, fix, txns, accounts, matches, status; direct-DB or HTTP client
          mode (--server) against a running server.
@@ -125,7 +125,7 @@ files. See DEPLOYMENT.md for the full recipe.
 | OAuth redirect | `OUTFLOW_OAUTH_REDIRECT` | `https://<mini>.<tailnet>.ts.net/oauth-return`, must match the Plaid dashboard exactly |
 | Sync cadence | `OUTFLOW_SYNC_INTERVAL_SECS` (default 21600) | background interval |
 | API auth | `OUTFLOW_API_TOKEN` (optional bearer) | tailnet is the primary boundary |
-| DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | keychain only in interactive CLI use |
+| DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | env or 0600 file only — no keychain path |
 | LLM | `ANTHROPIC_API_KEY`, `OUTFLOW_LLM_URL`, `OUTFLOW_LLM_MODEL` | `net::anthropic` |
 
 ## Feature flags
@@ -136,8 +136,7 @@ zero features via `pull --from-file`.
 | Crate | Feature | Enables |
 |---|---|---|
 | core | `encryption` | rusqlite `bundled-sqlcipher-vendored-openssl` → `Store::open_encrypted` |
-| net | `keychain` | `keyring` + `getrandom` (DB-key keychain storage) |
-| cli | `net` / `client` / `keychain` / `encryption` | LLM categorizer / HTTP mode against a server / keychain / SQLCipher |
+| cli | `net` / `client` / `encryption` | LLM categorizer / HTTP mode against a server / SQLCipher |
 | server | `encryption` | SQLCipher via `OUTFLOW_DB_KEY[_FILE]` |
 
 `server` always has network (it is the network layer); it depends on `net`

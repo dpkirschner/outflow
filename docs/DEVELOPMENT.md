@@ -30,7 +30,7 @@ pre-built-frontend requirement are gone). The `-p` form stays the fast path.
 ## CLI
 
 Features: `net` (LLM categorizer), `client` (HTTP mode against a running
-server), `keychain`, `encryption`. Zero-feature builds still run the full
+server), `encryption`. Zero-feature builds still run the full
 pipeline from a file:
 
 ```
@@ -38,7 +38,7 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/pl
 ```
 
 ```
-cargo build -p outflow-cli --features "net,client,keychain,encryption"
+cargo build -p outflow-cli --features "net,client,encryption"
 ```
 
 Subcommands: `pull --from-file P` (offline fixture ingest; live syncs are the

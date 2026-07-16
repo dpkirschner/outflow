@@ -23,7 +23,7 @@ cargo build                                  # whole workspace (no Tauri anymore
 ```
 
 CLI (`outflow` binary). Features: `net` (LLM categorizer), `client`
-(HTTP mode against a running server), `keychain`, `encryption`. With no
+(HTTP mode against a running server), `encryption`. With no
 features the full pipeline still runs via `--from-file`:
 
 ```
@@ -72,8 +72,8 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
   matcher). Source of truth; every front-end calls it directly so **CLI and web
   run identical domain logic**.
 - **`net/`** — networked adapters (sync ureq): `plaid` (Link/exchange/sync
-  transport), `plaid_tokens` (0600 token file), `secrets` (0600-file + DB-key
-  keychain helpers), `anthropic` (`Prompter`).
+  transport), `plaid_tokens` (0600 token file), `secrets` (0600-file
+  helpers), `anthropic` (`Prompter`).
 - **`cli/`** — headless `outflow` binary; clap subcommands map to core calls
   (direct DB) or to the server API (`--server`, for agents/scripts).
 - **`server/`** — axum + tokio. `Arc<Mutex<Store>>` bridged with
@@ -106,7 +106,7 @@ Violating these breaks data integrity or the domain contract:
    superseded `pending_transaction_id`s), and the cursor advance in ONE SQLite
    transaction. Never persist a Plaid cursor outside that path.
    `upsert_transactions` is the plain path for offline fixture ingest.
-3. **`core` stays network/GUI-free by default.** Network, keychain, encryption
+3. **`core` stays network/GUI-free by default.** Network and encryption
    are cargo features; the pipeline must stay runnable via `pull --from-file`
    with zero features. Network code lives in `net`.
 4. **One merchant normalizer everywhere: `subscriptions::normalize_payee`.**
@@ -117,11 +117,11 @@ Violating these breaks data integrity or the domain contract:
    leaks defaults (`plaid::parse_sync_page`, `plaid::parse_fixture`).
    Plaid sign conventions flip at this boundary: amounts negate (Plaid
    positive = money out), credit balances negate (positive-owed → negative).
-6. **Secrets never touch the DB or argv** — env, a 0600 file, or the keychain
-   only. Plaid access tokens live in the 0600 tokens file keyed by item_id;
-   only non-secret item metadata (institution, cursor, status) is in the DB.
-   The DB key is regenerated **only** on keychain `NoEntry`, never on a
-   locked/denied read (a new key permanently orphans an existing encrypted DB).
+6. **Secrets never touch the DB or argv** — env or a 0600 file only (no
+   keychain path; launchd has no unlocked GUI keychain). Plaid access tokens
+   live in the 0600 tokens file keyed by item_id; only non-secret item metadata
+   (institution, cursor, status) is in the DB. The SQLCipher DB key comes from
+   `OUTFLOW_DB_KEY[_FILE]`; losing or changing it orphans the encrypted DB.
 7. **User flag decisions survive re-sync.** `flag` is absent from the upsert
    conflict-update; Plaid PFC hints seed flags at parse time only.
 

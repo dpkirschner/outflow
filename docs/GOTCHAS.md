@@ -51,6 +51,25 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   production; use sandbox for testing.
 - **Item removal at Plaid is best-effort on unlink** — local history is kept
   on purpose (the archive outliving the connection is the point of the app).
+- **A pull with no linked items never contacts Plaid.** `sync_all_blocking`
+  guards the entire Plaid leg behind `if !items.is_empty()`, so `POST /api/pull`
+  against an empty archive returns a clean `{"legs":[],...}` **without reading
+  the secret or validating anything**. The first call that actually uses
+  `OUTFLOW_PLAID_CLIENT_ID` + the secret is `POST /api/plaid/link_token` — bad
+  keys surface when you open Connections, not before. A zero-result pull is not
+  a credential test.
+- **One client_id, a different secret per environment.** Plaid issues a single
+  client_id shared across sandbox and production; only the *secret* differs.
+  Switching environments means swapping `plaid-secret` **and**
+  `OUTFLOW_PLAID_ENV` together — a production secret against
+  `OUTFLOW_PLAID_ENV=sandbox` just fails auth. `OUTFLOW_PLAID_ENV` is strict:
+  anything but `sandbox`/`production` is a hard error, so `prod` or
+  `Production` kills the sync outright rather than defaulting.
+- **Switching environments needs the DB and tokens file deleted — `reset_data`
+  is not enough.** It keeps the `plaid_items` rows (only nulling their cursors)
+  and never touches `plaid-tokens.json`, so sandbox item_ids and sandbox access
+  tokens survive into production and fail confusingly. Delete `outflow.db` and
+  `plaid-tokens.json`; **keep `db-key`** (the DB is recreated encrypted with it).
 
 ## Headless mac-mini (see DEPLOYMENT.md)
 
@@ -81,6 +100,26 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   user, and injecting JS into `app/dist` lifts the API token out of a browser's
   localStorage. The daemon user needs its own clone that nobody else can write —
   deploy via git, not by pointing the plist at another account's working copy.
+- **`launchctl kickstart` does not reread the plist.** It restarts the process
+  with the config launchd already cached, so an edited plist looks like it had
+  no effect and you debug the wrong thing. Plist changes need
+  `bootout` then `bootstrap`.
+- **File contents are live; env vars are not.** `PlaidConfig::from_env()` runs
+  inside `sync_all`, not at startup, so rewriting `plaid-secret` takes effect on
+  the next sync with no restart. The env block — including every `*_FILE`
+  **path** — is fixed when the process starts and needs a reload.
+- **Overwrite secret files; never `rm` and recreate.** `>` truncates in place
+  and preserves the 0600 mode. A freshly created file gets your umask (usually
+  0644), and `read_secret_file` then refuses it — the daemon exits 1 and won't
+  boot until you `chmod 600` it again.
+- **Edit plists with `plutil`, not a pasted heredoc.** Two different paste
+  hazards corrupt them: zsh's `url-quote-magic` escapes `<`/`>` adjacent to
+  anything URL-shaped (yielding `\>`), and long `<string>` lines can hard-wrap
+  in transit — XML faithfully preserves the embedded newline, so the value
+  silently becomes a path with a `\n` in the middle that `stat` can never find,
+  while the file still lints clean. `plutil -replace KEY -string VALUE` avoids
+  both; `plutil -extract KEY raw -o - FILE | od -c` is how you prove a value is
+  what you think it is.
 
 ## Encryption
 

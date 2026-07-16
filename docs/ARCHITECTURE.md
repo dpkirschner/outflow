@@ -124,8 +124,8 @@ files. See DEPLOYMENT.md for the full recipe.
 | Plaid access tokens | `OUTFLOW_PLAID_TOKENS_FILE` (default `<data-dir>/plaid-tokens.json`, 0600) | per-item map; never in the DB |
 | OAuth redirect | `OUTFLOW_OAUTH_REDIRECT` | `https://<mini>.<tailnet>.ts.net/oauth-return`, must match the Plaid dashboard exactly |
 | Sync cadence | `OUTFLOW_SYNC_INTERVAL_SECS` (default 21600) | background interval |
-| API auth | `OUTFLOW_API_TOKEN` (optional bearer, full access) | setting it flips `/api/*` to deny-by-default; the SPA prompts once and keeps it in localStorage |
-| API auth (read-only) | `OUTFLOW_API_TOKEN_RO` (optional bearer) | `GET /api/*` only, 403 on mutations — for agents/scripts in CLI `--server` mode |
+| API auth | `OUTFLOW_API_TOKEN` or `OUTFLOW_API_TOKEN_FILE` (0600) | full access; setting it flips `/api/*` to deny-by-default. The SPA prompts once and keeps it in localStorage. Use `_FILE` under launchd — the plist is world-readable |
+| API auth (read-only) | `OUTFLOW_API_TOKEN_RO` or `OUTFLOW_API_TOKEN_RO_FILE` (0600) | `GET /api/*` only, 403 on mutations — for agents/scripts in CLI `--server` mode |
 | DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | env or 0600 file only — no keychain path |
 | LLM | `ANTHROPIC_API_KEY`, `OUTFLOW_LLM_URL`, `OUTFLOW_LLM_MODEL` | `net::anthropic` |
 

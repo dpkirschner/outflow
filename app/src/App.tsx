@@ -36,10 +36,14 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<ToastMsg | null>(null);
+  const toastTimer = useRef<number | undefined>(undefined);
 
   const notify = useCallback((msg: ToastMsg) => {
+    // Rapid-fire notifications must reset the dismiss timer, not stack — an
+    // earlier timeout would otherwise fire and clear the newest toast early.
+    window.clearTimeout(toastTimer.current);
     setToast(msg);
-    window.setTimeout(() => setToast(null), 3200);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3200);
   }, []);
 
   const reload = useCallback(

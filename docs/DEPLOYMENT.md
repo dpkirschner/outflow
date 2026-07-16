@@ -1,10 +1,12 @@
 # Deployment — mac-mini + Tailscale + Plaid
 
-The production posture: `outflow-server` runs as a launchd agent on an
-always-on mac-mini, bound to loopback, with `tailscale serve` terminating
-HTTPS on the tailnet. Every device on the tailnet (laptop, phone) gets the web
-UI at `https://<mini>.<tailnet>.ts.net`; agents/scripts use the CLI in
-`--server` mode against the same URL.
+The production posture: `outflow-server` runs as a launchd **daemon** on an
+always-on mac-mini — as your own account, from a clone only that account can
+write — bound to loopback, with `tailscale serve` terminating HTTPS on the
+tailnet. Every device on the tailnet (laptop, phone) gets the web UI at
+`https://<mini>.<tailnet>.ts.net` and prompts once for the API token;
+agents/scripts use the CLI in `--server` mode against the same URL with the
+read-only token.
 
 ## 1. Plaid account (do this first — approval is the long pole)
 
@@ -65,9 +67,43 @@ Verify: `https://<mini>.<tailnet>.ts.net` from another tailnet device. This
 URL (plus `/oauth-return`) is what goes in the Plaid dashboard redirect list
 and in `OUTFLOW_OAUTH_REDIRECT`.
 
-## 5. launchd agent
+## 5. launchd daemon
 
-`~/Library/LaunchAgents/com.outflow.server.plist` (adjust paths/tailnet):
+Run the server as a **LaunchDaemon**, not a LaunchAgent. An agent only runs
+inside a loaded GUI login session: it starts as whoever is auto-logged-in and
+never starts at all if that account isn't. A daemon starts at boot, with no
+login, as an account you name via `UserName`.
+
+### Two rules that decide whether any of this works
+
+Both matter the moment anything else shares the box — a second account, a
+container, an automation/agent user with a shell:
+
+1. **Run as the human's account.** `UserName` is the account whose 0600 secrets
+   the server reads. Not root, not a shared service account.
+2. **Nothing else may write what the daemon executes or serves.** Whoever can
+   write `target/release/outflow-server` can run arbitrary code *as the daemon's
+   user* by swapping the binary; whoever can write `app/dist` can inject JS into
+   the SPA and lift the API token out of your browser's localStorage. Either one
+   makes `UserName` decoration.
+
+So the account that runs the daemon needs **its own clone**, built in its own
+home, writable by nobody else. A checkout sitting in some other account's home
+is a dev tree, not a deploy artifact — ship to production through git (push,
+then pull as the daemon's user), never by pointing the plist at someone else's
+working copy.
+
+```
+sudo -u YOU -i          # as the account that will run it
+git clone https://github.com/dpkirschner/outflow.git ~/code/outflow
+cd ~/code/outflow && rustup default stable   # toolchains are per-user
+cd app && npm install && npm run build && cd ..
+cargo build --release -p outflow-server -p outflow-cli
+```
+
+### The plist
+
+`/Library/LaunchDaemons/com.outflow.server.plist` (adjust paths/tailnet):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -75,11 +111,17 @@ and in `OUTFLOW_OAUTH_REDIRECT`.
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.outflow.server</string>
+  <key>UserName</key><string>YOU</string>
+  <key>GroupName</key><string>staff</string>
   <key>ProgramArguments</key><array>
     <string>/Users/YOU/code/outflow/target/release/outflow-server</string>
   </array>
   <key>WorkingDirectory</key><string>/Users/YOU/code/outflow</string>
   <key>EnvironmentVariables</key><dict>
+    <!-- Set the data dir explicitly. A daemon gets no HOME, and the server
+         falls back to "." — the DB and plaid-tokens.json would land in
+         WorkingDirectory instead, silently. -->
+    <key>OUTFLOW_DATA_DIR</key><string>/Users/YOU/Library/Application Support/outflow</string>
     <key>OUTFLOW_LISTEN</key><string>127.0.0.1:8080</string>
     <key>OUTFLOW_WEB_DIR</key><string>/Users/YOU/code/outflow/app/dist</string>
     <key>OUTFLOW_PLAID_CLIENT_ID</key><string>YOUR_CLIENT_ID</string>
@@ -87,43 +129,69 @@ and in `OUTFLOW_OAUTH_REDIRECT`.
     <key>OUTFLOW_PLAID_ENV</key><string>production</string>
     <key>OUTFLOW_OAUTH_REDIRECT</key><string>https://MINI.TAILNET.ts.net/oauth-return</string>
     <key>OUTFLOW_SYNC_INTERVAL_SECS</key><string>21600</string>
-    <key>OUTFLOW_API_TOKEN</key><string>GENERATE_ME</string>
-    <key>OUTFLOW_API_TOKEN_RO</key><string>GENERATE_ME_TOO</string>
+    <!-- Tokens by FILE, never inline: this plist is world-readable. -->
+    <key>OUTFLOW_API_TOKEN_FILE</key><string>/Users/YOU/Library/Application Support/outflow/api-token</string>
+    <key>OUTFLOW_API_TOKEN_RO_FILE</key><string>/Users/YOU/Library/Application Support/outflow/api-token-ro</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/tmp/outflow-server.log</string>
-  <key>StandardErrorPath</key><string>/tmp/outflow-server.log</string>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/outflow-server.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/outflow-server.log</string>
 </dict></plist>
 ```
 
+Install it root-owned (launchd refuses a daemon plist writable by anyone else)
+and load it into the **system** domain, not `gui/`:
+
 ```
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.outflow.server.plist
+sudo cp com.outflow.server.plist /Library/LaunchDaemons/
+sudo chown root:wheel /Library/LaunchDaemons/com.outflow.server.plist
+sudo chmod 644 /Library/LaunchDaemons/com.outflow.server.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.outflow.server.plist
 ```
 
 Restart after a rebuild:
 
 ```
-launchctl kickstart -k gui/$(id -u)/com.outflow.server
+sudo launchctl kickstart -k system/com.outflow.server
 ```
+
+Logs go to the daemon user's `~/Library/Logs`, not `/tmp` — `/tmp` is
+world-readable and world-writable, so anyone on the box could read the server's
+output or pre-create the file.
 
 ### API tokens
 
-Generate both with `openssl rand -hex 32` and keep them in a password manager.
-Losing one costs a plist edit plus a `kickstart` — nothing is encrypted with
-them, unlike `OUTFLOW_DB_KEY`.
-
 | Token | Grants |
 |---|---|
-| `OUTFLOW_API_TOKEN` | all of `/api/*` |
-| `OUTFLOW_API_TOKEN_RO` | `GET /api/*` only — 403 on every mutation |
+| `OUTFLOW_API_TOKEN[_FILE]` | all of `/api/*` |
+| `OUTFLOW_API_TOKEN_RO[_FILE]` | `GET /api/*` only — 403 on every mutation |
+
+Generate both and write them 0600 next to the other secrets:
+
+```
+openssl rand -hex 32 > ~/Library/"Application Support"/outflow/api-token
+openssl rand -hex 32 > ~/Library/"Application Support"/outflow/api-token-ro
+chmod 600 ~/Library/"Application Support"/outflow/api-token{,-ro}
+```
+
+**Use the `_FILE` form in the plist, never the inline value.** Files under
+`/Library/LaunchDaemons` are world-readable (0644 root:wheel — that is what
+launchd wants), so a token in the env block is legible to every account on the
+machine, including the ones the token exists to keep out. `_FILE` reads a
+0600 file at startup and refuses to boot if it is group/other-readable; the
+inline env form stays for dev and for the CLI.
+
+Keep both in a password manager anyway. Losing one costs a file rewrite plus a
+`kickstart` — nothing is encrypted with them, unlike `OUTFLOW_DB_KEY`.
 
 Setting **either** flips the whole `/api` surface to deny-by-default (401
 without a valid token); with neither set the API is open to anything that can
 reach the port. "The tailnet is the boundary" holds only while everything on
 the tailnet — and everything *on the box* — is equally trusted. A container or
-an agent user running locally reaches `127.0.0.1:8080` too, so a loopback bind
-is not a boundary against it.
+an agent user running locally reaches `127.0.0.1:8080` too (on colima, the
+VM's user-mode networking forwards `host.docker.internal` into the host's
+loopback), so a loopback bind is not a boundary against it.
 
 Give the **RO** token to agents and scripts (`OUTFLOW_API_TOKEN_RO` where the
 CLI runs, in `--server` mode): they can query the archive but can never

@@ -30,6 +30,31 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Config {
         let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+
+        // A secret from `K`, else from a 0600 file named by `K_FILE`. Prefer
+        // the file form in production: config lives in a launchd plist, and
+        // /Library/LaunchDaemons plists are world-readable (0644 root:wheel),
+        // so anything in the env block is legible to every account on the box.
+        // For an API token that means no token at all. Same posture as
+        // OUTFLOW_PLAID_SECRET_FILE / OUTFLOW_DB_KEY_FILE.
+        //
+        // A `K_FILE` that is set but unreadable is fatal, never None: falling
+        // through would leave the token unset, which silently opens all of
+        // /api/* to anyone who can reach the port. Fail closed, loudly.
+        let secret = |k: &str| -> Option<String> {
+            if let Some(v) = env(k) {
+                return Some(v);
+            }
+            let path = env(&format!("{k}_FILE"))?;
+            match outflow_net::secrets::read_secret_file(&path) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!("outflow-server: {k}_FILE: {e}");
+                    std::process::exit(1);
+                }
+            }
+        };
+
         let data_dir = env("OUTFLOW_DATA_DIR").unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             format!("{home}/Library/Application Support/outflow")
@@ -41,8 +66,8 @@ impl Config {
             plaid_tokens_file: env("OUTFLOW_PLAID_TOKENS_FILE")
                 .unwrap_or_else(|| format!("{data_dir}/plaid-tokens.json")),
             oauth_redirect: env("OUTFLOW_OAUTH_REDIRECT"),
-            api_token: env("OUTFLOW_API_TOKEN"),
-            api_token_ro: env("OUTFLOW_API_TOKEN_RO"),
+            api_token: secret("OUTFLOW_API_TOKEN"),
+            api_token_ro: secret("OUTFLOW_API_TOKEN_RO"),
             sync_interval_secs: env("OUTFLOW_SYNC_INTERVAL_SECS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(21_600), // 6h

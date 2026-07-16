@@ -111,11 +111,12 @@ With no features, the full pipeline still runs offline via `pull --from-file`.
 
 ## Deployment
 
-The production posture is `outflow-server` as a launchd agent on an always-on
+The production posture is `outflow-server` as a launchd daemon on an always-on
 mac-mini, bound to loopback, with `tailscale serve` terminating HTTPS on the
-tailnet — every device on the tailnet gets the web UI, and agents/scripts use
-the CLI in `--server` mode against the same URL. Full recipe (Plaid dashboard,
-tailscale, launchd, 0600 secret files) in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+tailnet — every device on the tailnet gets the web UI (prompting once for an
+API token), and agents/scripts use the CLI in `--server` mode against the same
+URL with a read-only token. Full recipe (Plaid dashboard, tailscale, launchd,
+0600 secret files) in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Known limitations
 

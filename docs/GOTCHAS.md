@@ -61,6 +61,25 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 - **Bind loopback; let `tailscale serve` do TLS.** The server listens on
   `127.0.0.1:8080`; tailnet exposure + certs come from
   `tailscale serve https / http://127.0.0.1:8080`.
+- **A loopback bind is not a boundary against the local machine.** Other
+  accounts and containers reach `127.0.0.1:8080` too — colima's user-mode
+  networking forwards `host.docker.internal` straight into the host's loopback.
+  If anything else runs on the box, the API tokens are the boundary, not the
+  bind address.
+- **A daemon gets no `HOME`.** `Config::from_env` falls back to `"."`, so
+  without `OUTFLOW_DATA_DIR` the DB and `plaid-tokens.json` are created under
+  `WorkingDirectory` instead of Application Support — silently, and possibly
+  somewhere another account can read. Always set `OUTFLOW_DATA_DIR` in the plist.
+- **`/Library/LaunchDaemons` plists are world-readable** (0644 root:wheel, which
+  is what launchd requires). Anything in the `EnvironmentVariables` block is
+  readable by every account on the box, so secrets go in via `*_FILE` (0600),
+  never inline. That includes the API tokens.
+- **Whoever can write the binary or `app/dist` owns the daemon.** `UserName`
+  only decides which account's secrets the server reads; it does not protect
+  what it executes. Swapping `target/release/outflow-server` runs code as that
+  user, and injecting JS into `app/dist` lifts the API token out of a browser's
+  localStorage. The daemon user needs its own clone that nobody else can write —
+  deploy via git, not by pointing the plist at another account's working copy.
 
 ## Encryption
 

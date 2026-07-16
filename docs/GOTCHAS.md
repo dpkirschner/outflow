@@ -7,7 +7,7 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 
 - **The wire format is snake_case serde, verbatim.** The old Tauri
   camelCase↔snake_case translation is gone; `app/src/api.ts` (the single HTTP
-  client) sends Rust field names (`txn_id`, `setup_token`, `public_token`).
+  client) sends Rust field names (`txn_id`, `public_token`).
 - **`Money` is a number in JS.** serde-transparent newtype → bare number
   (cents). Never expect an object.
 - **`Store` is not `Sync`** (holds a rusqlite `Connection`). The server keeps
@@ -67,9 +67,9 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 - **Plaintext ↔ encrypted are not interchangeable.** A DB created plaintext
   cannot be opened with `open_encrypted`, and vice versa. Switching a path's
   mode requires deleting the file first.
-- **Never regenerate the DB key except on keychain `NoEntry`** — see
-  INVARIANTS #8. A new key orphans the existing encrypted DB forever. On the
-  server, the key comes from a 0600 file — back that file up with the DB.
+- **The DB key comes from `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) only
+  — there is no keychain path.** Losing or changing the key orphans the
+  existing encrypted DB forever, so back the key file up alongside the DB.
 
 ## Data / demo
 

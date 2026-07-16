@@ -2,14 +2,9 @@
 name = "outflow-net"
 version = "0.1.0"
 edition = "2021"
-description = "Networked adapters for outflow (SimpleFIN, secrets, Anthropic)"
+description = "Networked adapters for outflow (Plaid, secrets, Anthropic)"
 
 [dependencies]
 outflow-core = { path = "../core" }
 ureq = "2"
 serde_json = "1"
-keyring = { version = "2", optional = true }
-getrandom = { version = "0.2", optional = true }
-
-[features]
-keychain = ["dep:keyring", "dep:getrandom"]

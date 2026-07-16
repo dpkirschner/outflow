@@ -20,7 +20,6 @@ ureq = { version = "2", optional = true }
 default = []
 net = ["dep:outflow-net"]
 # HTTP client mode against a running outflow-server (--server URL). Lighter
-# than `net`: no SimpleFIN/LLM code, just the API calls.
+# than `net`: no Plaid/LLM code, just the API calls.
 client = ["dep:ureq"]
-keychain = ["net", "outflow-net/keychain"]
 encryption = ["outflow-core/encryption"]

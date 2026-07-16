@@ -5,7 +5,9 @@
 //! consumers don't care which mode produced it.
 //!
 //! Auth: `OUTFLOW_API_TOKEN` (if the server requires a bearer token). Env
-//! only — never argv.
+//! only — never argv. The server's read-only token goes in the same variable:
+//! it is just a bearer token with fewer rights, so read-only callers (agents,
+//! scripts) get 403 on any mutating subcommand.
 
 use crate::{By, Cmd, MatchCmd};
 
@@ -39,6 +41,13 @@ impl Remote {
         };
         match result {
             Ok(resp) => resp.into_string().map_err(|e| format!("read body: {e}")),
+            // 403 means the token is real but read-only: say so, rather than
+            // leaving a bare status for an agent to guess at (the server sends
+            // no body on this one).
+            Err(ureq::Error::Status(403, _)) => Err(format!(
+                "{url}: HTTP 403: read-only token — this command mutates and \
+                 needs the full OUTFLOW_API_TOKEN"
+            )),
             Err(ureq::Error::Status(code, resp)) => {
                 let detail = resp.into_string().unwrap_or_default();
                 Err(format!("{url}: HTTP {code}: {detail}"))

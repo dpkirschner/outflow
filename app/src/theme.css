@@ -371,3 +371,44 @@ select.cat:focus {
   height: 10px;
   border-radius: 3px;
 }
+
+/* ---------- auth gate ---------- */
+.auth-gate {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.auth-card {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.auth-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.auth-card input {
+  background: var(--card-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.auth-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.auth-card .auth-hint {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-faint);
+}
+.auth-card .auth-hint code {
+  font-size: 11px;
+  color: var(--text-dim);
+}

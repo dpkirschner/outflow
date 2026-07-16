@@ -18,7 +18,12 @@ pub struct Config {
     /// HTTPS redirect URI registered in the Plaid dashboard (OAuth banks).
     pub oauth_redirect: Option<String>,
     /// Optional bearer token required on /api/* (tailnet is the main boundary).
+    /// Full access.
     pub api_token: Option<String>,
+    /// Optional second bearer token with read-only access: GET /api/* only,
+    /// 403 on any mutation. For agents/scripts that should be able to query the
+    /// archive but never wipe it, trigger Plaid, or spend LLM budget.
+    pub api_token_ro: Option<String>,
     pub sync_interval_secs: u64,
 }
 
@@ -37,6 +42,7 @@ impl Config {
                 .unwrap_or_else(|| format!("{data_dir}/plaid-tokens.json")),
             oauth_redirect: env("OUTFLOW_OAUTH_REDIRECT"),
             api_token: env("OUTFLOW_API_TOKEN"),
+            api_token_ro: env("OUTFLOW_API_TOKEN_RO"),
             sync_interval_secs: env("OUTFLOW_SYNC_INTERVAL_SECS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(21_600), // 6h

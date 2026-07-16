@@ -87,6 +87,8 @@ and in `OUTFLOW_OAUTH_REDIRECT`.
     <key>OUTFLOW_PLAID_ENV</key><string>production</string>
     <key>OUTFLOW_OAUTH_REDIRECT</key><string>https://MINI.TAILNET.ts.net/oauth-return</string>
     <key>OUTFLOW_SYNC_INTERVAL_SECS</key><string>21600</string>
+    <key>OUTFLOW_API_TOKEN</key><string>GENERATE_ME</string>
+    <key>OUTFLOW_API_TOKEN_RO</key><string>GENERATE_ME_TOO</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -105,8 +107,33 @@ Restart after a rebuild:
 launchctl kickstart -k gui/$(id -u)/com.outflow.server
 ```
 
-Optional hardening: add `OUTFLOW_API_TOKEN` to the env block and export it
-wherever the CLI runs.
+### API tokens
+
+Generate both with `openssl rand -hex 32` and keep them in a password manager.
+Losing one costs a plist edit plus a `kickstart` — nothing is encrypted with
+them, unlike `OUTFLOW_DB_KEY`.
+
+| Token | Grants |
+|---|---|
+| `OUTFLOW_API_TOKEN` | all of `/api/*` |
+| `OUTFLOW_API_TOKEN_RO` | `GET /api/*` only — 403 on every mutation |
+
+Setting **either** flips the whole `/api` surface to deny-by-default (401
+without a valid token); with neither set the API is open to anything that can
+reach the port. "The tailnet is the boundary" holds only while everything on
+the tailnet — and everything *on the box* — is equally trusted. A container or
+an agent user running locally reaches `127.0.0.1:8080` too, so a loopback bind
+is not a boundary against it.
+
+Give the **RO** token to agents and scripts (`OUTFLOW_API_TOKEN_RO` where the
+CLI runs, in `--server` mode): they can query the archive but can never
+`/reset_data`, trigger a Plaid pull, or spend LLM budget. Keep the full token
+for yourself — the web UI prompts for it once and remembers it in that
+browser's localStorage.
+
+The read-only tier is method-based: every read here is a `GET` and every
+mutation is a `POST`/`DELETE`, so a newly added mutating route is denied to the
+RO token automatically, with no allowlist to maintain.
 
 ## 6. Link the banks
 

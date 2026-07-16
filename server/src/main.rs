@@ -13,7 +13,7 @@ mod state;
 mod sync;
 
 use axum::extract::{Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::Router;
@@ -55,26 +55,58 @@ fn resolve_db_key() -> Result<String, String> {
     outflow_net::secrets::read_secret_file(&path)
 }
 
-/// Optional bearer check on /api/*. When `OUTFLOW_API_TOKEN` is unset this
-/// layer passes everything through — the tailnet is the boundary.
+/// Compare without an early exit on the first differing byte, so a token can't
+/// be recovered byte-by-byte from response timing. Length is not secret (both
+/// tokens are fixed-width random hex), so returning early on a length mismatch
+/// is fine.
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Optional bearer check on /api/*, in two tiers:
+///
+/// - `OUTFLOW_API_TOKEN`    — full access.
+/// - `OUTFLOW_API_TOKEN_RO` — GET only; 403 on any mutation.
+///
+/// With **neither** set this layer passes everything through — the tailnet is
+/// the boundary, which is the zero-config single-user default. Setting either
+/// one flips the whole /api surface to deny-by-default.
+///
+/// The read-only tier keys off the HTTP method rather than a route allowlist:
+/// every read in this API is a GET and every mutation is a POST/DELETE, so a
+/// newly added mutating route is denied to the RO token the day it lands, with
+/// no list for anyone to remember to update.
 async fn require_bearer(
     State(state): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if let Some(expected) = &state.cfg.api_token {
-        let ok = req
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .map(|t| t == expected)
-            .unwrap_or(false);
-        if !ok {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
+    let (full, ro) = (&state.cfg.api_token, &state.cfg.api_token_ro);
+    if full.is_none() && ro.is_none() {
+        return Ok(next.run(req).await);
     }
-    Ok(next.run(req).await)
+
+    let presented = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+
+    if full.as_deref().is_some_and(|t| ct_eq(presented, t)) {
+        return Ok(next.run(req).await);
+    }
+    if ro.as_deref().is_some_and(|t| ct_eq(presented, t)) {
+        if req.method() == Method::GET {
+            return Ok(next.run(req).await);
+        }
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Err(StatusCode::UNAUTHORIZED)
 }
 
 /// Serve the SPA shell for any non-API, non-asset path — client-side routes
@@ -171,4 +203,149 @@ async fn main() {
         })
         .await
         .expect("server error");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request as HttpRequest;
+    use axum::routing::{delete, get, post};
+    use tower::ServiceExt; // for `oneshot`
+
+    const FULL: &str = "fulltoken0000000000000000000000f";
+    const RO: &str = "readonlytoken00000000000000000ro";
+
+    /// A stand-in for the real /api surface: one GET, one POST, one DELETE, all
+    /// behind the same layer main() applies.
+    fn app(full: Option<&str>, ro: Option<&str>) -> Router {
+        let store = Store::open_in_memory().expect("in-memory store");
+        let cfg = Config {
+            db_path: ":memory:".into(),
+            listen: "127.0.0.1:0".into(),
+            web_dir: "app/dist".into(),
+            plaid_tokens_file: "/dev/null".into(),
+            oauth_redirect: None,
+            api_token: full.map(Into::into),
+            api_token_ro: ro.map(Into::into),
+            sync_interval_secs: 21_600,
+        };
+        let state = AppState {
+            store: Arc::new(Mutex::new(store)),
+            sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            cfg: Arc::new(cfg),
+        };
+        Router::new()
+            .route("/read", get(|| async { "ok" }))
+            .route("/write", post(|| async { "ok" }))
+            .route("/remove", delete(|| async { "ok" }))
+            .layer(middleware::from_fn_with_state(state, require_bearer))
+    }
+
+    async fn status(app: Router, method: Method, uri: &str, token: Option<&str>) -> StatusCode {
+        let mut b = HttpRequest::builder().method(method).uri(uri);
+        if let Some(t) = token {
+            b = b.header(header::AUTHORIZATION, format!("Bearer {t}"));
+        }
+        app.oneshot(b.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// Both tiers configured — the production shape.
+    async fn tiered(method: Method, uri: &str, token: &str) -> StatusCode {
+        status(app(Some(FULL), Some(RO)), method, uri, Some(token)).await
+    }
+
+    // With no tokens configured the layer is a no-op: the tailnet is the
+    // boundary. This is the zero-config default and the dev posture.
+    #[tokio::test]
+    async fn no_tokens_configured_passes_everything() {
+        assert_eq!(
+            status(app(None, None), Method::GET, "/read", None).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(app(None, None), Method::POST, "/write", None).await,
+            StatusCode::OK
+        );
+    }
+
+    // Setting any token flips the whole surface to deny-by-default.
+    #[tokio::test]
+    async fn full_token_required_once_configured() {
+        assert_eq!(
+            status(app(Some(FULL), None), Method::GET, "/read", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(app(Some(FULL), None), Method::GET, "/read", Some("wrong")).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(app(Some(FULL), None), Method::GET, "/read", Some(FULL)).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(app(Some(FULL), None), Method::POST, "/write", Some(FULL)).await,
+            StatusCode::OK
+        );
+    }
+
+    // The point of the RO tier: reads pass, mutations are refused. 403 (not
+    // 401) so the caller can tell "your token is wrong" from "your token is
+    // real but may not do this".
+    #[tokio::test]
+    async fn ro_token_reads_but_cannot_mutate() {
+        assert_eq!(tiered(Method::GET, "/read", RO).await, StatusCode::OK);
+        assert_eq!(
+            tiered(Method::POST, "/write", RO).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            tiered(Method::DELETE, "/remove", RO).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    // Both tiers coexist: the full token is unaffected by the RO token existing.
+    #[tokio::test]
+    async fn full_token_still_mutates_alongside_ro() {
+        assert_eq!(tiered(Method::POST, "/write", FULL).await, StatusCode::OK);
+        assert_eq!(
+            tiered(Method::DELETE, "/remove", FULL).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            tiered(Method::GET, "/read", "nope").await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    // An RO token alone is a valid config: a read-only server for everyone.
+    #[tokio::test]
+    async fn ro_token_alone_denies_writes_to_all() {
+        assert_eq!(
+            status(app(None, Some(RO)), Method::GET, "/read", Some(RO)).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(app(None, Some(RO)), Method::POST, "/write", Some(RO)).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            status(app(None, Some(RO)), Method::GET, "/read", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[test]
+    fn ct_eq_matches_only_identical_strings() {
+        assert!(ct_eq(FULL, FULL));
+        assert!(!ct_eq(FULL, RO));
+        assert!(!ct_eq("abc", "abcd")); // length mismatch
+        assert!(!ct_eq("abc", "abd")); // last byte differs
+        assert!(ct_eq("", ""));
+    }
 }

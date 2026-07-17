@@ -13,3 +13,6 @@
 
 # Personal build spec / session handoff (kept out of git intentionally)
 agent.md
+
+# graphify knowledge graph (generated locally, refreshed by git hooks)
+graphify-out/

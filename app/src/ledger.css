@@ -286,15 +286,30 @@ body:has(.lg-app) {
   font-weight: 600;
   border: 1px solid;
 }
-.lg-src.card {
+/* Colored by account kind (core AccountKind). Checking + savings share one
+   "cash" color; credit and investment each get their own. `investment` is
+   reserved for when the Plaid Investments product is enabled — no data flows
+   into it yet. `other` is the neutral fallback. */
+.lg-src.checking,
+.lg-src.savings {
+  color: #7dd3c0;
+  border-color: #1f4a44;
+  background: #0f2420;
+}
+.lg-src.credit {
   color: #c4b5fd;
   border-color: #3b2f66;
   background: #1a1533;
 }
-.lg-src.ach {
-  color: #7dd3c0;
-  border-color: #1f4a44;
-  background: #0f2420;
+.lg-src.investment {
+  color: #f5d38a;
+  border-color: #4a3a1f;
+  background: #241d0f;
+}
+.lg-src.other {
+  color: var(--text-dim);
+  border-color: var(--border);
+  background: var(--card-2);
 }
 .lg-src.more {
   color: var(--lg-blue);

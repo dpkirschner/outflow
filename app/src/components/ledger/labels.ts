@@ -1,5 +1,5 @@
 // Display helpers for the rhythm ledger.
-import type { Account, Coverage, Source, SourceKind, StreamCadence, Trend, Window } from "../../types";
+import type { Account, Coverage, Source, StreamCadence, Trend, Window } from "../../types";
 import { formatDate } from "../../format";
 
 const WINDOW_SPAN: Record<Window, string> = {
@@ -22,12 +22,9 @@ export function coverageText(c: Coverage, win: Window): string {
 }
 
 // Derive a source chip from an account (mirrors core's ledger::account_source):
-// cards show their last-4, ACH accounts show their name.
+// the full account name, colored by the account kind.
 export function accountSource(a: Account): Source {
-  const kind: SourceKind = a.kind === "Credit" ? "Card" : "Ach";
-  const runs = a.name.match(/\d{4,}/g);
-  const last4 = runs ? runs[runs.length - 1].slice(-4) : null;
-  return { label: kind === "Card" ? last4 ?? a.name : a.name, kind, pct: 100 };
+  return { label: a.name, kind: a.kind, pct: 100 };
 }
 
 // Whole-dollar money for the ledger (the mockup drops cents): "$1,310".

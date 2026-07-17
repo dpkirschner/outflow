@@ -597,18 +597,38 @@ body:has(.lg-app) {
   display: flex;
   align-items: flex-end;
   gap: 3px;
-  height: 44px;
   margin-top: 14px;
 }
-.lg-bigrhythm i {
+/* Each bar is a column: the bar sits in a fixed-height well, its dollar value
+   printed underneath (mirrors the Outflows month chart). */
+.lg-barcol {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.lg-barwrap {
+  width: 100%;
+  height: 44px;
+  display: flex;
+  align-items: flex-end;
+}
+.lg-barwrap i {
+  width: 100%;
   background: #22384f;
   border-radius: 2px;
   min-height: 3px;
 }
-.lg-bigrhythm i.cur {
+.lg-barwrap i.cur {
   background: var(--lg-teal);
   opacity: 0.5;
+}
+.lg-barval {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lg-faint);
 }
 .lg-sect {
   padding: 16px 20px;

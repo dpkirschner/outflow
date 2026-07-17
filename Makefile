@@ -8,7 +8,7 @@ APP_DIR := app
 DB ?= $(HOME)/outflow-dev.db
 
 .DEFAULT_GOAL := help
-.PHONY: help dev web server run serve deps test check fmt lint pull clean
+.PHONY: help dev web server run serve prod deps test check fmt lint pull clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' \
@@ -28,6 +28,10 @@ run: web ## Rebuild app/dist, then serve it + /api against $(DB) — use after U
 
 serve: ## Serve the existing app/dist without rebuilding (backend-only iteration)
 	OUTFLOW_DB="$(DB)" cargo run -p outflow-server
+
+prod: deps web ## Production deploy: install deps, build frontend + encrypted release binaries, then restart the launchd daemon
+	cargo build --release --features encryption -p outflow-server -p outflow-cli
+	sudo launchctl kickstart -k system/com.outflow.server
 
 deps: ## Install frontend dependencies (first-time setup)
 	cd $(APP_DIR) && npm install

@@ -18,7 +18,6 @@ export type StreamCadence =
   | "Monthly"
   | "Yearly"
   | "Irregular"; // only from a force-promoted noise merchant
-export type SourceKind = "Card" | "Ach";
 export type Mark = "Committed" | "Dismissed" | "Kept";
 export type Window = "3mo" | "6mo" | "12mo" | "all";
 
@@ -81,8 +80,8 @@ export interface Subscription {
 
 // A source chip: which account a stream's charges land on.
 export interface Source {
-  label: string; // last-4 (cards) or account name
-  kind: SourceKind;
+  label: string; // the full account name, e.g. "VentureOne (3419)"
+  kind: AccountKind; // colored per account type in the chip
   pct: number; // share of the stream's occurrences on this account
 }
 

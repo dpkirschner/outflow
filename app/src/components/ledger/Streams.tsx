@@ -22,11 +22,10 @@ export function RhythmStrip({ spark, big }: { spark: number[]; big?: boolean }) 
 }
 
 export function SourceChip({ s }: { s: Source }) {
-  const card = s.kind === "Card";
-  const text = card ? `••${s.label}` : `ACH · ${s.label}`;
+  // Full account name (e.g. "VentureOne (3419)"), colored by account kind.
   return (
-    <span className={card ? "lg-src card" : "lg-src ach"}>
-      {text}
+    <span className={`lg-src ${s.kind.toLowerCase()}`}>
+      {s.label}
       {s.pct < 100 ? ` · ${s.pct}%` : ""}
     </span>
   );

@@ -29,18 +29,13 @@ const COMMITTED_CATEGORIES: &[&str] = &[
     "debt",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum SourceKind {
-    Card,
-    Ach,
-}
-
-/// Which account(s) a stream's charges land on. `label` = last-4 (cards) or the
-/// account name; `pct` = share of the stream's occurrences on this account.
+/// Which account(s) a stream's charges land on. `label` = the full account name
+/// (e.g. "VentureOne (3419)"); `kind` = the account type, which the UI colors by
+/// (cash vs credit vs investment); `pct` = share of occurrences on this account.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Source {
     pub label: String,
-    pub kind: SourceKind,
+    pub kind: AccountKind,
     pub pct: u8,
 }
 
@@ -118,43 +113,10 @@ pub struct LedgerView {
     pub transfers: Vec<TransferGroup>,
 }
 
-/// Parse a card's last-4 from the account name — the last run of ≥4 digits, e.g.
-/// "Chase Freedom Unlimited (4707)" → "4707". `None` when the name has no digits.
-fn last4(name: &str) -> Option<String> {
-    let mut best: Option<String> = None;
-    let mut cur = String::new();
-    for ch in name.chars() {
-        if ch.is_ascii_digit() {
-            cur.push(ch);
-        } else {
-            if cur.len() >= 4 {
-                best = Some(cur.clone());
-            }
-            cur.clear();
-        }
-    }
-    if cur.len() >= 4 {
-        best = Some(cur);
-    }
-    best.map(|r| r[r.len() - 4..].to_string())
-}
-
-fn source_kind(kind: AccountKind) -> SourceKind {
-    match kind {
-        AccountKind::Credit => SourceKind::Card,
-        _ => SourceKind::Ach,
-    }
-}
-
-/// Label + kind for an account (pct filled in per stream). Card → last-4; else the
-/// account name.
-fn account_source(acct: &Account) -> (String, SourceKind) {
-    let kind = source_kind(acct.kind);
-    let label = match kind {
-        SourceKind::Card => last4(&acct.name).unwrap_or_else(|| acct.name.clone()),
-        SourceKind::Ach => acct.name.clone(),
-    };
-    (label, kind)
+/// Label + kind for an account (pct filled in per stream). The label is the full
+/// account name for every kind; the UI colors the chip by `kind`.
+fn account_source(acct: &Account) -> (String, AccountKind) {
+    (acct.name.clone(), acct.kind)
 }
 
 /// The dominant non-null category among a group of transactions, if any.
@@ -184,7 +146,7 @@ fn stream_sources(items: &[&Transaction], accounts: &HashMap<String, Account>) -
             let (label, kind) = accounts
                 .get(id)
                 .map(account_source)
-                .unwrap_or_else(|| (id.to_string(), SourceKind::Ach));
+                .unwrap_or_else(|| (id.to_string(), AccountKind::Other));
             Source {
                 label,
                 kind,
@@ -201,7 +163,7 @@ fn line_item(t: &Transaction, accounts: &HashMap<String, Account>) -> LineItem {
     let (label, kind) = accounts
         .get(&t.account_id)
         .map(account_source)
-        .unwrap_or_else(|| (t.account_id.clone(), SourceKind::Ach));
+        .unwrap_or_else(|| (t.account_id.clone(), AccountKind::Other));
     LineItem {
         id: t.id.clone(),
         merchant: t.merchant().to_string(),
@@ -461,13 +423,6 @@ mod tests {
     }
 
     #[test]
-    fn last4_parses_trailing_group() {
-        assert_eq!(last4("Chase Freedom Unlimited (4707)").as_deref(), Some("4707"));
-        assert_eq!(last4("Amex ending 1005").as_deref(), Some("1005"));
-        assert_eq!(last4("SimpleFIN Checking"), None);
-    }
-
-    #[test]
     fn partitions_streams_notable_and_noise_without_double_count() {
         let s = Store::open_in_memory().unwrap();
         s.upsert_accounts(&[acct("chk", "SimpleFIN Checking", AccountKind::Checking)])
@@ -488,7 +443,7 @@ mod tests {
         assert_eq!(v.streams.len(), 1, "grocery is the only stream");
         assert_eq!(v.streams[0].rhythm.merchant, "grocery store");
         assert_eq!(v.streams[0].sources.len(), 1);
-        assert_eq!(v.streams[0].sources[0].kind, SourceKind::Ach);
+        assert_eq!(v.streams[0].sources[0].kind, AccountKind::Checking);
         assert_eq!(v.notable.len(), 1);
         assert_eq!(v.notable[0].amount_cents, 90000);
         assert_eq!(v.stats.noise_count, 2);

@@ -222,7 +222,7 @@ export function StreamSlideOver({
           {occ.map((t) => {
             const src = acctMap[t.account_id]
               ? accountSource(acctMap[t.account_id])
-              : { label: t.account_id, kind: "Ach" as const, pct: 100 };
+              : { label: t.account_id, kind: "Other" as const, pct: 100 };
             return (
               <div key={t.id}>
                 <div className="lg-occ" style={t.flag !== "Spending" ? { opacity: 0.5 } : undefined}>

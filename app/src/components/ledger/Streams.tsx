@@ -5,16 +5,36 @@ import { agoLabel, cadenceLabel, dollars, trendClass, trendLabel } from "./label
 export type SortMode = "size" | "change";
 
 // Hand-rolled flexbox rhythm strip (not Recharts, per spec). Heights normalized
-// to the series max; the final bar is the in-progress month (muted teal).
+// to the series max; the final bar is the in-progress month (muted teal). The
+// `big` variant (sidebar detail) has room to print each bar's dollar value
+// underneath, mirroring the Outflows month chart; the compact row variant stays
+// a pure sparkline.
 export function RhythmStrip({ spark, big }: { spark: number[]; big?: boolean }) {
   const max = Math.max(1, ...spark.map((v) => Math.abs(v)));
+  const barHeight = (v: number) => `${Math.max(6, Math.round((Math.abs(v) / max) * 100))}%`;
+
+  if (big) {
+    return (
+      <div className="lg-bigrhythm">
+        {spark.map((v, i) => (
+          <div className="lg-barcol" key={i}>
+            <div className="lg-barwrap">
+              <i className={i === spark.length - 1 ? "cur" : ""} style={{ height: barHeight(v) }} />
+            </div>
+            <span className="lg-barval">{dollars(v)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className={big ? "lg-bigrhythm" : "lg-rhythm"}>
+    <div className="lg-rhythm">
       {spark.map((v, i) => (
         <i
           key={i}
           className={i === spark.length - 1 ? "cur" : ""}
-          style={{ height: `${Math.max(6, Math.round((Math.abs(v) / max) * 100))}%` }}
+          style={{ height: barHeight(v) }}
         />
       ))}
     </div>

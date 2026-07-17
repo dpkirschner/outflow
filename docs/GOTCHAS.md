@@ -129,6 +129,17 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 - **The DB key comes from `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) only
   — there is no keychain path.** Losing or changing the key orphans the
   existing encrypted DB forever, so back the key file up alongside the DB.
+- **Schema migrations are encryption-agnostic.** `open_encrypted` applies
+  `PRAGMA key` then runs the *same* `migrate()` as the plaintext path; SQLCipher
+  decrypts below the SQL layer, so `ALTER`/migration code never accounts for
+  encryption. A schema change on the encrypted archive is just the normal
+  `SCHEMA_VERSION` bump + `run_migrations` block (`core/src/store.rs`), applied
+  in-process at server startup — nothing encryption-specific to do.
+- **Inspecting an encrypted DB by hand needs the `sqlcipher` CLI**, not stock
+  `sqlite3` (which reports "file is not a database" on the ciphertext). The
+  first statement must be `PRAGMA key='...';`. You rarely need this — the server
+  migrates in-process on the next open — but reach for `sqlcipher`, not
+  `sqlite3`, when you do.
 
 ## Data / demo
 

@@ -88,6 +88,12 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
   Serves the SPA from `app/dist` with an index.html fallback (OAuth resumption
   at `/oauth-return`). Frontend in `app/src/` (React + Vite + TS).
 
+**Styling:** plain CSS in two files — `app/src/theme.css` and `app/src/ledger.css`
+(no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
+`of-*` = Outflows tab, `lg-*` = ledger. For styling/visual questions, trace
+`className` → rule with `rtk grep` across those `.css` files (graphify doesn't
+index CSS), or just read both — they're small.
+
 **Swappable ports:** the transaction source is a free-function pipeline —
 fetch JSON in `net`, parse pure in `core`
 (`plaid::parse_sync_page`/`parse_accounts_get`/`parse_fixture`) — plus

@@ -195,6 +195,7 @@ pub fn parse_accounts_get(
             currency,
             last_synced: synced_at,
             source: "plaid".to_string(),
+            nickname: None,
         });
     }
     Ok(accounts)

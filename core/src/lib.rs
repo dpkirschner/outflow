@@ -12,8 +12,8 @@ pub mod transfers;
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
-    Account, AccountKind, CategorySource, Mark, MatchConfidence, MatchStatus, PlaidItem,
-    SyncEntry, Transaction, TxnFlag, TxnMatch,
+    account_display_label, Account, AccountKind, CategorySource, Mark, MatchConfidence,
+    MatchStatus, PlaidItem, SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use plaid::{parse_accounts_get, parse_fixture, parse_sync_page, Fixture, SourceError, SyncPage};

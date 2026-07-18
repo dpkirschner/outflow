@@ -4,7 +4,7 @@
 //! double-counts, and attaches per-stream sources. Everything downstream (Tauri
 //! commands, the React screen) is a thin render over `LedgerView`.
 
-use crate::model::{Account, AccountKind, Mark, Transaction, TxnFlag};
+use crate::model::{account_display_label, Account, AccountKind, Mark, Transaction, TxnFlag};
 use crate::store::Store;
 use crate::subscriptions::{detect_rhythms, normalize_payee, rhythm_for_items, RhythmEntry};
 use serde::Serialize;
@@ -113,10 +113,14 @@ pub struct LedgerView {
     pub transfers: Vec<TransferGroup>,
 }
 
-/// Label + kind for an account (pct filled in per stream). The label is the full
-/// account name for every kind; the UI colors the chip by `kind`.
+/// Label + kind for an account (pct filled in per stream). The label is the
+/// account's display name (nickname + auto last-4 when set, else the full name);
+/// the UI colors the chip by `kind`.
 fn account_source(acct: &Account) -> (String, AccountKind) {
-    (acct.name.clone(), acct.kind)
+    (
+        account_display_label(&acct.name, acct.nickname.as_deref()),
+        acct.kind,
+    )
 }
 
 /// The dominant non-null category among a group of transactions, if any.
@@ -401,6 +405,7 @@ mod tests {
             currency: "USD".into(),
             last_synced: 0,
             source: crate::model::default_source(),
+            nickname: None,
         }
     }
 

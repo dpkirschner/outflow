@@ -190,6 +190,7 @@ mod tests {
             currency: "USD".into(),
             last_synced: 0,
             source: default_source(),
+            nickname: None,
         }
     }
 

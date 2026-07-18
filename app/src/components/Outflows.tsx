@@ -248,11 +248,11 @@ export function Outflows({
         <tbody>
           {page?.items.map((t) => (
             <tr key={t.id} className={t.flag !== "Spending" ? "of-excluded" : ""}>
-              <td className="of-date">
-                {fmtDay(t.transacted_at ?? t.posted)}
-                {t.pending ? <span className="of-pending"> · pending</span> : null}
+              <td className="of-date">{fmtDay(t.transacted_at ?? t.posted)}</td>
+              <td className="of-merch">
+                <span className="of-merch-name">{t.payee ?? t.description}</span>
+                {t.pending ? <span className="of-pending">pending</span> : null}
               </td>
-              <td className="of-merch">{t.payee ?? t.description}</td>
               <td>
                 {editing === t.id ? (
                   <select

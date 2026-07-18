@@ -13,7 +13,8 @@ import type {
   TxnFlag,
   TxnPage,
 } from "../types";
-import { dollars } from "./ledger/labels";
+import { accountSource, dollars } from "./ledger/labels";
+import { SourceChip } from "./ledger/Streams";
 import type { ToastMsg } from "./Toast";
 
 const PAGE = 50;
@@ -157,7 +158,7 @@ export function Outflows({
     }
   };
 
-  const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? id;
+  const acctFor = (id: string) => accounts.find((a) => a.id === id);
   const maxOut = Math.max(1, ...flow.map((m) => m.outflow_cents));
   const arrow = (k: SortKey) => (sort === k ? (dir === "desc" ? " ↓" : " ↑") : "");
 
@@ -278,7 +279,12 @@ export function Outflows({
                   </span>
                 )}
               </td>
-              <td className="of-acct">{accountName(t.account_id)}</td>
+              <td className="of-acct">
+                {(() => {
+                  const a = acctFor(t.account_id);
+                  return a ? <SourceChip s={accountSource(a)} /> : t.account_id;
+                })()}
+              </td>
               <td className={`num ${t.amount < 0 ? "of-out" : "of-in"}`}>{dollars(t.amount)}</td>
               <td className="of-rowact">
                 {t.flag === "Spending" ? (

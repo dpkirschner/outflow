@@ -1088,7 +1088,7 @@ body:has(.lg-app) {
 }
 .of-table td:nth-child(3) .of-select { max-width: 100%; }
 .of-table th:nth-child(4),
-.of-table td:nth-child(4) { width: 132px; }  /* account */
+.of-table td:nth-child(4) { width: 176px; }  /* account (colored source chip) */
 .of-table th:nth-child(5),
 .of-table td:nth-child(5) { width: 112px; }  /* amount */
 .of-table th:nth-child(6),
@@ -1145,12 +1145,17 @@ body:has(.lg-app) {
   border-bottom: 1px dotted var(--lg-faint);
 }
 .of-acct {
-  color: var(--lg-faint);
-  font-size: 12px;
-  max-width: 160px;
+  overflow: hidden;
+}
+/* Reuse the ledger's kind-colored account chip; truncate if it can't fit the
+   fixed cell rather than widening the column. */
+.of-acct .lg-src {
+  display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: middle;
 }
 .of-out {
   color: var(--lg-text);

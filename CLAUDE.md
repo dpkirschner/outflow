@@ -90,7 +90,8 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
 
 **Styling:** plain CSS in two files — `app/src/theme.css` and `app/src/ledger.css`
 (no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
-`of-*` = Outflows tab, `lg-*` = ledger. For styling/visual questions, trace
+`of-*` = Outflows tab, `lg-*` = ledger, `cx-*` = Connections tab, `mr-*` =
+match review. For styling/visual questions, trace
 `className` → rule with `rtk grep` across those `.css` files (graphify doesn't
 index CSS), or just read both — they're small.
 

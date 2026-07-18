@@ -4,11 +4,12 @@
 // Capital One) redirect away and come back to /oauth-return, so the link_token
 // is stashed in localStorage and Link is re-initialized with the full return
 // URL (receivedRedirectUri) to resume the session.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
-import type { PlaidItem, SyncEntry } from "../types";
-import { agoLabel } from "./ledger/labels";
+import type { Account, PlaidItem, SyncEntry } from "../types";
+import { accountSource, agoLabel } from "./ledger/labels";
+import { SourceChip } from "./ledger/Streams";
 import type { ToastMsg } from "./Toast";
 
 const LINK_TOKEN_KEY = "outflow_plaid_link_token";
@@ -42,10 +43,23 @@ function LinkSession({
   return null;
 }
 
-export function Connections({ notify }: { notify: (msg: ToastMsg) => void }) {
+export function Connections({
+  notify,
+  accounts,
+  onChanged,
+}: {
+  notify: (msg: ToastMsg) => void;
+  accounts: Account[];
+  /// Re-fetch app-wide state after a nickname edit so the chips in the other
+  /// tabs (which read the shared accounts list) update too.
+  onChanged: () => void;
+}) {
   const [items, setItems] = useState<PlaidItem[]>([]);
   const [log, setLog] = useState<SyncEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  // Escape must cancel an edit without the input's onBlur committing it.
+  const cancelEdit = useRef(false);
   const [session, setSession] = useState<{
     token: string;
     receivedRedirectUri?: string;
@@ -159,6 +173,28 @@ export function Connections({ notify }: { notify: (msg: ToastMsg) => void }) {
     }
   };
 
+  // Commit a nickname edit (single path: Enter/blur both route here). Empty
+  // clears it; an unchanged value skips the round-trip.
+  const saveNickname = async (a: Account, raw: string) => {
+    setEditing(null);
+    const next = raw.trim();
+    if (next === (a.nickname ?? "")) return;
+    try {
+      await api.setAccountNickname(a.id, next);
+      notify({ kind: "ok", text: next ? `Nicknamed “${next}”` : "Nickname cleared" });
+      onChanged();
+    } catch (err) {
+      notify({ kind: "err", text: String(err) });
+    }
+  };
+
+  // Accounts grouped by institution; org === PlaidItem.institution on the live
+  // path, so headers line up with the items above (fixture accounts group too).
+  const byOrg = accounts.reduce<Record<string, Account[]>>((m, a) => {
+    (m[a.org] ??= []).push(a);
+    return m;
+  }, {});
+
   return (
     <div className="cx-wrap">
       {session && (
@@ -220,6 +256,58 @@ export function Connections({ notify }: { notify: (msg: ToastMsg) => void }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {accounts.length > 0 && (
+        <div className="cx-accts">
+          <h3>Accounts</h3>
+          <p className="cx-accts-hint">
+            Give a card or account a nickname to spot it at a glance — the last-4
+            is kept automatically.
+          </p>
+          {Object.entries(byOrg).map(([org, accts]) => (
+            <div className="cx-acct-group" key={org}>
+              <div className="cx-acct-org">{org}</div>
+              <ul className="cx-acct-list">
+                {accts.map((a) => (
+                  <li className="cx-acct-row" key={a.id}>
+                    <SourceChip s={accountSource(a)} />
+                    {editing === a.id ? (
+                      <input
+                        className="cx-nick-input"
+                        type="text"
+                        autoFocus
+                        defaultValue={a.nickname ?? ""}
+                        placeholder="nickname"
+                        maxLength={40}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.currentTarget.blur();
+                          } else if (e.key === "Escape") {
+                            cancelEdit.current = true;
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        onBlur={(e) => {
+                          if (cancelEdit.current) {
+                            cancelEdit.current = false;
+                            setEditing(null);
+                            return;
+                          }
+                          void saveNickname(a, e.target.value);
+                        }}
+                      />
+                    ) : (
+                      <button className="cx-nick-edit" onClick={() => setEditing(a.id)}>
+                        {a.nickname ? "Rename" : "Add nickname"}
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       )}
 
       {log.length > 0 && (

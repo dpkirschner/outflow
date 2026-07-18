@@ -153,6 +153,9 @@ export const api = {
   // flag is the serde variant name, e.g. "Transfer" | "CardPayment" | "Spending".
   setFlag: (txnId: string, flag: TxnFlag, learn: boolean) =>
     post<number | null>(`/txn/${encodeURIComponent(txnId)}/flag`, { flag, learn }),
+  // Rename an account. Empty string clears the nickname (chip reverts to name).
+  setAccountNickname: (accountId: string, nickname: string) =>
+    post<void>(`/account/${encodeURIComponent(accountId)}/nickname`, { nickname }),
   applyFlags: () => post<number>("/apply_flags"),
   hasCreditAccount: () => get<boolean>("/has_credit_account"),
   resetData: () => post<void>("/reset_data"),

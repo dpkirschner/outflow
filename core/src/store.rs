@@ -103,9 +103,12 @@ fn match_flag<'a>(rules: &'a [FlagRule], merchant: &str) -> Option<&'a FlagRule>
 /// runs inside the caller's transaction.
 fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Result<()> {
     for a in accounts {
+        // `nickname` is intentionally absent from the conflict-update: a re-pull
+        // (which carries no nickname) must not wipe a user-set one. Same rule as
+        // `flag` on transactions — see `insert_txn_batch`.
         conn.execute(
-            "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced, source, nickname)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
                 org=excluded.org, name=excluded.name, kind=excluded.kind,
                 balance_cents=excluded.balance_cents, currency=excluded.currency,
@@ -118,7 +121,8 @@ fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Re
                 a.balance.cents(),
                 a.currency,
                 a.last_synced,
-                a.source
+                a.source,
+                a.nickname
             ],
         )?;
     }
@@ -227,7 +231,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     balance_cents INTEGER NOT NULL,
     currency TEXT NOT NULL,
     last_synced INTEGER NOT NULL,
-    source TEXT NOT NULL DEFAULT 'plaid'
+    source TEXT NOT NULL DEFAULT 'plaid',
+    nickname TEXT
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -301,7 +306,8 @@ CREATE TABLE IF NOT EXISTS txn_matches (
 /// bumping documents the change.
 /// v1: transactions.transacted_at + transactions.flag. v2: merchant_overrides.
 /// v3: accounts.source + transactions.source (+ plaid_items, txn_matches tables).
-const SCHEMA_VERSION: i64 = 3;
+/// v4: accounts.nickname.
+const SCHEMA_VERSION: i64 = 4;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -366,6 +372,10 @@ impl Store {
                 "TEXT NOT NULL DEFAULT 'simplefin'",
             )?;
             // plaid_items / txn_matches are new tables → created by SCHEMA.
+        }
+        if version < 4 {
+            // v4: user-editable per-account nickname. NULL = no nickname.
+            self.add_column_if_missing("accounts", "nickname", "TEXT")?;
         }
         self.conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -449,7 +459,7 @@ impl Store {
 
     pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source
+            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source, nickname
              FROM accounts ORDER BY name",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -463,6 +473,7 @@ impl Store {
                 currency: r.get(5)?,
                 last_synced: r.get(6)?,
                 source: r.get(7)?,
+                nickname: r.get(8)?,
             })
         })?;
         rows.collect()
@@ -692,6 +703,22 @@ impl Store {
             }
         }
         Ok(None)
+    }
+
+    /// Set (or clear) an account's nickname. Empty/whitespace-only clears it to
+    /// NULL (chip reverts to the raw name). Preserved across re-sync because
+    /// `insert_account_batch` omits `nickname` from its conflict-update.
+    pub fn set_account_nickname(
+        &self,
+        id: &str,
+        nickname: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let val = nickname.map(str::trim).filter(|s| !s.is_empty());
+        self.conn.execute(
+            "UPDATE accounts SET nickname = ?1 WHERE id = ?2",
+            params![val, id],
+        )?;
+        Ok(())
     }
 
     /// Apply every flag rule to matching transactions. Only touches rows whose
@@ -1082,6 +1109,7 @@ mod tests {
             currency: "USD".into(),
             last_synced: 42,
             source: default_source(),
+            nickname: None,
         };
         s.upsert_accounts(&[a.clone()]).unwrap();
         let got = s.accounts().unwrap();
@@ -1373,6 +1401,30 @@ mod tests {
     }
 
     #[test]
+    fn nickname_survives_repull_and_clears() {
+        let s = Store::open_in_memory().unwrap();
+        let a = Account {
+            id: "acct1".into(),
+            org: "Chase".into(),
+            name: "CREDIT CARD (4707)".into(),
+            kind: AccountKind::Credit,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: default_source(),
+            nickname: None,
+        };
+        s.upsert_accounts(&[a.clone()]).unwrap();
+        s.set_account_nickname("acct1", Some("Sapphire")).unwrap();
+        // A re-pull carries no nickname (binds NULL) but must not wipe it.
+        s.upsert_accounts(&[a]).unwrap();
+        assert_eq!(s.accounts().unwrap()[0].nickname.as_deref(), Some("Sapphire"));
+        // Empty/whitespace clears back to NULL.
+        s.set_account_nickname("acct1", Some("  ")).unwrap();
+        assert_eq!(s.accounts().unwrap()[0].nickname, None);
+    }
+
+    #[test]
     fn merchant_marks_round_trip_and_clear() {
         let s = Store::open_in_memory().unwrap();
         s.set_merchant_mark("chase mortgage", Mark::Committed).unwrap();
@@ -1421,6 +1473,7 @@ mod tests {
             currency: "USD".into(),
             last_synced: 0,
             source: default_source(),
+            nickname: None,
         }])
         .unwrap();
         assert!(s.has_credit_account().unwrap());

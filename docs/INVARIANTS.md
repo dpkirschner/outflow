@@ -55,12 +55,14 @@ data integrity or the domain contract — treat them as load-bearing.
    `query::passes` so all aggregators inherit it and `monthly_flow` drops both
    legs. (`query`)
 
-10. **User flag decisions survive re-sync.** The upsert conflict-update omits
-    the `flag` column; `apply_flags` only ever assigns a rule's flag, never
-    resets to `Spending`; Plaid `personal_finance_category` hints seed flags at
-    parse time only (insert, not update). Card-payment suppression is only
-    correct when the card account is ingested — warn via
-    `Store::has_credit_account`. (`store`, `plaid`)
+10. **User edits survive re-sync.** The upsert conflict-updates omit any
+    user-owned column: transactions omit `flag`, accounts omit `nickname`. A
+    re-pull carries neither (it binds `flag`'s parse-time seed / a NULL nickname
+    on *insert* only), so a stored value is never clobbered on *conflict*.
+    Likewise `apply_flags` only ever assigns a rule's flag, never resets to
+    `Spending`; Plaid `personal_finance_category` hints seed flags at parse time
+    only. Card-payment suppression is only correct when the card account is
+    ingested — warn via `Store::has_credit_account`. (`store`, `plaid`)
 
 11. **Existing DBs migrate through `PRAGMA user_version`.** New columns on an
     existing table need a guarded `ALTER TABLE` in `store::run_migrations` and a

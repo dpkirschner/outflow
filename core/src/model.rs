@@ -47,6 +47,37 @@ pub struct Account {
     pub last_synced: i64,
     #[serde(default = "default_source")]
     pub source: String,
+    /// User-editable nickname. `None` = show the raw `name`. Set via
+    /// `Store::set_account_nickname`; deliberately preserved across re-sync
+    /// (omitted from the upsert conflict-update, like `Transaction::flag`).
+    #[serde(default)]
+    pub nickname: Option<String>,
+}
+
+/// Display label for an account chip: the user's nickname (when set) with the
+/// auto last-4 mask preserved. `plaid::parse_accounts_get` bakes the mask onto
+/// `name` as a trailing `" (1234)"`; when a nickname is set we strip that suffix
+/// off `name` and re-attach it to the nickname. No nickname → the raw `name`.
+/// Mirrored in the frontend as `accountDisplayLabel` (app/src/components/ledger/labels.ts).
+pub fn account_display_label(name: &str, nickname: Option<&str>) -> String {
+    match nickname.map(str::trim).filter(|s| !s.is_empty()) {
+        None => name.to_string(),
+        Some(nick) => match mask_suffix(name) {
+            Some(mask) => format!("{nick} {mask}"),
+            None => nick.to_string(),
+        },
+    }
+}
+
+/// The trailing `"(1234)"`-style suffix `plaid.rs` appends to an account name,
+/// if present. Strips only the last parenthesized group.
+fn mask_suffix(name: &str) -> Option<&str> {
+    let name = name.trim_end();
+    if !name.ends_with(')') {
+        return None;
+    }
+    let open = name.rfind(" (")?;
+    Some(name[open + 1..].trim_end())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,5 +295,34 @@ impl Transaction {
     /// analytics reflect behavior, not bookkeeping.
     pub fn effective_date(&self) -> i64 {
         self.transacted_at.unwrap_or(self.posted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::account_display_label as label;
+
+    #[test]
+    fn no_nickname_shows_raw_name() {
+        assert_eq!(label("CREDIT CARD (4707)", None), "CREDIT CARD (4707)");
+        assert_eq!(label("CREDIT CARD (4707)", Some("")), "CREDIT CARD (4707)");
+        assert_eq!(label("CREDIT CARD (4707)", Some("   ")), "CREDIT CARD (4707)");
+    }
+
+    #[test]
+    fn nickname_keeps_the_trailing_mask() {
+        assert_eq!(label("CREDIT CARD (4707)", Some("Sapphire")), "Sapphire (4707)");
+        assert_eq!(label("CREDIT CARD (4707)", Some("  Sapphire  ")), "Sapphire (4707)");
+    }
+
+    #[test]
+    fn nickname_without_a_mask_shows_alone() {
+        assert_eq!(label("Checking 0000", Some("Everyday")), "Everyday");
+        assert_eq!(label("Plain Name", Some("Nick")), "Nick");
+    }
+
+    #[test]
+    fn strips_only_the_last_paren_group() {
+        assert_eq!(label("Joint (shared) (3333)", Some("Nick")), "Nick (3333)");
     }
 }

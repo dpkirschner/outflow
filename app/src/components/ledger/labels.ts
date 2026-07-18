@@ -21,10 +21,25 @@ export function coverageText(c: Coverage, win: Window): string {
   return `Data since ${since} · ${tail} · ${txns}`;
 }
 
+// Display label for an account chip: the user's nickname (when set) with the
+// auto last-4 mask preserved, else the raw name. Mirror of core's
+// `account_display_label` (core/src/model.rs) — plaid parsing bakes the mask
+// onto `name` as a trailing " (1234)"; strip it off and re-attach to the nickname.
+export function accountDisplayLabel(name: string, nickname: string | null): string {
+  const nick = nickname?.trim();
+  if (!nick) return name;
+  const trimmed = name.trimEnd();
+  if (trimmed.endsWith(")")) {
+    const open = trimmed.lastIndexOf(" (");
+    if (open >= 0) return `${nick} ${trimmed.slice(open + 1)}`;
+  }
+  return nick;
+}
+
 // Derive a source chip from an account (mirrors core's ledger::account_source):
-// the full account name, colored by the account kind.
+// the display label, colored by the account kind.
 export function accountSource(a: Account): Source {
-  return { label: a.name, kind: a.kind, pct: 100 };
+  return { label: accountDisplayLabel(a.name, a.nickname), kind: a.kind, pct: 100 };
 }
 
 // Whole-dollar money for the ledger (the mockup drops cents): "$1,310".

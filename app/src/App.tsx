@@ -243,7 +243,11 @@ export default function App() {
 
       {tab === "connections" ? (
         <>
-          <Connections notify={notify} />
+          <Connections
+            notify={notify}
+            accounts={accounts}
+            onChanged={() => void reload(win)}
+          />
           {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "review" ? (

@@ -347,6 +347,26 @@ async fn set_flag(
     .map(Json)
 }
 
+#[derive(Deserialize)]
+struct NicknameBody {
+    /// Free-form nickname; empty/whitespace clears it (chip reverts to name).
+    nickname: String,
+}
+
+async fn set_account_nickname(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    Json(body): Json<NicknameBody>,
+) -> ApiResult<()> {
+    with_store(&state, move |s| {
+        let nn = body.nickname.trim();
+        s.set_account_nickname(&account_id, (!nn.is_empty()).then_some(nn))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
 async fn apply_flags(State(state): State<AppState>) -> ApiResult<usize> {
     with_store(&state, |s| s.apply_flags().map_err(|e| e.to_string()))
         .await
@@ -495,6 +515,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/categorize_llm", post(categorize_llm))
         .route("/txn/{txn_id}/category", post(set_category))
         .route("/txn/{txn_id}/flag", post(set_flag))
+        .route("/account/{account_id}/nickname", post(set_account_nickname))
         .route("/apply_flags", post(apply_flags))
         .route("/mark_stream", post(mark_stream))
         .route("/clear_stream_mark", post(clear_stream_mark))

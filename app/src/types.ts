@@ -30,6 +30,7 @@ export interface Account {
   currency: string;
   last_synced: number; // epoch seconds
   source: string; // provenance: "plaid" (or "simplefin" from the retired era)
+  nickname: string | null; // user-set; null = show the raw name
 }
 
 export interface Transaction {

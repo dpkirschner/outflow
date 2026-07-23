@@ -13,7 +13,7 @@ import type {
   TxnFlag,
   TxnPage,
 } from "../types";
-import { accountSource, dollars } from "./ledger/labels";
+import { accountDisplayLabel, accountSource, dollars } from "./ledger/labels";
 import { SourceChip } from "./ledger/Streams";
 import type { ToastMsg } from "./Toast";
 
@@ -196,7 +196,7 @@ export function Outflows({
           <option value="">All accounts</option>
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name}
+              {accountDisplayLabel(a.name, a.nickname)}
             </option>
           ))}
         </select>

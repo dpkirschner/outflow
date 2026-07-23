@@ -1076,6 +1076,17 @@ body:has(.lg-app) {
   border-color: var(--lg-line);
   color: var(--lg-text);
 }
+/* "All" (lifetime) selector — separated from the month series and given its own
+   blue accent so its full-height bar doesn't read as just another month. */
+.of-month-all {
+  margin-right: 4px;
+  padding-right: 10px;
+  border-right: 1px solid var(--lg-line);
+  border-radius: 8px;
+}
+.of-month-all .of-bar {
+  background: var(--lg-blue);
+}
 .of-bar {
   width: 22px;
   background: var(--lg-teal);

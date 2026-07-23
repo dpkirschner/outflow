@@ -51,7 +51,10 @@ export function Outflows({
   notify: (msg: ToastMsg) => void;
 }) {
   const [flow, setFlow] = useState<MonthlyFlow[]>([]);
-  const [month, setMonth] = useState<{ year: number; month: number } | null>(null);
+  // null = uninitialized (first load defaults to the latest month); "all" =
+  // explicit, sticky all-time. The sentinel keeps loadFlow's `cur ?? latest`
+  // default from snapping an all-time view back to the latest month.
+  const [month, setMonth] = useState<{ year: number; month: number } | "all" | null>(null);
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [account, setAccount] = useState("");
@@ -92,7 +95,7 @@ export function Outflows({
   }, [loadFlow]);
 
   const query = useMemo(() => {
-    const bounds = month ? monthBounds(month.year, month.month) : {};
+    const bounds = month && month !== "all" ? monthBounds(month.year, month.month) : {};
     return {
       ...bounds,
       q: debounced || undefined,
@@ -160,18 +163,32 @@ export function Outflows({
 
   const acctFor = (id: string) => accounts.find((a) => a.id === id);
   const maxOut = Math.max(1, ...flow.map((m) => m.outflow_cents));
+  const allOut = flow.reduce((a, m) => a + m.outflow_cents, 0);
   const arrow = (k: SortKey) => (sort === k ? (dir === "desc" ? " ↓" : " ↑") : "");
 
   return (
     <div className="of-wrap">
       <div className="of-months">
+        {flow.length > 0 && (
+          <button
+            className={`of-month of-month-all${month === "all" ? " on" : ""}`}
+            onClick={() => setMonth("all")}
+            title={`${dollars(-allOut)} out · all time`}
+          >
+            {/* Summed lifetime outflow: allOut >= any single month, so full height. */}
+            <span className="of-bar" style={{ height: "50px" }} />
+            <span className="of-mlabel">All</span>
+            <span className="of-mout">{dollars(-allOut)}</span>
+          </button>
+        )}
         {flow.map((m) => {
-          const active = month?.year === m.year && month?.month === m.month;
+          const active =
+            month !== "all" && month?.year === m.year && month?.month === m.month;
           return (
             <button
               key={`${m.year}-${m.month}`}
               className={`of-month${active ? " on" : ""}`}
-              onClick={() => setMonth(active ? null : { year: m.year, month: m.month })}
+              onClick={() => setMonth({ year: m.year, month: m.month })}
               title={`${dollars(-m.outflow_cents)} out`}
             >
               <span
@@ -235,7 +252,9 @@ export function Outflows({
               {dollars(page.total_cents)}
             </b>{" "}
             {page.total_cents > 0 ? "net in" : page.total_cents < 0 ? "net out" : "net"}
-            {month ? ` · ${monthLabel(month.year, month.month)}` : " · all time"}
+            {month && month !== "all"
+              ? ` · ${monthLabel(month.year, month.month)}`
+              : " · all time"}
           </>
         ) : (
           "Loading…"

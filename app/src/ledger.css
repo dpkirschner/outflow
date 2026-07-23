@@ -1232,6 +1232,10 @@ body:has(.lg-app) {
 .of-in {
   color: var(--lg-green);
 }
+/* Summary "net out" total — spent more than received (money lost this view). */
+.of-netout {
+  color: var(--lg-red);
+}
 .of-excluded td {
   opacity: 0.5;
 }

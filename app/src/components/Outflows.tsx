@@ -225,8 +225,17 @@ export function Outflows({
       <div className="of-total">
         {page ? (
           <>
-            <b>{page.total}</b> transactions · net <b>{dollars(page.total_cents)}</b>
-            {month ? ` in ${monthLabel(month.year, month.month)}` : " all time"}
+            <b>{page.total}</b> transactions ·{" "}
+            <b
+              className={
+                page.total_cents > 0 ? "of-in" : page.total_cents < 0 ? "of-netout" : undefined
+              }
+              title="Money in minus money out across these transactions. 'net in' = you received more than you spent; 'net out' = you spent more than you received."
+            >
+              {dollars(page.total_cents)}
+            </b>{" "}
+            {page.total_cents > 0 ? "net in" : page.total_cents < 0 ? "net out" : "net"}
+            {month ? ` · ${monthLabel(month.year, month.month)}` : " · all time"}
           </>
         ) : (
           "Loading…"

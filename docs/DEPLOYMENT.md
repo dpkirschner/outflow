@@ -254,9 +254,15 @@ export OUTFLOW_SERVER=http://host.docker.internal:8080
 That hop is plain HTTP but never leaves the machine. It still requires the
 token — being on the box is not authorization.
 
-(Build the CLI with `--features client`. `report`, `subs`, `accounts`,
-`matches`, `status`, `pull`, `fix` all work in server mode and print the same
-JSON shapes as local `--json`.)
+(Build the CLI with `--features client`. `txns`, `report`, `subs`, `accounts`,
+`matches`, `status`, `categorize`, `pull`, `fix` all work in server mode and
+print the same JSON shapes as local `--json` — the reads need only the RO
+token; `categorize`, `pull`, `fix`, and `matches accept|reject` mutate and need
+the full token.)
+
+To call the HTTP API directly instead of via the CLI, see
+[API.md](API.md) — every `/api/*` endpoint, its method, query params, and which
+auth tier it needs.
 
 ## 8. Backups
 

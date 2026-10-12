@@ -57,6 +57,7 @@ Deeper reference lives in [`docs/`](docs/):
 [data model](docs/DATA_MODEL.md) ·
 [invariants](docs/INVARIANTS.md) ·
 [development](docs/DEVELOPMENT.md) ·
+[API](docs/API.md) ·
 [gotchas](docs/GOTCHAS.md) ·
 [deployment](docs/DEPLOYMENT.md).
 

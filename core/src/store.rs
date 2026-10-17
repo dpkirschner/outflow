@@ -807,10 +807,10 @@ impl Store {
             .filter(|t| {
                 t.amount.is_outflow()
                     && normalize_payee(t.merchant()) == merchant_key
-                    && since.map_or(true, |s| t.effective_date() >= s)
+                    && since.is_none_or(|s| t.effective_date() >= s)
             })
             .collect();
-        txns.sort_by(|a, b| b.effective_date().cmp(&a.effective_date()));
+        txns.sort_by_key(|x| std::cmp::Reverse(x.effective_date()));
         Ok(txns)
     }
 
@@ -1113,7 +1113,7 @@ mod tests {
             source: default_source(),
             nickname: None,
         };
-        s.upsert_accounts(&[a.clone()]).unwrap();
+        s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         let got = s.accounts().unwrap();
         assert_eq!(got, vec![a]);
     }
@@ -1457,7 +1457,7 @@ mod tests {
             source: default_source(),
             nickname: None,
         };
-        s.upsert_accounts(&[a.clone()]).unwrap();
+        s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         s.set_account_nickname("acct1", Some("Sapphire")).unwrap();
         // A re-pull carries no nickname (binds NULL) but must not wipe it.
         s.upsert_accounts(&[a]).unwrap();
@@ -1488,7 +1488,7 @@ mod tests {
             Some(&Mark::Dismissed)
         );
         s.clear_merchant_mark("chase mortgage").unwrap();
-        assert!(s.merchant_marks().unwrap().get("chase mortgage").is_none());
+        assert!(!s.merchant_marks().unwrap().contains_key("chase mortgage"));
     }
 
     #[test]

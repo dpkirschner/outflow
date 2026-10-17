@@ -67,6 +67,8 @@ pub enum SortKey {
 }
 
 impl SortKey {
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<SortKey> {
         match s {
             "date" => Some(SortKey::Date),
@@ -134,16 +136,16 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
         .all_transactions()?
         .into_iter()
         .filter(|t| passes(t, &q.filter))
-        .filter(|t| q.account_id.as_deref().map_or(true, |a| t.account_id == a))
+        .filter(|t| q.account_id.as_deref().is_none_or(|a| t.account_id == a))
         .filter(|t| {
             q.category
                 .as_deref()
-                .map_or(true, |c| t.category.as_deref() == Some(c))
+                .is_none_or(|c| t.category.as_deref() == Some(c))
         })
-        .filter(|t| q.source.as_deref().map_or(true, |s| t.source == s))
-        .filter(|t| q.flag.map_or(true, |f| t.flag == f))
-        .filter(|t| q.min_cents.map_or(true, |m| t.amount.cents().abs() >= m))
-        .filter(|t| q.max_cents.map_or(true, |m| t.amount.cents().abs() <= m))
+        .filter(|t| q.source.as_deref().is_none_or(|s| t.source == s))
+        .filter(|t| q.flag.is_none_or(|f| t.flag == f))
+        .filter(|t| q.min_cents.is_none_or(|m| t.amount.cents().abs() >= m))
+        .filter(|t| q.max_cents.is_none_or(|m| t.amount.cents().abs() <= m))
         .filter(|t| {
             let Some(n) = &needle else { return true };
             t.payee.as_deref().unwrap_or("").to_lowercase().contains(n)
@@ -250,7 +252,7 @@ pub fn spend_by_category(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<C
             count,
         })
         .collect();
-    out.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+    out.sort_by_key(|x| std::cmp::Reverse(x.total_cents));
     Ok(out)
 }
 
@@ -281,7 +283,7 @@ pub fn top_merchants(
             count,
         })
         .collect();
-    out.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+    out.sort_by_key(|x| std::cmp::Reverse(x.total_cents));
     out.truncate(limit);
     Ok(out)
 }
@@ -313,7 +315,7 @@ pub fn monthly_flow(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<Monthl
             },
         )
         .collect();
-    out.sort_by(|a, b| (a.year, a.month).cmp(&(b.year, b.month)));
+    out.sort_by_key(|a| (a.year, a.month));
     Ok(out)
 }
 

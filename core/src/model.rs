@@ -54,6 +54,12 @@ pub struct Account {
     /// (omitted from the upsert conflict-update, like `Transaction::flag`).
     #[serde(default)]
     pub nickname: Option<String>,
+    /// User-hidden: kept in the archive and still synced, but dropped from
+    /// every user-facing read (`Store::accounts`, `Store::all_transactions`).
+    /// Set via `Store::set_account_hidden`; preserved across re-sync like
+    /// `nickname`.
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 /// Display label for an account chip: the user's nickname (when set) with the

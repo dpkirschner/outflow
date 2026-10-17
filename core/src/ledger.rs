@@ -424,6 +424,7 @@ mod tests {
             last_synced: 0,
             source: crate::model::default_source(),
             nickname: None,
+            hidden: false,
         }
     }
 

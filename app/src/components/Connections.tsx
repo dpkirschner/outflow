@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { api } from "../api";
 import type { Account, PlaidItem, SyncEntry } from "../types";
-import { accountSource, agoLabel } from "./ledger/labels";
+import { accountDisplayLabel, accountSource, agoLabel } from "./ledger/labels";
 import { SourceChip } from "./ledger/Streams";
 import type { ToastMsg } from "./Toast";
 
@@ -45,16 +45,16 @@ function LinkSession({
 
 export function Connections({
   notify,
-  accounts,
   onChanged,
 }: {
   notify: (msg: ToastMsg) => void;
-  accounts: Account[];
-  /// Re-fetch app-wide state after a nickname edit so the chips in the other
-  /// tabs (which read the shared accounts list) update too.
+  /// Re-fetch app-wide state after a nickname or hide change so the other
+  /// tabs (which read the shared, visible-only accounts list) update too.
   onChanged: () => void;
 }) {
   const [items, setItems] = useState<PlaidItem[]>([]);
+  // Every account, hidden included — this is the one screen that can un-hide.
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [log, setLog] = useState<SyncEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -67,9 +67,14 @@ export function Connections({
 
   const refresh = useCallback(async () => {
     try {
-      const [it, lg] = await Promise.all([api.plaidItems(), api.syncLog(15)]);
+      const [it, lg, accts] = await Promise.all([
+        api.plaidItems(),
+        api.syncLog(15),
+        api.accounts(true),
+      ]);
       setItems(it);
       setLog(lg);
+      setAccounts(accts);
     } catch (err) {
       notify({ kind: "err", text: `Load failed: ${String(err)}` });
     }
@@ -189,6 +194,22 @@ export function Connections({
     try {
       await api.setAccountNickname(a.id, next);
       notify({ kind: "ok", text: next ? `Nicknamed “${next}”` : "Nickname cleared" });
+      await refresh();
+      onChanged();
+    } catch (err) {
+      notify({ kind: "err", text: String(err) });
+    }
+  };
+
+  const toggleHidden = async (a: Account) => {
+    try {
+      await api.setAccountHidden(a.id, !a.hidden);
+      const label = accountDisplayLabel(a.name, a.nickname);
+      notify({
+        kind: "ok",
+        text: a.hidden ? `Showing ${label} again` : `Hid ${label} from every view`,
+      });
+      await refresh();
       onChanged();
     } catch (err) {
       notify({ kind: "err", text: String(err) });
@@ -270,15 +291,17 @@ export function Connections({
           <h3>Accounts</h3>
           <p className="cx-accts-hint">
             Give a card or account a nickname to spot it at a glance — the last-4
-            is kept automatically.
+            is kept automatically. Hide one to drop it and its transactions from
+            every view; it keeps syncing, and you can show it again here.
           </p>
           {Object.entries(byOrg).map(([org, accts]) => (
             <div className="cx-acct-group" key={org}>
               <div className="cx-acct-org">{org}</div>
               <ul className="cx-acct-list">
                 {accts.map((a) => (
-                  <li className="cx-acct-row" key={a.id}>
+                  <li className={`cx-acct-row${a.hidden ? " cx-acct-hidden" : ""}`} key={a.id}>
                     <SourceChip s={accountSource(a)} />
+                    {a.hidden && <span className="cx-hidden-tag">hidden</span>}
                     {editing === a.id ? (
                       <input
                         className="cx-nick-input"
@@ -309,6 +332,9 @@ export function Connections({
                         {a.nickname ? "Rename" : "Add nickname"}
                       </button>
                     )}
+                    <button className="cx-hide" onClick={() => void toggleHidden(a)}>
+                      {a.hidden ? "Show" : "Hide"}
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -601,6 +601,7 @@ mod tests {
             last_synced: 0,
             source: default_source(),
             nickname: None,
+            hidden: false,
         }
     }
 

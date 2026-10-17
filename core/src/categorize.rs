@@ -15,6 +15,8 @@ impl MatchType {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<MatchType> {
         match s {
             "exact" => Some(MatchType::Exact),

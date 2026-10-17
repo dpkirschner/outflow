@@ -19,6 +19,8 @@ impl AccountKind {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> AccountKind {
         match s {
             "checking" => AccountKind::Checking,
@@ -98,6 +100,8 @@ impl CategorySource {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<CategorySource> {
         match s {
             "plaid" => Some(CategorySource::Plaid),
@@ -131,6 +135,8 @@ impl Mark {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Mark> {
         match s {
             "committed" => Some(Mark::Committed),
@@ -162,6 +168,8 @@ impl TxnFlag {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<TxnFlag> {
         match s {
             "spending" => Some(TxnFlag::Spending),
@@ -223,6 +231,8 @@ impl MatchStatus {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<MatchStatus> {
         match s {
             "proposed" => Some(MatchStatus::Proposed),
@@ -247,6 +257,8 @@ impl MatchConfidence {
         }
     }
 
+    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<MatchConfidence> {
         match s {
             "high" => Some(MatchConfidence::High),

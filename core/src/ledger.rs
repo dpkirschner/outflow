@@ -158,7 +158,7 @@ fn stream_sources(items: &[&Transaction], accounts: &HashMap<String, Account>) -
             }
         })
         .collect();
-    out.sort_by(|a, b| b.pct.cmp(&a.pct));
+    out.sort_by_key(|x| std::cmp::Reverse(x.pct));
     out
 }
 
@@ -214,14 +214,14 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
     let earliest = all.iter().map(|t| t.effective_date()).min();
     let windowed: Vec<Transaction> = all
         .into_iter()
-        .filter(|t| since.map_or(true, |s| t.effective_date() >= s))
+        .filter(|t| since.is_none_or(|s| t.effective_date() >= s))
         .collect();
     let coverage = Coverage {
         earliest,
         window_txn_count: windowed.iter().filter(|t| t.amount.is_outflow()).count(),
         covers_all: match since {
             None => true,
-            Some(s) => earliest.map_or(true, |e| e >= s),
+            Some(s) => earliest.is_none_or(|e| e >= s),
         },
     };
 
@@ -313,9 +313,9 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
             noise_items.push(item);
         }
     }
-    notable.sort_by(|a, b| b.amount_cents.cmp(&a.amount_cents));
+    notable.sort_by_key(|x| std::cmp::Reverse(x.amount_cents));
     notable.truncate(NOTABLE_TOP_N);
-    noise_items.sort_by(|a, b| b.date.cmp(&a.date)); // newest first
+    noise_items.sort_by_key(|x| std::cmp::Reverse(x.date)); // newest first
     let noise_count = noise_items.len();
 
     // Transfers / card payments — grouped, excluded from every total.
@@ -337,7 +337,7 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
             },
         )
         .collect();
-    transfers.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+    transfers.sort_by_key(|x| std::cmp::Reverse(x.total_cents));
 
     let stats = LedgerStats {
         recurring_monthly_cents: streams
@@ -387,7 +387,7 @@ pub fn stream_preview(
             t.amount.is_outflow()
                 && t.flag == TxnFlag::Spending
                 && normalize_payee(t.merchant()) == merchant_key
-                && since.map_or(true, |s| t.effective_date() >= s)
+                && since.is_none_or(|s| t.effective_date() >= s)
         })
         .collect();
     Ok(

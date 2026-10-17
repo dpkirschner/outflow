@@ -127,7 +127,7 @@ pub fn detect(txns: &[Transaction]) -> Vec<Subscription> {
         });
     }
 
-    out.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+    out.sort_by_key(|x| std::cmp::Reverse(x.total_cents));
     out
 }
 
@@ -342,7 +342,7 @@ pub fn detect_rhythms(txns: &[Transaction], now: i64) -> Vec<RhythmEntry> {
         out.push(build_rhythm(merchant, &items, cadence, med_gap, now));
     }
 
-    out.sort_by(|a, b| b.monthly_estimate_cents.cmp(&a.monthly_estimate_cents));
+    out.sort_by_key(|x| std::cmp::Reverse(x.monthly_estimate_cents));
     out
 }
 
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn rhythm_for_items_uses_detected_cadence_when_regular() {
         // Uber-shaped: alternating 17/13-day gaps → regular FewPerMonth, NOT Irregular.
-        let txns = vec![
+        let txns = [
             charge("1", 0, -633, "Uber"),
             charge("2", 17, -540, "Uber"),
             charge("3", 30, -633, "Uber"),
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn rhythm_for_items_single_occurrence_is_irregular() {
-        let txns = vec![charge("1", 0, -900, "One Off")];
+        let txns = [charge("1", 0, -900, "One Off")];
         let items: Vec<&Transaction> = txns.iter().collect();
         let e = rhythm_for_items("one off".into(), &items, LATER).unwrap();
         assert_eq!(e.cadence, StreamCadence::Irregular);

@@ -7,9 +7,9 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    detect, monthly_flow, parse_fixture, spend_by_category, top_merchants, Account,
-    CategorySource, CategorySpend, LedgerView, Mark, MerchantSpend, MonthlyFlow, Subscription,
-    SyncEntry, Transaction, TxnFilter, TxnFlag,
+    detect, monthly_flow, parse_fixture, spend_by_category, top_merchants, Account, CategorySource,
+    CategorySpend, LedgerView, Mark, MerchantSpend, MonthlyFlow, Subscription, SyncEntry,
+    Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -164,9 +164,11 @@ async fn spend_categories(
     Query(params): Query<FilterParams>,
 ) -> ApiResult<Vec<CategorySpend>> {
     let f = params.to_filter();
-    with_store(&state, move |s| spend_by_category(s, &f).map_err(|e| e.to_string()))
-        .await
-        .map(Json)
+    with_store(&state, move |s| {
+        spend_by_category(s, &f).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
 }
 
 // Inlined filter fields, not flatten — see the note on TxnQueryParams.
@@ -191,9 +193,11 @@ async fn merchants(
     }
     .to_filter();
     let limit = params.limit.unwrap_or(15);
-    with_store(&state, move |s| top_merchants(s, &f, limit).map_err(|e| e.to_string()))
-        .await
-        .map(Json)
+    with_store(&state, move |s| {
+        top_merchants(s, &f, limit).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
 }
 
 async fn flow(
@@ -201,9 +205,11 @@ async fn flow(
     Query(params): Query<FilterParams>,
 ) -> ApiResult<Vec<MonthlyFlow>> {
     let f = params.to_filter();
-    with_store(&state, move |s| monthly_flow(s, &f).map_err(|e| e.to_string()))
-        .await
-        .map(Json)
+    with_store(&state, move |s| {
+        monthly_flow(s, &f).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
 }
 
 async fn subscriptions(State(state): State<AppState>) -> ApiResult<Vec<Subscription>> {
@@ -246,7 +252,8 @@ async fn stream_occurrences(
 ) -> ApiResult<Vec<Transaction>> {
     let since = window_since(p.window.as_deref().unwrap_or("6mo"), now_secs());
     with_store(&state, move |s| {
-        s.stream_occurrences(&p.merchant, since).map_err(|e| e.to_string())
+        s.stream_occurrences(&p.merchant, since)
+            .map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -274,12 +281,10 @@ struct MarkBody {
     mark: Mark,
 }
 
-async fn mark_stream(
-    State(state): State<AppState>,
-    Json(body): Json<MarkBody>,
-) -> ApiResult<()> {
+async fn mark_stream(State(state): State<AppState>, Json(body): Json<MarkBody>) -> ApiResult<()> {
     with_store(&state, move |s| {
-        s.set_merchant_mark(&body.merchant, body.mark).map_err(|e| e.to_string())
+        s.set_merchant_mark(&body.merchant, body.mark)
+            .map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -295,7 +300,8 @@ async fn clear_stream_mark(
     Json(body): Json<MerchantBody>,
 ) -> ApiResult<()> {
     with_store(&state, move |s| {
-        s.clear_merchant_mark(&body.merchant).map_err(|e| e.to_string())
+        s.clear_merchant_mark(&body.merchant)
+            .map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -341,7 +347,8 @@ async fn set_flag(
     Json(body): Json<FlagBody>,
 ) -> ApiResult<Option<i64>> {
     with_store(&state, move |s| {
-        s.set_flag(&txn_id, body.flag, body.learn).map_err(|e| e.to_string())
+        s.set_flag(&txn_id, body.flag, body.learn)
+            .map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -374,9 +381,11 @@ async fn apply_flags(State(state): State<AppState>) -> ApiResult<usize> {
 }
 
 async fn has_credit_account(State(state): State<AppState>) -> ApiResult<bool> {
-    with_store(&state, |s| s.has_credit_account().map_err(|e| e.to_string()))
-        .await
-        .map(Json)
+    with_store(&state, |s| {
+        s.has_credit_account().map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
 }
 
 async fn reset_data(State(state): State<AppState>) -> ApiResult<()> {
@@ -395,9 +404,11 @@ async fn sync_log(
     Query(p): Query<LimitParam>,
 ) -> ApiResult<Vec<SyncEntry>> {
     let limit = p.limit.unwrap_or(50);
-    with_store(&state, move |s| s.sync_log(limit).map_err(|e| e.to_string()))
-        .await
-        .map(Json)
+    with_store(&state, move |s| {
+        s.sync_log(limit).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
 }
 
 #[derive(Deserialize)]
@@ -417,8 +428,11 @@ async fn pull_from_file(
     let fixture = parse_fixture(&json, started)
         .map_err(|err| ApiError::bad_request(format!("parse: {err:?}")))?;
     with_store(&state, move |s| {
-        let log_id = s.log_sync_start("plaid:file", started).map_err(|e| e.to_string())?;
-        s.upsert_accounts(&fixture.accounts).map_err(|e| e.to_string())?;
+        let log_id = s
+            .log_sync_start("plaid:file", started)
+            .map_err(|e| e.to_string())?;
+        s.upsert_accounts(&fixture.accounts)
+            .map_err(|e| e.to_string())?;
         let mut txns = fixture.sync.added;
         txns.extend(fixture.sync.modified);
         let r = s.upsert_transactions(&txns).map_err(|e| e.to_string())?;
@@ -584,7 +598,10 @@ mod tests {
             serde_json::Value::Null
         } else {
             serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                panic!("body was not JSON ({e}): {:?}", String::from_utf8_lossy(&bytes))
+                panic!(
+                    "body was not JSON ({e}): {:?}",
+                    String::from_utf8_lossy(&bytes)
+                )
             })
         };
         (status, body)
@@ -596,7 +613,10 @@ mod tests {
     // string" body; axum_extra's serde_html_form Query must accept them.
     #[tokio::test]
     async fn transactions_accepts_flattened_filter_params() {
-        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle"), txn("t2", -900, "Sightglass")]);
+        let app = app_with_txns(&[
+            txn("t1", -1500, "Blue Bottle"),
+            txn("t2", -900, "Sightglass"),
+        ]);
         let (status, body) = get_json(
             app,
             "/transactions?since=1719810000&until=1722488400&sort=date&dir=desc&offset=0&limit=50",
@@ -622,7 +642,10 @@ mod tests {
     // The /merchants handler flattens FilterParams too — same fix, same guard.
     #[tokio::test]
     async fn merchants_accepts_flattened_filter_params() {
-        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle"), txn("t2", -900, "Sightglass")]);
+        let app = app_with_txns(&[
+            txn("t1", -1500, "Blue Bottle"),
+            txn("t2", -900, "Sightglass"),
+        ]);
         let (status, body) =
             get_json(app, "/merchants?since=1719810000&until=1722488400&limit=5").await;
         assert_eq!(status, StatusCode::OK, "body: {body}");

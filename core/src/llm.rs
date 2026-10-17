@@ -188,12 +188,20 @@ mod tests {
     fn maps_merchants_to_vocabulary() {
         let fake = Fake::new(r#"{"whole foods": "Groceries", "netflix com": "Streaming"}"#);
         let cat = LlmCategorizer::new(&fake, vocab());
-        let out = cat.suggest(&samples(&["whole foods", "netflix com"])).unwrap();
+        let out = cat
+            .suggest(&samples(&["whole foods", "netflix com"]))
+            .unwrap();
         assert_eq!(
             out,
             vec![
-                Suggestion { merchant: "whole foods".into(), category: "Groceries".into() },
-                Suggestion { merchant: "netflix com".into(), category: "Streaming".into() },
+                Suggestion {
+                    merchant: "whole foods".into(),
+                    category: "Groceries".into()
+                },
+                Suggestion {
+                    merchant: "netflix com".into(),
+                    category: "Streaming".into()
+                },
             ]
         );
     }
@@ -211,7 +219,10 @@ mod tests {
         // "groceries" canonicalizes; the other two are not in the vocabulary → dropped.
         assert_eq!(
             out,
-            vec![Suggestion { merchant: "whole foods".into(), category: "Groceries".into() }]
+            vec![Suggestion {
+                merchant: "whole foods".into(),
+                category: "Groceries".into()
+            }]
         );
     }
 

@@ -91,9 +91,8 @@ pub fn detect_card_payments(
 
     // Candidate legs. Pending rows are excluded: a Plaid pending id can be
     // superseded by a differently-id'd posted row, which would orphan a match.
-    let eligible = |t: &Transaction| {
-        !t.pending && matches!(t.flag, TxnFlag::Spending | TxnFlag::CardPayment)
-    };
+    let eligible =
+        |t: &Transaction| !t.pending && matches!(t.flag, TxnFlag::Spending | TxnFlag::CardPayment);
     let bank_legs: Vec<&Transaction> = txns
         .iter()
         .filter(|t| {
@@ -118,8 +117,9 @@ pub fn detect_card_payments(
         .map(|(b, c)| (b.as_str(), c.as_str()))
         .collect();
     let window = opts.max_day_gap * DAY;
-    let in_window =
-        |a: &Transaction, b: &Transaction| (a.effective_date() - b.effective_date()).abs() <= window;
+    let in_window = |a: &Transaction, b: &Transaction| {
+        (a.effective_date() - b.effective_date()).abs() <= window
+    };
 
     let mut out = Vec::new();
     for bank in &bank_legs {
@@ -127,8 +127,7 @@ pub fn detect_card_payments(
         let Some(cards) = by_amount.get(&magnitude) else {
             continue;
         };
-        let partners: Vec<&&Transaction> =
-            cards.iter().filter(|c| in_window(bank, c)).collect();
+        let partners: Vec<&&Transaction> = cards.iter().filter(|c| in_window(bank, c)).collect();
         for card in &partners {
             if bank.flag == TxnFlag::CardPayment && card.flag == TxnFlag::CardPayment {
                 continue; // both legs already suppressed — nothing to do
@@ -249,7 +248,9 @@ mod tests {
             txn("b1", "checking", 100, -1000, "autopay"),
             txn("c1", "card", 106, 1000, "payment"),
         ];
-        assert!(detect_card_payments(&accounts, &outside, &[], &MatchOptions::default()).is_empty());
+        assert!(
+            detect_card_payments(&accounts, &outside, &[], &MatchOptions::default()).is_empty()
+        );
     }
 
     #[test]
@@ -286,7 +287,9 @@ mod tests {
             txn("c1", "card", 100, 1000, "payment"),
         ];
         let decided = vec![("b1".to_string(), "c1".to_string())];
-        assert!(detect_card_payments(&accounts, &txns, &decided, &MatchOptions::default()).is_empty());
+        assert!(
+            detect_card_payments(&accounts, &txns, &decided, &MatchOptions::default()).is_empty()
+        );
     }
 
     #[test]
@@ -307,8 +310,10 @@ mod tests {
         bank.flag = TxnFlag::CardPayment;
         let mut card = txn("c1", "card", 101, 30_000, "payment");
         card.flag = TxnFlag::CardPayment;
-        assert!(detect_card_payments(&accounts, &[bank, card], &[], &MatchOptions::default())
-            .is_empty());
+        assert!(
+            detect_card_payments(&accounts, &[bank, card], &[], &MatchOptions::default())
+                .is_empty()
+        );
     }
 
     #[test]

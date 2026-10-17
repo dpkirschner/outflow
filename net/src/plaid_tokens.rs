@@ -61,7 +61,8 @@ fn write_map(path: &str, tokens: &HashMap<String, String>) -> Result<(), String>
     if let Some(dir) = std::path::Path::new(path).parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
     }
-    let body = serde_json::to_string_pretty(tokens).map_err(|e| format!("serialize tokens: {e}"))?;
+    let body =
+        serde_json::to_string_pretty(tokens).map_err(|e| format!("serialize tokens: {e}"))?;
     std::fs::write(path, body).map_err(|e| format!("write {path}: {e}"))?;
     #[cfg(unix)]
     {
@@ -78,7 +79,11 @@ mod tests {
 
     fn tmp(tag: &str) -> String {
         let mut p = std::env::temp_dir();
-        p.push(format!("outflow-tokens-{}-{}.json", tag, std::process::id()));
+        p.push(format!(
+            "outflow-tokens-{}-{}.json",
+            tag,
+            std::process::id()
+        ));
         p.to_string_lossy().into_owned()
     }
 

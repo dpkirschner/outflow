@@ -1492,7 +1492,7 @@ body:has(.lg-app) {
   width: 96px;
 }
 .bl-hold .c-share {
-  width: 58px;
+  width: 66px;
 }
 .bl-hold .c-gain {
   width: 92px;
@@ -1514,6 +1514,21 @@ body:has(.lg-app) {
 }
 .bl-hold .r {
   text-align: right;
+}
+.bl-hold th.bl-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.bl-hold th.bl-sortable:hover,
+.bl-hold th.bl-sortable.on {
+  color: var(--lg-text);
+}
+.bl-sort-ind {
+  display: inline-block;
+  width: 10px;
+  margin-left: 3px;
+  font-size: 8px;
+  vertical-align: middle;
 }
 @media (max-width: 560px) {
   .bl-hold-scroll {

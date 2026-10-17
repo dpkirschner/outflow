@@ -5,7 +5,7 @@
 // (core::balances); this only renders it.
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import type { AccountBalance, BalanceGroup, BalancesView, DayTotals } from "../types";
+import type { AccountBalance, BalanceGroup, BalancesView, DayTotals, HoldingRow } from "../types";
 import { accountSource, agoLabel } from "./ledger/labels";
 import { SourceChip } from "./ledger/Streams";
 import type { ToastMsg } from "./Toast";
@@ -124,6 +124,49 @@ function Stat({ label, cents }: { label: string; cents: number }) {
   );
 }
 
+type SortKey = "label" | "quantity" | "price" | "value" | "share" | "gain";
+type Sort = { key: SortKey; dir: "asc" | "desc" };
+
+const COLUMNS: { key: SortKey; label: string; cls: string }[] = [
+  { key: "label", label: "Holding", cls: "" },
+  { key: "quantity", label: "Shares", cls: "r c-qty" },
+  { key: "price", label: "Price", cls: "r c-price" },
+  { key: "value", label: "Value", cls: "r c-val" },
+  { key: "share", label: "Share", cls: "r c-share" },
+  { key: "gain", label: "Gain", cls: "r c-gain" },
+];
+
+// Sort key per column. Quantity/price arrive as exact decimal strings; the
+// float here only orders rows — display still uses the exact text.
+function sortValue(h: HoldingRow, key: SortKey): number | string | null {
+  switch (key) {
+    case "label":
+      return h.label.toLowerCase();
+    case "quantity":
+      return Number(h.quantity);
+    case "price":
+      return Number(h.price);
+    case "value":
+      return h.value;
+    case "share":
+      return h.share_bp;
+    case "gain":
+      return h.gain;
+  }
+}
+
+function sortHoldings(rows: HoldingRow[], { key, dir }: Sort): HoldingRow[] {
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((x, y) => {
+    const a = sortValue(x, key);
+    const b = sortValue(y, key);
+    // Unknown (no cost basis → no gain) always sinks to the bottom.
+    if (a === null || b === null) return a === b ? 0 : a === null ? 1 : -1;
+    const c = typeof a === "string" ? a.localeCompare(b as string) : a - (b as number);
+    return c * sign || y.value - x.value;
+  });
+}
+
 function AccountRow({
   a,
   expanded,
@@ -135,6 +178,16 @@ function AccountRow({
 }) {
   const invest = a.group === "investments";
   const canExpand = a.holdings.length > 0;
+  // Largest position first by default; per account, kept while collapsed.
+  const [sort, setSort] = useState<Sort>({ key: "value", dir: "desc" });
+  // Same column flips direction; a new column starts A→Z for names and
+  // largest-first for numbers.
+  const sortBy = (key: SortKey) =>
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "label" ? "asc" : "desc" },
+    );
   return (
     <li className={`bl-acct${a.idle_cash ? " idle" : ""}`}>
       <div
@@ -159,16 +212,24 @@ function AccountRow({
           <table className="bl-hold">
             <thead>
               <tr>
-                <th>Holding</th>
-                <th className="r c-qty">Shares</th>
-                <th className="r c-price">Price</th>
-                <th className="r c-val">Value</th>
-                <th className="r c-share">Share</th>
-                <th className="r c-gain">Gain</th>
+                {COLUMNS.map((c) => {
+                  const on = sort.key === c.key;
+                  return (
+                    <th
+                      key={c.key}
+                      className={`${c.cls} bl-sortable${on ? " on" : ""}`}
+                      aria-sort={on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                      onClick={() => sortBy(c.key)}
+                    >
+                      {c.label}
+                      <span className="bl-sort-ind">{on ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
-              {a.holdings.map((h) => (
+              {sortHoldings(a.holdings, sort).map((h) => (
                 <tr key={h.security_id}>
                   <td className="bl-hcell" title={h.label !== h.name ? `${h.label} · ${h.name}` : h.name}>
                     <span className="bl-ticker">{h.label}</span>

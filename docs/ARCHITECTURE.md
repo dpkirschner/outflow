@@ -6,13 +6,13 @@ One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
 core/    pure domain — money, model, store, plaid, categorize, query,
-         subscriptions, ledger, transfers, perks, llm. Zero GUI/network deps by
+         subscriptions, ledger, transfers, perks, balances, llm. Zero GUI/network deps by
          default. Source of truth.
 net/     networked adapters (sync ureq) — plaid (Link/exchange/sync
          transport), plaid_tokens (0600 token file), secrets (0600-file
          helpers), anthropic (Prompter impl). Depends on core.
 cli/     headless binary `outflow` — pull --from-file, categorize, report,
-         subs, fix, txns, accounts, matches, status, perks; direct-DB or HTTP client
+         subs, fix, txns, accounts, balances, matches, status, perks; direct-DB or HTTP client
          mode (--server) against a running server.
 server/  axum + tokio HTTP server — JSON API + serves the built React SPA.
          The always-on deployment target (mac-mini behind tailscale serve).
@@ -53,6 +53,8 @@ money            i64-cents type, decimal parse, display
           ├ transfers      detect_card_payments() — checking↔card pair matcher
           ├ perks          card offers TOML → domain (parse_offers/load_offers);
           │                evaluate() → add-offer / wrong-card / expiring findings
+          ├ balances       current state + daily trend: account_cash (the one
+          │                cash rule), summarize, history (per-sync snapshots)
           ├ categorize     RuleSet, precedence
           ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
           │                flag/category seeding from personal_finance_category)

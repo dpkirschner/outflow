@@ -105,6 +105,39 @@ const VISIBLE: &str = "account_id NOT IN (SELECT id FROM accounts WHERE hidden =
 
 /// Account upsert loop shared by `upsert_accounts` and `apply_plaid_batch`;
 /// runs inside the caller's transaction.
+fn query_securities(conn: &Connection) -> rusqlite::Result<Vec<Security>> {
+    let mut stmt =
+        conn.prepare("SELECT security_id, ticker, name, type, is_cash FROM securities")?;
+    let rows = stmt.query_map([], |r| {
+        Ok(Security {
+            security_id: r.get(0)?,
+            ticker: r.get(1)?,
+            name: r.get(2)?,
+            sec_type: r.get(3)?,
+            is_cash: r.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+fn query_holdings(conn: &Connection, filter: &str) -> rusqlite::Result<Vec<Holding>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT account_id, security_id, quantity, price, value_cents, cost_basis_cents
+         FROM holdings {filter}"
+    ))?;
+    let rows = stmt.query_map([], |r| {
+        Ok(Holding {
+            account_id: r.get(0)?,
+            security_id: r.get(1)?,
+            quantity: r.get(2)?,
+            price: r.get(3)?,
+            value: Money::from_cents(r.get(4)?),
+            cost_basis: r.get::<_, Option<i64>>(5)?.map(Money::from_cents),
+        })
+    })?;
+    rows.collect()
+}
+
 fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Result<()> {
     for a in accounts {
         // `nickname` is intentionally absent from the conflict-update: a re-pull
@@ -306,6 +339,39 @@ CREATE TABLE IF NOT EXISTS txn_matches (
     created INTEGER NOT NULL,
     UNIQUE(bank_txn_id, card_txn_id)
 );
+CREATE TABLE IF NOT EXISTS securities (
+    security_id TEXT PRIMARY KEY,
+    ticker TEXT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    is_cash INTEGER NOT NULL,
+    updated INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS holdings (
+    account_id TEXT NOT NULL,
+    security_id TEXT NOT NULL,
+    quantity TEXT NOT NULL,
+    price TEXT NOT NULL,
+    value_cents INTEGER NOT NULL,
+    cost_basis_cents INTEGER,
+    PRIMARY KEY (account_id, security_id)
+);
+CREATE TABLE IF NOT EXISTS balance_snapshots (
+    taken_at INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    balance_cents INTEGER NOT NULL,
+    cash_cents INTEGER NOT NULL,
+    PRIMARY KEY (taken_at, account_id)
+);
+CREATE TABLE IF NOT EXISTS holding_snapshots (
+    taken_at INTEGER NOT NULL,
+    account_id TEXT NOT NULL,
+    security_id TEXT NOT NULL,
+    quantity TEXT NOT NULL,
+    value_cents INTEGER NOT NULL,
+    cost_basis_cents INTEGER,
+    PRIMARY KEY (taken_at, account_id, security_id)
+);
 ";
 
 /// Current schema version, tracked via `PRAGMA user_version`. Bump this and add a
@@ -315,7 +381,8 @@ CREATE TABLE IF NOT EXISTS txn_matches (
 /// v1: transactions.transacted_at + transactions.flag. v2: merchant_overrides.
 /// v3: accounts.source + transactions.source (+ plaid_items, txn_matches tables).
 /// v4: accounts.nickname. v5: accounts.hidden. v6: plaid_items.investments_consent.
-const SCHEMA_VERSION: i64 = 6;
+/// v7: securities, holdings, balance_snapshots, holding_snapshots (new tables).
+const SCHEMA_VERSION: i64 = 7;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -465,6 +532,11 @@ impl Store {
         tx.execute("DELETE FROM accounts", [])?;
         tx.execute("DELETE FROM sync_log", [])?;
         tx.execute("DELETE FROM txn_matches", [])?;
+        // Current positions are re-fetched on the next sync. Balance/holding
+        // snapshots are kept on purpose: that history can't be re-pulled, and
+        // it reattaches when the same account ids sync again.
+        tx.execute("DELETE FROM holdings", [])?;
+        tx.execute("DELETE FROM securities", [])?;
         tx.execute(
             "UPDATE plaid_items SET cursor = NULL, last_synced = NULL",
             [],
@@ -781,6 +853,121 @@ impl Store {
             .conn
             .prepare("SELECT id FROM accounts WHERE hidden = 1")?;
         let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect()
+    }
+
+    /// Record one item's sync point, in a single transaction:
+    /// - with `holdings`: upsert its securities and REPLACE the current
+    ///   positions of this item's investment accounts (sold positions drop);
+    /// - always: append a balance snapshot per account, with cash computed by
+    ///   `balances::account_cash` over the (new or last-known) holdings;
+    /// - with `holdings`: append a holding snapshot per position.
+    ///
+    /// `None` holdings (no consent, or the fetch failed) keeps the last-known
+    /// positions as current. Snapshots cover hidden accounts too — reads
+    /// filter, so un-hiding restores the full history.
+    pub fn record_item_snapshot(
+        &self,
+        accounts: &[Account],
+        holdings: Option<(&[Security], &[Holding])>,
+        taken_at: i64,
+    ) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let ids: HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
+        if let Some((secs, holds)) = holdings {
+            for s in secs {
+                tx.execute(
+                    "INSERT INTO securities (security_id, ticker, name, type, is_cash, updated)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(security_id) DO UPDATE SET ticker=excluded.ticker,
+                        name=excluded.name, type=excluded.type, is_cash=excluded.is_cash,
+                        updated=excluded.updated",
+                    params![
+                        s.security_id,
+                        s.ticker,
+                        s.name,
+                        s.sec_type,
+                        s.is_cash,
+                        taken_at
+                    ],
+                )?;
+            }
+            for a in accounts
+                .iter()
+                .filter(|a| a.kind == AccountKind::Investment)
+            {
+                tx.execute("DELETE FROM holdings WHERE account_id = ?1", params![a.id])?;
+            }
+            for h in holds.iter().filter(|h| ids.contains(h.account_id.as_str())) {
+                let basis = h.cost_basis.map(|m| m.cents());
+                tx.execute(
+                    "INSERT OR REPLACE INTO holdings
+                        (account_id, security_id, quantity, price, value_cents, cost_basis_cents)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        h.account_id,
+                        h.security_id,
+                        h.quantity,
+                        h.price,
+                        h.value.cents(),
+                        basis
+                    ],
+                )?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO holding_snapshots
+                        (taken_at, account_id, security_id, quantity, value_cents, cost_basis_cents)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        taken_at,
+                        h.account_id,
+                        h.security_id,
+                        h.quantity,
+                        h.value.cents(),
+                        basis
+                    ],
+                )?;
+            }
+        }
+        // Cash over whatever is now current (fresh positions or last-known).
+        let secs = query_securities(&tx)?;
+        let sec_map: HashMap<&str, &Security> =
+            secs.iter().map(|s| (s.security_id.as_str(), s)).collect();
+        let current = query_holdings(&tx, "")?;
+        for a in accounts {
+            let held: Vec<&Holding> = current.iter().filter(|h| h.account_id == a.id).collect();
+            let cash = crate::balances::account_cash(a.kind, a.balance, &held, &sec_map);
+            tx.execute(
+                "INSERT OR REPLACE INTO balance_snapshots (taken_at, account_id, balance_cents, cash_cents)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![taken_at, a.id, a.balance.cents(), cash.cents()],
+            )?;
+        }
+        tx.commit()
+    }
+
+    /// Current positions on visible accounts.
+    pub fn current_holdings(&self) -> rusqlite::Result<Vec<Holding>> {
+        query_holdings(&self.conn, &format!("WHERE {VISIBLE}"))
+    }
+
+    pub fn securities(&self) -> rusqlite::Result<Vec<Security>> {
+        query_securities(&self.conn)
+    }
+
+    /// Balance snapshots on visible accounts, oldest first.
+    pub fn balance_snapshots(&self, since: Option<i64>) -> rusqlite::Result<Vec<BalanceSnapshot>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT taken_at, account_id, balance_cents, cash_cents FROM balance_snapshots
+             WHERE {VISIBLE} AND taken_at >= ?1 ORDER BY taken_at"
+        ))?;
+        let rows = stmt.query_map(params![since.unwrap_or(i64::MIN)], |r| {
+            Ok(BalanceSnapshot {
+                taken_at: r.get(0)?,
+                account_id: r.get(1)?,
+                balance: Money::from_cents(r.get(2)?),
+                cash: Money::from_cents(r.get(3)?),
+            })
+        })?;
         rows.collect()
     }
 
@@ -1116,6 +1303,7 @@ impl Store {
 }
 
 #[cfg(test)]
+#[allow(clippy::inconsistent_digit_grouping)] // dollars_cents literals
 mod tests {
     use super::*;
 
@@ -1629,6 +1817,131 @@ mod tests {
             nickname: None,
             hidden: false,
         }
+    }
+
+    fn invest(id: &str, cents: i64) -> Account {
+        Account {
+            kind: AccountKind::Investment,
+            balance: Money::from_cents(cents),
+            ..account(id)
+        }
+    }
+
+    fn security(id: &str, is_cash: bool) -> Security {
+        Security {
+            security_id: id.into(),
+            ticker: Some(id.to_uppercase()),
+            name: id.into(),
+            sec_type: "etf".into(),
+            is_cash,
+        }
+    }
+
+    fn position(acct: &str, sec: &str, cents: i64) -> Holding {
+        Holding {
+            account_id: acct.into(),
+            security_id: sec.into(),
+            quantity: "1.5".into(),
+            price: "2.0001".into(),
+            value: Money::from_cents(cents),
+            cost_basis: None,
+        }
+    }
+
+    #[test]
+    fn snapshot_replaces_holdings_and_appends_history() {
+        let s = Store::open_in_memory().unwrap();
+        let brk = [invest("brk", 1_000_00)];
+        s.upsert_accounts(&brk).unwrap();
+        let secs = [
+            security("vmfxx", true),
+            security("vti", false),
+            security("gme", false),
+        ];
+
+        let first = [
+            position("brk", "vmfxx", 100_00),
+            position("brk", "vti", 800_00),
+            position("brk", "gme", 50_00),
+        ];
+        s.record_item_snapshot(&brk, Some((&secs, &first)), 100)
+            .unwrap();
+        // GME sold: the next sync's positions replace the set entirely.
+        let second = [
+            position("brk", "vmfxx", 100_00),
+            position("brk", "vti", 850_00),
+        ];
+        s.record_item_snapshot(&brk, Some((&secs, &second)), 200)
+            .unwrap();
+
+        let held = s.current_holdings().unwrap();
+        assert_eq!(held.len(), 2);
+        assert!(held.iter().all(|h| h.security_id != "gme"));
+        assert_eq!(held[0].quantity, "1.5"); // exact text round-trips
+        assert_eq!(held[0].price, "2.0001");
+
+        let snaps = s.balance_snapshots(None).unwrap();
+        assert_eq!(snaps.len(), 2);
+        // 100 cash fund + (1000 - 950) uninvested on the second sync.
+        assert_eq!(snaps[1].cash.cents(), 150_00);
+        assert_eq!(s.balance_snapshots(Some(150)).unwrap().len(), 1);
+
+        // A sync with no holdings (fetch failed / no consent) keeps the
+        // last-known positions and computes cash from them.
+        s.record_item_snapshot(&brk, None, 300).unwrap();
+        assert_eq!(s.current_holdings().unwrap().len(), 2);
+        assert_eq!(s.balance_snapshots(None).unwrap()[2].cash.cents(), 150_00);
+        let n: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM holding_snapshots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 5);
+    }
+
+    #[test]
+    fn hidden_accounts_snapshot_but_drop_from_reads() {
+        let s = Store::open_in_memory().unwrap();
+        let (a, b) = (invest("a", 500_00), invest("b", 700_00));
+        s.upsert_accounts(&[a.clone(), b.clone()]).unwrap();
+        s.set_account_hidden("a", true).unwrap();
+        let secs = [security("vti", false)];
+        let holds = [position("a", "vti", 500_00), position("b", "vti", 700_00)];
+        s.record_item_snapshot(&[a, b], Some((&secs, &holds)), 100)
+            .unwrap();
+
+        let held: Vec<String> = s
+            .current_holdings()
+            .unwrap()
+            .into_iter()
+            .map(|h| h.account_id)
+            .collect();
+        assert_eq!(held, vec!["b".to_string()]);
+        assert_eq!(s.balance_snapshots(None).unwrap().len(), 1);
+        s.set_account_hidden("a", false).unwrap();
+        assert_eq!(s.balance_snapshots(None).unwrap().len(), 2);
+        assert_eq!(s.current_holdings().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn v6_db_gains_holdings_tables() {
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-v6-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 6;").unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let v: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 7);
+        assert!(s.current_holdings().unwrap().is_empty());
+        assert!(s.balance_snapshots(None).unwrap().is_empty());
+        drop(s);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

@@ -1467,14 +1467,35 @@ body:has(.lg-app) {
   font-weight: 600;
 }
 .bl-hold-scroll {
+  /* Fallback only — the fixed layout below is sized to fit. `contain` keeps a
+     trackpad swipe from rubber-banding the page sideways. */
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding: 0 4px 10px 24px;
 }
+/* Fixed layout: numeric columns get set widths, the holding column takes the
+   rest and truncates long fund names with an ellipsis (full name on hover). */
 .bl-hold {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+}
+.bl-hold .c-qty {
+  width: 92px;
+}
+.bl-hold .c-price {
+  width: 78px;
+}
+.bl-hold .c-val {
+  width: 96px;
+}
+.bl-hold .c-share {
+  width: 58px;
+}
+.bl-hold .c-gain {
+  width: 92px;
 }
 .bl-hold th {
   text-align: left;
@@ -1488,9 +1509,20 @@ body:has(.lg-app) {
   padding: 5px 8px;
   border-bottom: 1px solid #151e29;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .bl-hold .r {
   text-align: right;
+}
+@media (max-width: 560px) {
+  .bl-hold-scroll {
+    padding-left: 4px;
+  }
+  .bl-hold .c-price,
+  .bl-hold .c-share {
+    display: none;
+  }
 }
 .bl-ticker {
   font-weight: 600;

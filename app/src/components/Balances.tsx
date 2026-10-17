@@ -160,26 +160,26 @@ function AccountRow({
             <thead>
               <tr>
                 <th>Holding</th>
-                <th className="r">Shares</th>
-                <th className="r">Price</th>
-                <th className="r">Value</th>
-                <th className="r">Share</th>
-                <th className="r">Gain</th>
+                <th className="r c-qty">Shares</th>
+                <th className="r c-price">Price</th>
+                <th className="r c-val">Value</th>
+                <th className="r c-share">Share</th>
+                <th className="r c-gain">Gain</th>
               </tr>
             </thead>
             <tbody>
               {a.holdings.map((h) => (
                 <tr key={h.security_id}>
-                  <td>
+                  <td className="bl-hcell" title={h.label !== h.name ? `${h.label} · ${h.name}` : h.name}>
                     <span className="bl-ticker">{h.label}</span>
                     {h.is_cash && <span className="bl-cash-tag">cash</span>}
                     {h.label !== h.name && <span className="bl-dim bl-hname">{h.name}</span>}
                   </td>
-                  <td className="r">{h.quantity}</td>
-                  <td className="r">${h.price}</td>
-                  <td className="r">{money(h.value)}</td>
-                  <td className="r bl-dim">{pct(h.share_bp)}</td>
-                  <td className={`r${h.gain === null ? " bl-dim" : h.gain < 0 ? " bl-neg" : " bl-pos"}`}>
+                  <td className="r c-qty">{h.quantity}</td>
+                  <td className="r c-price">${h.price}</td>
+                  <td className="r c-val">{money(h.value)}</td>
+                  <td className="r c-share bl-dim">{pct(h.share_bp)}</td>
+                  <td className={`r c-gain${h.gain === null ? " bl-dim" : h.gain < 0 ? " bl-neg" : " bl-pos"}`}>
                     {h.gain === null ? "—" : money(h.gain)}
                   </td>
                 </tr>

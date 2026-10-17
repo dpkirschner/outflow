@@ -61,6 +61,7 @@ pub struct PlaidBatch {
     pub accounts: Vec<Account>,
     pub upserts: Vec<Transaction>,
     pub removed_ids: Vec<String>,
+    /// Empty = Plaid gave no cursor yet; the stored cursor is left as-is.
     pub next_cursor: String,
 }
 
@@ -504,7 +505,8 @@ impl Store {
             }
         }
         tx.execute(
-            "UPDATE plaid_items SET cursor = ?1, last_synced = ?2, status = 'ok'
+            "UPDATE plaid_items
+             SET cursor = COALESCE(NULLIF(?1, ''), cursor), last_synced = ?2, status = 'ok'
              WHERE item_id = ?3",
             params![batch.next_cursor, synced_at, batch.item_id],
         )?;
@@ -1222,6 +1224,65 @@ mod tests {
 
         drop(s);
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// The new-link path end to end: a NOT_READY first sync (empty cursor)
+    /// must commit the item's accounts, mark it synced, and leave the cursor
+    /// unset so the next sync starts from the beginning.
+    #[test]
+    fn not_ready_first_sync_commits_accounts_and_leaves_cursor_unset() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_plaid_item("item1", "Vanguard", 1000).unwrap();
+        let accounts = crate::plaid::parse_accounts_get(
+            include_str!("../../examples/plaid-accounts-get.json"),
+            "Vanguard",
+            2000,
+        )
+        .unwrap();
+        let page = crate::plaid::parse_sync_page(
+            r#"{"added":[],"modified":[],"removed":[],"next_cursor":"","has_more":false,
+                "transactions_update_status":"NOT_READY"}"#,
+        )
+        .unwrap();
+        s.apply_plaid_batch(
+            &PlaidBatch {
+                item_id: "item1".into(),
+                accounts: accounts.clone(),
+                upserts: page.added,
+                removed_ids: page.removed_ids,
+                next_cursor: page.next_cursor,
+            },
+            2000,
+        )
+        .unwrap();
+        let item = &s.plaid_items().unwrap()[0];
+        assert_eq!(item.cursor, None, "an empty cursor must not be stored");
+        assert_eq!(item.last_synced, Some(2000));
+        assert_eq!(item.status, "ok");
+        assert_eq!(s.accounts().unwrap().len(), accounts.len());
+    }
+
+    /// An empty cursor never clobbers a real one (e.g. Plaid briefly reporting
+    /// NOT_READY again); a non-empty one always advances.
+    #[test]
+    fn empty_cursor_keeps_the_stored_cursor() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_plaid_item("item1", "Chase", 1000).unwrap();
+        let batch = |cursor: &str| PlaidBatch {
+            item_id: "item1".into(),
+            accounts: vec![],
+            upserts: vec![],
+            removed_ids: vec![],
+            next_cursor: cursor.into(),
+        };
+        let cursor = |s: &Store| s.plaid_items().unwrap()[0].cursor.clone();
+        s.apply_plaid_batch(&batch("cur1"), 2000).unwrap();
+        assert_eq!(cursor(&s).as_deref(), Some("cur1"));
+        s.apply_plaid_batch(&batch(""), 3000).unwrap();
+        assert_eq!(cursor(&s).as_deref(), Some("cur1"));
+        assert_eq!(s.plaid_items().unwrap()[0].last_synced, Some(3000));
+        s.apply_plaid_batch(&batch("cur2"), 4000).unwrap();
+        assert_eq!(cursor(&s).as_deref(), Some("cur2"));
     }
 
     fn plaid_txn(id: &str, acct: &str, posted: i64, cents: i64, pending: bool) -> Transaction {

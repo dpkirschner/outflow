@@ -7,9 +7,10 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    detect, monthly_flow, parse_fixture, spend_by_category, top_merchants, Account, CategorySource,
-    CategorySpend, LedgerView, Mark, MerchantSpend, MonthlyFlow, Subscription, SyncEntry,
-    Transaction, TxnFilter, TxnFlag,
+    balance_history, detect, monthly_flow, parse_fixture, spend_by_category, summarize_balances,
+    top_merchants, Account, AccountKind, BalancesView, CategorySource, CategorySpend, DayTotals,
+    LedgerView, Mark, MerchantSpend, MonthlyFlow, Subscription, SyncEntry, Transaction, TxnFilter,
+    TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +79,45 @@ async fn accounts(
     let all = p.include_hidden.unwrap_or(false);
     with_store(&state, move |s| {
         if all { s.all_accounts() } else { s.accounts() }.map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+/// Current state of every visible account: balances, cash vs invested,
+/// holdings, idle-cash flags. Hidden accounts and their holdings drop out at
+/// the store reads.
+async fn balances(State(state): State<AppState>) -> ApiResult<BalancesView> {
+    with_store(&state, |s| {
+        let accounts = s.accounts().map_err(|e| e.to_string())?;
+        let securities = s.securities().map_err(|e| e.to_string())?;
+        let holdings = s.current_holdings().map_err(|e| e.to_string())?;
+        Ok(summarize_balances(&accounts, &securities, &holdings))
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct HistoryParams {
+    /// Epoch seconds; omit for the full history.
+    since: Option<i64>,
+}
+
+/// Daily net worth / cash / invested / credit from the per-sync snapshots.
+async fn balances_history(
+    State(state): State<AppState>,
+    Query(p): Query<HistoryParams>,
+) -> ApiResult<Vec<DayTotals>> {
+    with_store(&state, move |s| {
+        let kinds: std::collections::HashMap<String, AccountKind> = s
+            .accounts()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|a| (a.id, a.kind))
+            .collect();
+        let snaps = s.balance_snapshots(p.since).map_err(|e| e.to_string())?;
+        Ok(balance_history(&snaps, &kinds))
     })
     .await
     .map(Json)
@@ -555,6 +595,8 @@ async fn categorize_llm(State(state): State<AppState>) -> ApiResult<usize> {
 pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/accounts", get(accounts))
+        .route("/balances", get(balances))
+        .route("/balances/history", get(balances_history))
         .route("/transactions", get(transactions))
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
@@ -581,6 +623,7 @@ pub fn api_router() -> Router<AppState> {
 }
 
 #[cfg(test)]
+#[allow(clippy::inconsistent_digit_grouping)] // dollars_cents literals
 mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
@@ -610,6 +653,10 @@ mod tests {
     fn app_with_txns(txns: &[Transaction]) -> Router {
         let store = Store::open_in_memory().expect("in-memory store");
         store.upsert_transactions(txns).expect("seed txns");
+        app_with_store(store)
+    }
+
+    fn app_with_store(store: Store) -> Router {
         let cfg = crate::state::Config {
             db_path: ":memory:".into(),
             listen: "127.0.0.1:0".into(),
@@ -716,6 +763,98 @@ mod tests {
         .await
         .unwrap()
         .status()
+    }
+
+    /// /balances groups accounts, counts a money-market holding and an
+    /// all-cash HSA as cash, flags idle cash; /balances/history has one point
+    /// per day of snapshots.
+    #[tokio::test]
+    async fn balances_report_cash_holdings_and_history() {
+        use outflow_core::{AccountKind, Holding, Security};
+        let store = Store::open_in_memory().unwrap();
+        let acct = |id: &str, kind: AccountKind, cents: i64| Account {
+            id: id.into(),
+            org: "Bank".into(),
+            name: format!("{id} (0000)"),
+            kind,
+            balance: Money::from_cents(cents),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: "plaid".into(),
+            nickname: None,
+            hidden: false,
+        };
+        let accounts = [
+            acct("chk", AccountKind::Checking, 2_000_00),
+            acct("card", AccountKind::Credit, -300_00),
+            acct("brk", AccountKind::Investment, 10_000_00),
+            acct("hsa", AccountKind::Investment, 4_478_25),
+        ];
+        store.upsert_accounts(&accounts).unwrap();
+        let secs = [
+            Security {
+                security_id: "vmfxx".into(),
+                ticker: Some("VMFXX".into()),
+                name: "Money Market".into(),
+                sec_type: "mutual fund".into(),
+                is_cash: true,
+            },
+            Security {
+                security_id: "vti".into(),
+                ticker: Some("VTI".into()),
+                name: "Total Market".into(),
+                sec_type: "etf".into(),
+                is_cash: false,
+            },
+        ];
+        let pos = |sec: &str, cents: i64| Holding {
+            account_id: "brk".into(),
+            security_id: sec.into(),
+            quantity: "1".into(),
+            price: "1".into(),
+            value: Money::from_cents(cents),
+            cost_basis: None,
+        };
+        let holds = [pos("vmfxx", 100_00), pos("vti", 9_900_00)];
+        store
+            .record_item_snapshot(&accounts, Some((&secs, &holds)), 1_000)
+            .unwrap();
+        store
+            .record_item_snapshot(&accounts, None, 1_000 + 2 * 86_400)
+            .unwrap();
+        let app = app_with_store(store);
+
+        let (status, v) = get_json(app.clone(), "/balances").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["totals"]["net_worth"], 16_178_25);
+        assert_eq!(v["totals"]["cash"], 2_000_00 + 100_00 + 4_478_25);
+        assert_eq!(v["totals"]["credit"], -300_00);
+        let groups: Vec<&str> = v["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|g| g["group"].as_str().unwrap())
+            .collect();
+        assert_eq!(groups, ["cash", "investments", "credit"]);
+        let inv = &v["groups"][1]["accounts"];
+        let by_id = |id: &str| {
+            inv.as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["account"]["id"] == id)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(by_id("hsa")["idle_cash"], true);
+        assert_eq!(by_id("brk")["idle_cash"], false); // $100 is 1%
+        assert_eq!(by_id("brk")["holdings"][0]["label"], "VTI");
+        assert_eq!(by_id("brk")["holdings"][1]["is_cash"], true);
+
+        let (status, h) = get_json(app, "/balances/history").await;
+        assert_eq!(status, StatusCode::OK);
+        let days = h.as_array().unwrap();
+        assert_eq!(days.len(), 3); // two sync days + the carried-forward gap
+        assert_eq!(days[2]["net_worth"], 16_178_25);
     }
 
     #[tokio::test]

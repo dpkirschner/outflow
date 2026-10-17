@@ -149,6 +149,8 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
             Some(serde_json::json!({ "category": category, "learn": !no_learn })),
         ),
         Cmd::Accounts { all } => remote.get(&format!("/accounts?include_hidden={all}")),
+        Cmd::Balances { history: false } => remote.get("/balances"),
+        Cmd::Balances { history: true } => remote.get("/balances/history"),
         Cmd::Status { limit } => remote.get(&format!("/sync_log?limit={limit}")),
         // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
         Cmd::Perks {

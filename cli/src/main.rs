@@ -1,8 +1,9 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    detect, evaluate_perks, load_offers, monthly_flow, parse_fixture, search_transactions,
-    spend_by_category, top_merchants, Cap, CategorySource, FindingKind, MatchStatus, Money, Offer,
-    PerkOptions, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    account_display_label, balance_history, detect, evaluate_perks, load_offers, monthly_flow,
+    parse_fixture, search_transactions, spend_by_category, summarize_balances, top_merchants, Cap,
+    CategorySource, FindingKind, MatchStatus, Money, Offer, PerkOptions, Reward, SortKey, Store,
+    TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -65,6 +66,13 @@ pub(crate) enum Cmd {
         /// Include hidden accounts (marked `hidden`).
         #[arg(long)]
         all: bool,
+    },
+    /// Current state of every visible account: cash vs invested, holdings,
+    /// and investment accounts holding idle cash. `--history` prints the
+    /// daily trend from per-sync snapshots instead.
+    Balances {
+        #[arg(long)]
+        history: bool,
     },
     /// Card-payment match review (list / accept / reject).
     Matches {
@@ -296,6 +304,10 @@ fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
     let deleted = store
         .delete_transactions(&removed)
         .map_err(|e| format!("apply removals: {e}"))?;
+    // Same sync-point history the server records (fixtures carry no holdings).
+    store
+        .record_item_snapshot(&fixture.accounts, None, now_secs())
+        .map_err(|e| format!("record snapshot: {e}"))?;
     for a in &fixture.accounts {
         println!(
             "  {} [{}]  {}",
@@ -672,6 +684,83 @@ fn cmd_accounts(store: &Store, all: bool, json: bool) -> Result<(), String> {
     Ok(())
 }
 
+fn pct(bp: i64) -> String {
+    format!("{}.{}%", bp / 100, (bp % 100) / 10)
+}
+
+fn cmd_balances(store: &Store, history: bool, json: bool) -> Result<(), String> {
+    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
+    if history {
+        let kinds = accounts.iter().map(|a| (a.id.clone(), a.kind)).collect();
+        let snaps = store.balance_snapshots(None).map_err(|e| format!("{e}"))?;
+        let days = balance_history(&snaps, &kinds);
+        if json {
+            return json_out(&days);
+        }
+        println!(
+            "{:<10} {:>15} {:>14} {:>15} {:>13}",
+            "day", "net worth", "cash", "invested", "credit"
+        );
+        for d in &days {
+            println!(
+                "{:<10} {:>15} {:>14} {:>15} {:>13}",
+                d.day,
+                dollars(d.net_worth.cents()),
+                dollars(d.cash.cents()),
+                dollars(d.invested.cents()),
+                dollars(d.credit.cents())
+            );
+        }
+        return Ok(());
+    }
+    let securities = store.securities().map_err(|e| format!("{e}"))?;
+    let holdings = store.current_holdings().map_err(|e| format!("{e}"))?;
+    let view = summarize_balances(&accounts, &securities, &holdings);
+    if json {
+        return json_out(&view);
+    }
+    let t = &view.totals;
+    println!(
+        "net worth {}   cash {}   invested {}   credit {}",
+        dollars(t.net_worth.cents()),
+        dollars(t.cash.cents()),
+        dollars(t.invested.cents()),
+        dollars(t.credit.cents())
+    );
+    for g in &view.groups {
+        println!("\n{:?}  {}", g.group, dollars(g.total.cents()));
+        for a in &g.accounts {
+            let label = account_display_label(&a.account.name, a.account.nickname.as_deref());
+            let cash = if a.group == outflow_core::Group::Investments {
+                format!("  cash {} ({})", dollars(a.cash.cents()), pct(a.cash_bp))
+            } else {
+                String::new()
+            };
+            println!(
+                "  {:<44} {:>14}{}{}",
+                truncate(&label, 44),
+                dollars(a.account.balance.cents()),
+                cash,
+                if a.idle_cash { "  ← idle cash" } else { "" }
+            );
+            for h in &a.holdings {
+                println!(
+                    "      {:<12} {:>12} sh  {:>13}  {:>6}{}{}",
+                    truncate(&h.label, 12),
+                    h.quantity,
+                    dollars(h.value.cents()),
+                    pct(h.share_bp),
+                    h.gain
+                        .map(|g| format!("  gain {}", dollars(g.cents())))
+                        .unwrap_or_default(),
+                    if h.is_cash { "  (cash)" } else { "" }
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
     let log = store.sync_log(limit).map_err(|e| format!("{e}"))?;
     if json {
@@ -817,6 +906,7 @@ fn run() -> Result<(), String> {
         } => cmd_fix(&store, txn_id, category, no_learn),
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
+        Cmd::Balances { history } => cmd_balances(&store, history, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
         Cmd::Status { limit } => cmd_status(&store, limit, cli.json),
         Cmd::Perks {

@@ -4,6 +4,8 @@
 // directly (snake_case): there is no camelCase translation layer anymore.
 import type {
   Account,
+  BalancesView,
+  DayTotals,
   CategorizeResult,
   CategorySpend,
   Filter,
@@ -103,6 +105,10 @@ export const api = {
   // Visible accounts; `includeHidden` adds hidden ones (Connections only).
   accounts: (includeHidden = false) =>
     get<Account[]>(includeHidden ? "/accounts?include_hidden=true" : "/accounts"),
+  // Current state of every visible account + holdings; and its daily trend.
+  balances: () => get<BalancesView>("/balances"),
+  balanceHistory: (since?: number) =>
+    get<DayTotals[]>(since ? `/balances/history?since=${since}` : "/balances/history"),
   // Search/sort/filter over the whole archive; returns one page + totals.
   transactions: (s?: TxnSearch) => {
     const q = new URLSearchParams();

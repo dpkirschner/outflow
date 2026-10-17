@@ -11,7 +11,8 @@
 use axum::http::StatusCode;
 use outflow_core::store::PlaidBatch;
 use outflow_core::{
-    item_has_investments_consent, parse_accounts_get, parse_sync_page, PlaidItem, Store,
+    item_has_investments_consent, parse_accounts_get, parse_holdings_get, parse_sync_page,
+    PlaidItem, Store,
 };
 use outflow_net::{plaid, plaid_tokens, PlaidConfig};
 use serde::Serialize;
@@ -25,6 +26,10 @@ pub struct LegReport {
     pub added: usize,
     pub updated: usize,
     pub error: Option<String>,
+    /// Non-fatal problem (e.g. holdings fetch failed): transactions synced
+    /// and the item stays `ok`, but something was left stale.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -69,6 +74,7 @@ fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
                 added: 0,
                 updated: 0,
                 error: Some(e),
+                warning: None,
             }),
         }
     }
@@ -177,6 +183,7 @@ pub(crate) fn sync_plaid_item(
         added: 0,
         updated: 0,
         error: None,
+        warning: None,
     };
     let log_id = lock(store, |s| {
         s.log_sync_start(&source, now_secs())
@@ -185,9 +192,10 @@ pub(crate) fn sync_plaid_item(
     .ok();
 
     match run_plaid_item(store, cfg, pcfg, item) {
-        Ok(r) => {
+        Ok((r, warning)) => {
             report.added = r.added;
             report.updated = r.updated;
+            report.warning = warning;
         }
         Err(e) => {
             if e.contains("ITEM_LOGIN_REQUIRED") {
@@ -220,15 +228,16 @@ pub(crate) fn sync_plaid_item(
 }
 
 /// One full item sync: accounts + the complete `/transactions/sync` cursor
-/// loop, committed as a single `PlaidBatch`. On the pagination-mutation error
-/// the whole loop restarts from the item's stored cursor (which only advances
-/// on commit, so a restart is always safe).
+/// loop, committed as a single `PlaidBatch`, then the holdings/balance
+/// snapshot. On the pagination-mutation error the whole loop restarts from the
+/// item's stored cursor (which only advances on commit, so a restart is always
+/// safe). The `Option<String>` is a non-fatal warning from the snapshot step.
 pub fn run_plaid_item(
     store: &Arc<Mutex<Store>>,
     cfg: &Config,
     pcfg: &PlaidConfig,
     item: &PlaidItem,
-) -> Result<outflow_core::UpsertResult, String> {
+) -> Result<(outflow_core::UpsertResult, Option<String>), String> {
     let token = plaid_tokens::token_for(&cfg.plaid_tokens_file, &item.item_id)?;
     let synced_at = now_secs();
 
@@ -237,15 +246,19 @@ pub fn run_plaid_item(
         .map_err(|e| format!("parse accounts: {e:?}"))?;
     // Consent is display-only metadata (drives "Allow holdings" in the UI), so
     // a malformed item block is logged rather than failing the sync.
-    match item_has_investments_consent(&accounts_json) {
+    let consent = match item_has_investments_consent(&accounts_json) {
         Ok(granted) => {
             let _ = lock(store, |s| {
                 s.set_plaid_item_investments_consent(&item.item_id, granted)
                     .map_err(|e| e.to_string())
             });
+            granted
         }
-        Err(e) => tracing::warn!(item_id = %item.item_id, error = ?e, "unreadable item consent"),
-    }
+        Err(e) => {
+            tracing::warn!(item_id = %item.item_id, error = ?e, "unreadable item consent");
+            item.investments_consent
+        }
+    };
 
     const MAX_RESTARTS: usize = 3;
     let mut restarts = 0;
@@ -285,9 +298,67 @@ pub fn run_plaid_item(
             }
             cursor = Some(page.next_cursor);
         }
-        return lock(store, |s| {
+        let result = lock(store, |s| {
             s.apply_plaid_batch(&batch, synced_at)
                 .map_err(|e| e.to_string())
-        });
+        })?;
+        let warning = snapshot_item(store, pcfg, &token, item, consent, &accounts, synced_at);
+        return Ok((result, warning));
     }
+}
+
+/// Fetch holdings (when the item has Investments consent and any investment
+/// account) and record this sync point. Never fails the item: transactions
+/// are already committed, so a holdings error keeps the last-known positions,
+/// leaves status `ok`, and comes back as a warning. Lost consent clears the
+/// flag so Connections offers "Allow holdings" again.
+fn snapshot_item(
+    store: &Arc<Mutex<Store>>,
+    pcfg: &PlaidConfig,
+    token: &str,
+    item: &PlaidItem,
+    consent: bool,
+    accounts: &[outflow_core::Account],
+    synced_at: i64,
+) -> Option<String> {
+    let mut warning = None;
+    let wants_holdings = consent
+        && accounts
+            .iter()
+            .any(|a| a.kind == outflow_core::AccountKind::Investment);
+    let holdings = if wants_holdings {
+        let fetched = plaid::investments_holdings_get(pcfg, token)
+            .and_then(|j| parse_holdings_get(&j).map_err(|e| format!("parse holdings: {e:?}")));
+        match fetched {
+            Ok(h) => Some(h),
+            Err(e) => {
+                if e.contains("ADDITIONAL_CONSENT_REQUIRED") {
+                    let _ = lock(store, |s| {
+                        s.set_plaid_item_investments_consent(&item.item_id, false)
+                            .map_err(|e| e.to_string())
+                    });
+                }
+                tracing::warn!(item_id = %item.item_id, error = %e, "holdings fetch failed; keeping last-known");
+                warning = Some(format!("holdings not refreshed: {e}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let recorded = lock(store, |s| {
+        s.record_item_snapshot(
+            accounts,
+            holdings
+                .as_ref()
+                .map(|(sec, h)| (sec.as_slice(), h.as_slice())),
+            synced_at,
+        )
+        .map_err(|e| e.to_string())
+    });
+    if let Err(e) = recorded {
+        tracing::warn!(item_id = %item.item_id, error = %e, "balance snapshot failed");
+        warning = Some(format!("snapshot not recorded: {e}"));
+    }
+    warning
 }

@@ -63,6 +63,8 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 | `GET /categories` | — | `string[]` — the category vocabulary |
 | `GET /has_credit_account` | — | `bool` — whether a credit account is ingested (card-payment suppression is only correct when true) |
 | `GET /sync_log` | `limit` (default 50) | `SyncEntry[]` — most recent sync runs |
+| `GET /balances` | — | `BalancesView { totals: {net_worth, cash, invested, credit}, groups: [{group: cash\|investments\|credit\|other, total, accounts: AccountBalance[]}] }`. `AccountBalance` = `{ account, group, cash, invested, cash_bp, idle_cash, holdings: HoldingRow[] }` (largest position first; `quantity`/`price` are decimal strings, `*_bp` basis points). Visible accounts only. `idle_cash` = investment account with ≥ $1,000 and ≥ 5% cash |
+| `GET /balances/history` | `since` (epoch secs, optional) | `DayTotals[]` — `{day: "YYYY-MM-DD", net_worth, cash, invested, credit}` per local day from the per-sync snapshots, each account's last value carried forward |
 | `GET /perks` | `lookback` = `3mo`\|`6mo`\|`12mo`(default)\|`all`, `expiring_days` (default 14) | `PerksReport { cards: CardStatus[], findings: Finding[] }` — card offers from the `OUTFLOW_PERKS` file(s) matched against spending; `kind` = `add_offer`\|`wrong_card`\|`expiring`, sorted by `est_cash_cents` desc. `400` if `OUTFLOW_PERKS` is unset; the file is re-read per request |
 
 ### Transaction query (`GET /transactions`)

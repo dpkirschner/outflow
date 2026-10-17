@@ -6,6 +6,8 @@ pub enum AccountKind {
     Checking,
     Savings,
     Credit,
+    /// Brokerage / IRA / 401(k) / investment HSA — Plaid `type: investment`.
+    Investment,
     Other,
 }
 
@@ -15,6 +17,7 @@ impl AccountKind {
             AccountKind::Checking => "checking",
             AccountKind::Savings => "savings",
             AccountKind::Credit => "credit",
+            AccountKind::Investment => "investment",
             AccountKind::Other => "other",
         }
     }
@@ -26,6 +29,7 @@ impl AccountKind {
             "checking" => AccountKind::Checking,
             "savings" => AccountKind::Savings,
             "credit" => AccountKind::Credit,
+            "investment" => AccountKind::Investment,
             _ => AccountKind::Other,
         }
     }
@@ -60,6 +64,42 @@ pub struct Account {
     /// `nickname`.
     #[serde(default)]
     pub hidden: bool,
+}
+
+/// One instrument from `/investments/holdings/get` (fund, stock, cash sweep).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Security {
+    pub security_id: String,
+    /// Absent for some instruments (e.g. warrants) — show `name` instead.
+    pub ticker: Option<String>,
+    pub name: String,
+    /// Plaid's security `type` ("etf", "mutual fund", "equity", "cash", ...).
+    pub sec_type: String,
+    /// Counts toward cash: Plaid `is_cash_equivalent` or `type == "cash"`
+    /// (money-market funds like VMFXX). See `balances::account_cash`.
+    pub is_cash: bool,
+}
+
+/// One position: current state, replaced per item each sync. `quantity` and
+/// `price` are exact decimal text (shares go to 4+ places, prices past
+/// cents); only `value`/`cost_basis` are money.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Holding {
+    pub account_id: String,
+    pub security_id: String,
+    pub quantity: String,
+    pub price: String,
+    pub value: Money,
+    pub cost_basis: Option<Money>,
+}
+
+/// One account's balance at one sync point (append-only history).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BalanceSnapshot {
+    pub taken_at: i64,
+    pub account_id: String,
+    pub balance: Money,
+    pub cash: Money,
 }
 
 /// Display label for an account chip: the user's nickname (when set) with the

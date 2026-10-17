@@ -186,6 +186,7 @@ mod tests {
             added: 3,
             updated: 1,
             error: error.map(Into::into),
+            warning: None,
         }
     }
 

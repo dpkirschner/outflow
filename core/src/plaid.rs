@@ -5,7 +5,7 @@
 //! amounts owed — both are negated here to match the domain (outflow < 0,
 //! credit balance < 0).
 
-use crate::model::{Account, AccountKind, CategorySource, Transaction, TxnFlag};
+use crate::model::{Account, AccountKind, CategorySource, Holding, Security, Transaction, TxnFlag};
 use crate::money::Money;
 use chrono::{Local, NaiveDate, TimeZone};
 
@@ -41,11 +41,12 @@ pub struct SyncPage {
 }
 
 /// Map Plaid `type`/`subtype` to a domain kind. Real typing from the API —
-/// unlike SimpleFIN, no name-substring guessing. `investment` stays `Other`
-/// until brokerage support lands.
+/// unlike SimpleFIN, no name-substring guessing. Loans and anything unknown
+/// fall to `Other`.
 fn plaid_kind(kind: &str, subtype: Option<&str>) -> AccountKind {
     match kind {
         "credit" => AccountKind::Credit,
+        "investment" => AccountKind::Investment,
         "depository" => match subtype.unwrap_or("") {
             "checking" | "cash management" | "paypal" | "prepaid" => AccountKind::Checking,
             "savings" | "cd" | "money market" | "hsa" | "ebt" => AccountKind::Savings,
@@ -231,6 +232,107 @@ pub fn item_has_investments_consent(json: &str) -> Result<bool, SourceError> {
         }
     }
     Ok(false)
+}
+
+/// A Plaid decimal kept as exact text (share quantities, unit prices). Same
+/// no-f64 rule as money: `Number::to_string` is the shortest round-trip form,
+/// and it must look like a plain decimal (no exponent).
+fn parse_decimal_text(v: &serde_json::Value, what: &str) -> Result<String, SourceError> {
+    let n = v
+        .as_number()
+        .ok_or_else(|| SourceError::Json(format!("{what}: expected a number, got {v}")))?;
+    let s = n.to_string();
+    let digits = s.strip_prefix('-').unwrap_or(&s);
+    let mut parts = digits.splitn(2, '.');
+    let ok = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    if !ok(parts.next().unwrap_or("")) || !parts.next().is_none_or(ok) {
+        return Err(SourceError::Json(format!(
+            "{what}: not a plain decimal: {s}"
+        )));
+    }
+    Ok(s)
+}
+
+/// Parse `/investments/holdings/get` into securities + current positions.
+/// Strict at the boundary: every holding must reference a security in the
+/// same response, and quantity/price/value must be numbers. `cost_basis` may
+/// be null (cash sweeps, some warrants); `is_cash_equivalent` null = false.
+pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), SourceError> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
+    let array = |key: &str| {
+        v.get(key)
+            .and_then(|a| a.as_array())
+            .ok_or_else(|| SourceError::Json(format!("missing {key} array")))
+    };
+
+    let mut securities = Vec::new();
+    for s in array("securities")? {
+        let security_id = require_str(s, "security_id")?;
+        let sec_type = str_field(s, "type").unwrap_or("unknown").to_string();
+        let ticker = str_field(s, "ticker_symbol").map(str::to_string);
+        let name = str_field(s, "name")
+            .map(str::to_string)
+            .or_else(|| ticker.clone())
+            .unwrap_or_else(|| security_id.clone());
+        let is_cash = s
+            .get("is_cash_equivalent")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false)
+            || sec_type == "cash";
+        securities.push(Security {
+            security_id,
+            ticker,
+            name,
+            sec_type,
+            is_cash,
+        });
+    }
+
+    let mut holdings = Vec::new();
+    for h in array("holdings")? {
+        let account_id = require_str(h, "account_id")?;
+        let security_id = require_str(h, "security_id")?;
+        if !securities.iter().any(|s| s.security_id == security_id) {
+            return Err(SourceError::Json(format!(
+                "holding in {account_id} references unknown security {security_id}"
+            )));
+        }
+        let field = |key: &str| {
+            h.get(key)
+                .ok_or_else(|| SourceError::Json(format!("holding {security_id}: missing {key}")))
+        };
+        let quantity = parse_decimal_text(field("quantity")?, "holding quantity")?;
+        let price = parse_decimal_text(field("institution_price")?, "holding price")?;
+        let value = match field("institution_value")?.as_number() {
+            Some(n) => parse_amount(n, &account_id, "institution_value")?,
+            None => {
+                return Err(SourceError::Json(format!(
+                    "holding {security_id}: institution_value is not a number"
+                )))
+            }
+        };
+        let cost_basis = match h.get("cost_basis") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(c) => match c.as_number() {
+                Some(n) => Some(parse_amount(n, &account_id, "cost_basis")?),
+                None => {
+                    return Err(SourceError::Json(format!(
+                        "holding {security_id}: cost_basis is not a number"
+                    )))
+                }
+            },
+        };
+        holdings.push(Holding {
+            account_id,
+            security_id,
+            quantity,
+            price,
+            value,
+            cost_basis,
+        });
+    }
+    Ok((securities, holdings))
 }
 
 fn parse_txn(v: &serde_json::Value) -> Result<Transaction, SourceError> {
@@ -514,6 +616,80 @@ mod tests {
         assert!(!page.has_more);
         assert!(page.added.is_empty() && page.modified.is_empty());
         assert!(page.removed_ids.is_empty() && page.pending_superseded.is_empty());
+    }
+
+    // Shape taken from a real Vanguard /investments/holdings/get: a cash sweep
+    // (VMFXX, is_cash_equivalent), a no-ticker warrant with null cost basis,
+    // and a fractional-share ETF.
+    const HOLDINGS: &str = r#"{
+      "accounts": [],
+      "securities": [
+        {"security_id":"s_vmfxx","ticker_symbol":"VMFXX","name":"Vanguard Federal Money Market",
+         "type":"mutual fund","is_cash_equivalent":true},
+        {"security_id":"s_wts","ticker_symbol":null,"name":"Gamestop Corp Wts Exp 10/30/26",
+         "type":"derivative","is_cash_equivalent":null},
+        {"security_id":"s_vwo","ticker_symbol":"VWO","name":"Vanguard FTSE EM ETF",
+         "type":"etf","is_cash_equivalent":false},
+        {"security_id":"s_usd","ticker_symbol":"CUR:USD","name":"US Dollar","type":"cash"}
+      ],
+      "holdings": [
+        {"account_id":"brk","security_id":"s_vmfxx","quantity":1090.87,
+         "institution_price":1,"institution_value":1090.87,"cost_basis":null},
+        {"account_id":"brk","security_id":"s_wts","quantity":7,
+         "institution_price":1.65,"institution_value":11.55,"cost_basis":null},
+        {"account_id":"brk","security_id":"s_vwo","quantity":326.5299,
+         "institution_price":58.0312,"institution_value":18948.53,"cost_basis":13058.07}
+      ]
+    }"#;
+
+    #[test]
+    fn holdings_parse_exact_and_classify_cash() {
+        let (secs, holds) = parse_holdings_get(HOLDINGS).unwrap();
+        assert_eq!(secs.len(), 4);
+        let sec = |id: &str| secs.iter().find(|s| s.security_id == id).unwrap();
+        assert!(sec("s_vmfxx").is_cash);
+        assert!(sec("s_usd").is_cash); // type "cash"
+        assert!(!sec("s_wts").is_cash); // null is_cash_equivalent = false
+        assert_eq!(sec("s_wts").ticker, None);
+        assert_eq!(sec("s_wts").name, "Gamestop Corp Wts Exp 10/30/26");
+
+        assert_eq!(holds.len(), 3);
+        let vwo = holds.iter().find(|h| h.security_id == "s_vwo").unwrap();
+        assert_eq!(vwo.quantity, "326.5299"); // exact text, not rounded
+        assert_eq!(vwo.price, "58.0312");
+        assert_eq!(vwo.value.cents(), 18_948_53);
+        assert_eq!(vwo.cost_basis.map(|m| m.cents()), Some(13_058_07));
+        let wts = holds.iter().find(|h| h.security_id == "s_wts").unwrap();
+        assert_eq!(wts.cost_basis, None);
+        assert_eq!(wts.quantity, "7");
+    }
+
+    #[test]
+    fn holdings_reject_unknown_security_and_bad_numbers() {
+        let unknown = r#"{"securities":[],"holdings":[{"account_id":"a","security_id":"x",
+            "quantity":1,"institution_price":1,"institution_value":1}]}"#;
+        assert!(parse_holdings_get(unknown).is_err());
+        let bad_qty = r#"{"securities":[{"security_id":"x","type":"etf"}],"holdings":[
+            {"account_id":"a","security_id":"x","quantity":"lots","institution_price":1,
+             "institution_value":1}]}"#;
+        assert!(parse_holdings_get(bad_qty).is_err());
+        let no_value = r#"{"securities":[{"security_id":"x","type":"etf"}],"holdings":[
+            {"account_id":"a","security_id":"x","quantity":1,"institution_price":1}]}"#;
+        assert!(parse_holdings_get(no_value).is_err());
+        assert!(parse_holdings_get(r#"{"holdings":[]}"#).is_err()); // no securities
+    }
+
+    #[test]
+    fn investment_accounts_get_their_own_kind() {
+        assert_eq!(
+            plaid_kind("investment", Some("ira")),
+            AccountKind::Investment
+        );
+        assert_eq!(
+            plaid_kind("investment", Some("hsa")),
+            AccountKind::Investment
+        );
+        assert_eq!(plaid_kind("loan", Some("mortgage")), AccountKind::Other);
     }
 
     #[test]

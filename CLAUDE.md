@@ -35,7 +35,8 @@ server), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`,
 `subs`, `fix <id> <category> [--no-learn]`,
 `perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
-vs spending; file from `--file`/`OUTFLOW_PERKS`), plus server/JSON mode (`--server
+vs spending; file from `--file`/`OUTFLOW_PERKS`), `balances [--history]`
+(current state incl. holdings + idle cash; daily trend from per-sync snapshots), plus server/JSON mode (`--server
 URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
 DB path from `--db` or `OUTFLOW_DB`.
 

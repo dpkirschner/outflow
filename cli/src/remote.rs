@@ -20,7 +20,9 @@ impl Remote {
     pub fn new(server: &str) -> Remote {
         Remote {
             base: format!("{}/api", server.trim_end_matches('/')),
-            token: std::env::var("OUTFLOW_API_TOKEN").ok().filter(|t| !t.is_empty()),
+            token: std::env::var("OUTFLOW_API_TOKEN")
+                .ok()
+                .filter(|t| !t.is_empty()),
         }
     }
 
@@ -36,7 +38,9 @@ impl Remote {
             req = req.set("authorization", &format!("Bearer {t}"));
         }
         let result = match body {
-            Some(b) => req.set("content-type", "application/json").send_string(&b.to_string()),
+            Some(b) => req
+                .set("content-type", "application/json")
+                .send_string(&b.to_string()),
             None => req.call(),
         };
         match result {
@@ -128,7 +132,11 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
                 }
                 By::Monthly => "/flow".to_string(),
             };
-            let qs = if q.is_empty() { String::new() } else { format!("?{}", q.join("&")) };
+            let qs = if q.is_empty() {
+                String::new()
+            } else {
+                format!("?{}", q.join("&"))
+            };
             remote.get(&format!("{path}{qs}"))
         }
         Cmd::Subs => remote.get("/subscriptions"),

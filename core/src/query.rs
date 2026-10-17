@@ -135,7 +135,11 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
         .into_iter()
         .filter(|t| passes(t, &q.filter))
         .filter(|t| q.account_id.as_deref().map_or(true, |a| t.account_id == a))
-        .filter(|t| q.category.as_deref().map_or(true, |c| t.category.as_deref() == Some(c)))
+        .filter(|t| {
+            q.category
+                .as_deref()
+                .map_or(true, |c| t.category.as_deref() == Some(c))
+        })
         .filter(|t| q.source.as_deref().map_or(true, |s| t.source == s))
         .filter(|t| q.flag.map_or(true, |f| t.flag == f))
         .filter(|t| q.min_cents.map_or(true, |m| t.amount.cents().abs() >= m))
@@ -144,7 +148,11 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
             let Some(n) = &needle else { return true };
             t.payee.as_deref().unwrap_or("").to_lowercase().contains(n)
                 || t.description.to_lowercase().contains(n)
-                || t.category.as_deref().unwrap_or("").to_lowercase().contains(n)
+                || t.category
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(n)
                 || normalize_payee(t.merchant()).contains(n)
         })
         .collect();
@@ -158,7 +166,11 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
             SortKey::Merchant => normalize_payee(a.merchant()).cmp(&normalize_payee(b.merchant())),
             SortKey::Category => a.category.cmp(&b.category),
         };
-        let primary = if q.descending { primary.reverse() } else { primary };
+        let primary = if q.descending {
+            primary.reverse()
+        } else {
+            primary
+        };
         primary
             .then_with(|| b.effective_date().cmp(&a.effective_date()))
             .then_with(|| a.id.cmp(&b.id))
@@ -291,13 +303,15 @@ pub fn monthly_flow(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<Monthl
     }
     let mut out: Vec<MonthlyFlow> = map
         .into_iter()
-        .map(|((year, month), (inflow_cents, outflow_cents))| MonthlyFlow {
-            year,
-            month,
-            inflow_cents,
-            outflow_cents,
-            net_cents: inflow_cents - outflow_cents,
-        })
+        .map(
+            |((year, month), (inflow_cents, outflow_cents))| MonthlyFlow {
+                year,
+                month,
+                inflow_cents,
+                outflow_cents,
+                net_cents: inflow_cents - outflow_cents,
+            },
+        )
         .collect();
     out.sort_by(|a, b| (a.year, a.month).cmp(&(b.year, b.month)));
     Ok(out)
@@ -314,7 +328,14 @@ mod tests {
     const JAN15: i64 = 1610712000; // 2021-01-15 12:00:00 UTC
     const FEB15: i64 = 1613390400; // 2021-02-15 12:00:00 UTC
 
-    fn t(id: &str, posted: i64, cents: i64, merchant: &str, cat: Option<&str>, pending: bool) -> Transaction {
+    fn t(
+        id: &str,
+        posted: i64,
+        cents: i64,
+        merchant: &str,
+        cat: Option<&str>,
+        pending: bool,
+    ) -> Transaction {
         Transaction {
             id: id.into(),
             account_id: "acct".into(),
@@ -443,7 +464,10 @@ mod tests {
     fn category_spend_sums_outflows_and_buckets_uncategorized() {
         let s = seed();
         let rows = spend_by_category(&s, &TxnFilter::all()).unwrap();
-        let groceries = rows.iter().find(|r| r.category.as_deref() == Some("Groceries")).unwrap();
+        let groceries = rows
+            .iter()
+            .find(|r| r.category.as_deref() == Some("Groceries"))
+            .unwrap();
         assert_eq!(groceries.total_cents, 8000);
         assert_eq!(groceries.count, 2);
         let uncat = rows.iter().find(|r| r.category.is_none()).unwrap();
@@ -480,11 +504,17 @@ mod tests {
     fn monthly_flow_splits_in_and_out() {
         let s = seed();
         let rows = monthly_flow(&s, &TxnFilter::all()).unwrap();
-        let jan = rows.iter().find(|r| (r.year, r.month) == (2021, 1)).unwrap();
+        let jan = rows
+            .iter()
+            .find(|r| (r.year, r.month) == (2021, 1))
+            .unwrap();
         assert_eq!(jan.outflow_cents, 8500);
         assert_eq!(jan.inflow_cents, 0);
         assert_eq!(jan.net_cents, -8500);
-        let feb = rows.iter().find(|r| (r.year, r.month) == (2021, 2)).unwrap();
+        let feb = rows
+            .iter()
+            .find(|r| (r.year, r.month) == (2021, 2))
+            .unwrap();
         assert_eq!(feb.inflow_cents, 250000);
         assert_eq!(feb.outflow_cents, 3900);
         assert_eq!(feb.net_cents, 246100);
@@ -517,7 +547,14 @@ mod tests {
     fn non_spending_excluded_by_default_and_readmitted_by_toggle() {
         let s = Store::open_in_memory().unwrap();
         s.upsert_transactions(&[
-            t("spend", JAN15, -2000, "Whole Foods", Some("Groceries"), false),
+            t(
+                "spend",
+                JAN15,
+                -2000,
+                "Whole Foods",
+                Some("Groceries"),
+                false,
+            ),
             t("xfer", JAN15, -50000, "Move to Savings", None, false),
             t("pay", JAN15, -100000, "Amex Payment", None, false),
         ])
@@ -558,7 +595,10 @@ mod tests {
         s.set_flag("out", TxnFlag::Transfer, false).unwrap();
 
         let rows = monthly_flow(&s, &TxnFilter::all()).unwrap();
-        let jan = rows.iter().find(|r| (r.year, r.month) == (2021, 1)).unwrap();
+        let jan = rows
+            .iter()
+            .find(|r| (r.year, r.month) == (2021, 1))
+            .unwrap();
         assert_eq!(jan.inflow_cents, 0, "transfer-in is not income");
         assert_eq!(jan.outflow_cents, 2000, "transfer-out is not spend");
         assert_eq!(jan.net_cents, -2000);
@@ -568,7 +608,14 @@ mod tests {
     fn buckets_on_transacted_at_not_posted() {
         // Behaved in January, posted in February → must bucket into January.
         let s = Store::open_in_memory().unwrap();
-        let mut tx = t("late", FEB15, -1000, "Corner Store", Some("Shopping"), false);
+        let mut tx = t(
+            "late",
+            FEB15,
+            -1000,
+            "Corner Store",
+            Some("Shopping"),
+            false,
+        );
         tx.transacted_at = Some(JAN15);
         s.upsert_transactions(&[tx]).unwrap();
         let rows = monthly_flow(&s, &TxnFilter::all()).unwrap();

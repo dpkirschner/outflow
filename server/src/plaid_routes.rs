@@ -31,7 +31,11 @@ async fn link_token(
             Some(item_id) => Some(plaid_tokens::token_for(&cfg.plaid_tokens_file, item_id)?),
             None => None,
         };
-        plaid::link_token_create(&pcfg, cfg.oauth_redirect.as_deref(), access_token.as_deref())
+        plaid::link_token_create(
+            &pcfg,
+            cfg.oauth_redirect.as_deref(),
+            access_token.as_deref(),
+        )
     })
     .await
     .map_err(|e| ApiError::internal(format!("blocking task: {e}")))?
@@ -76,7 +80,9 @@ async fn exchange(
         let (access_token, item_id) = plaid::exchange_public_token(&pcfg, &body.public_token)?;
         plaid_tokens::save_token(&cfg.plaid_tokens_file, &item_id, &access_token)?;
         {
-            let guard = store.lock().map_err(|e| format!("store lock poisoned: {e}"))?;
+            let guard = store
+                .lock()
+                .map_err(|e| format!("store lock poisoned: {e}"))?;
             guard
                 .upsert_plaid_item(&item_id, &institution, now_secs())
                 .map_err(|e| e.to_string())?;
@@ -113,10 +119,7 @@ async fn items(State(state): State<AppState>) -> ApiResult<Vec<outflow_core::Pla
 /// Unlink an item: best-effort remove at Plaid (stops billing), drop the
 /// stored token, delete the metadata row. Pulled history is kept — the local
 /// archive outliving the connection is the point of this app.
-async fn remove_item(
-    State(state): State<AppState>,
-    Path(item_id): Path<String>,
-) -> ApiResult<()> {
+async fn remove_item(State(state): State<AppState>, Path(item_id): Path<String>) -> ApiResult<()> {
     let cfg = state.cfg.clone();
     let store = state.store.clone();
     tokio::task::spawn_blocking(move || {
@@ -129,7 +132,9 @@ async fn remove_item(
             let _ = plaid::item_remove(&pcfg, &token);
         }
         plaid_tokens::remove_token(&cfg.plaid_tokens_file, &item_id)?;
-        let guard = store.lock().map_err(|e| format!("store lock poisoned: {e}"))?;
+        let guard = store
+            .lock()
+            .map_err(|e| format!("store lock poisoned: {e}"))?;
         guard.delete_plaid_item(&item_id).map_err(|e| e.to_string())
     })
     .await

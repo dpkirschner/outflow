@@ -11,6 +11,10 @@ pub mod subscriptions;
 pub mod transfers;
 
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
+pub use ledger::{
+    ledger, stream_preview, Coverage, LedgerStats, LedgerView, LineItem, Source, Stream,
+    TransferGroup,
+};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
     account_display_label, Account, AccountKind, CategorySource, Mark, MatchConfidence,
@@ -21,14 +25,12 @@ pub use perks::{
     evaluate as evaluate_perks, load_offers, parse_offers, Cap, CardOffers, CardStatus, Finding,
     FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
 };
-pub use plaid::{parse_accounts_get, parse_fixture, parse_sync_page, Fixture, SourceError, SyncPage};
+pub use plaid::{
+    parse_accounts_get, parse_fixture, parse_sync_page, Fixture, SourceError, SyncPage,
+};
 pub use query::{
     monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,
     MerchantSpend, MonthlyFlow, SortKey, TxnFilter, TxnPage, TxnQuery,
-};
-pub use ledger::{
-    ledger, stream_preview, Coverage, LedgerStats, LedgerView, LineItem, Source, Stream,
-    TransferGroup,
 };
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{

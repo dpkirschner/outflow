@@ -12,15 +12,19 @@ pub struct AnthropicPrompter {
 
 impl AnthropicPrompter {
     pub fn new(url: String, model: String, api_key: String) -> Self {
-        AnthropicPrompter { url, model, api_key }
+        AnthropicPrompter {
+            url,
+            model,
+            api_key,
+        }
     }
 
     /// Build from the environment: `ANTHROPIC_API_KEY` (required),
     /// `OUTFLOW_LLM_URL` (default Anthropic Messages API), `OUTFLOW_LLM_MODEL`
     /// (default `claude-opus-4-8`).
     pub fn from_env() -> Result<Self, String> {
-        let api_key =
-            std::env::var("ANTHROPIC_API_KEY").map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .map_err(|_| "ANTHROPIC_API_KEY not set".to_string())?;
         if api_key.is_empty() {
             return Err("ANTHROPIC_API_KEY is empty".into());
         }

@@ -293,9 +293,17 @@ fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
         .delete_transactions(&removed)
         .map_err(|e| format!("apply removals: {e}"))?;
     for a in &fixture.accounts {
-        println!("  {} [{}]  {}", a.name, a.kind.as_str(), dollars(a.balance.cents()));
+        println!(
+            "  {} [{}]  {}",
+            a.name,
+            a.kind.as_str(),
+            dollars(a.balance.cents())
+        );
     }
-    println!("added {}, updated {}, removed {}", r.added, r.updated, deleted);
+    println!(
+        "added {}, updated {}, removed {}",
+        r.added, r.updated, deleted
+    );
     Ok(())
 }
 
@@ -380,7 +388,12 @@ fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(
         }
         By::Merchant => {
             for r in top_merchants(store, filter, top).map_err(|e| format!("{e}"))? {
-                println!("{:>12}  {:<28} {}", dollars(r.total_cents), r.merchant, r.count);
+                println!(
+                    "{:>12}  {:<28} {}",
+                    dollars(r.total_cents),
+                    r.merchant,
+                    r.count
+                );
             }
         }
         By::Monthly => {
@@ -444,8 +457,8 @@ fn json_out<T: serde::Serialize>(v: &T) -> Result<(), String> {
 
 fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
     let mut filter = build_filter(&a.since, &a.until, a.posted_only)?;
-    filter.include_non_spending = a.show_excluded
-        || matches!(a.flag, Some(FlagArg::Transfer) | Some(FlagArg::CardPayment));
+    filter.include_non_spending =
+        a.show_excluded || matches!(a.flag, Some(FlagArg::Transfer) | Some(FlagArg::CardPayment));
     let q = TxnQuery {
         filter,
         text: a.search.clone(),
@@ -660,7 +673,13 @@ fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
             (Some(_), Some(n)) => format!("failed: {n}"),
             (Some(_), None) => format!("+{} ~{}", s.added.unwrap_or(0), s.updated.unwrap_or(0)),
         };
-        println!("#{:<4} {:<24} {}  {}", s.id, s.source, date_label(s.started), outcome);
+        println!(
+            "#{:<4} {:<24} {}  {}",
+            s.id,
+            s.source,
+            date_label(s.started),
+            outcome
+        );
     }
     Ok(())
 }

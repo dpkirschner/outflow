@@ -23,7 +23,10 @@ pub struct Subscription {
 }
 
 fn is_processor_prefix(head: &str) -> bool {
-    matches!(head.trim(), "sq" | "tst" | "sp" | "pp" | "py" | "pypl" | "paypal")
+    matches!(
+        head.trim(),
+        "sq" | "tst" | "sp" | "pp" | "py" | "pypl" | "paypal"
+    )
 }
 
 pub fn normalize_payee(s: &str) -> String {
@@ -80,10 +83,7 @@ pub fn detect(txns: &[Transaction]) -> Vec<Subscription> {
         amounts.sort_unstable();
         let med = median(&amounts);
         let tol = std::cmp::max(100, med / 20);
-        let stable = amounts
-            .iter()
-            .filter(|a| (**a - med).abs() <= tol)
-            .count();
+        let stable = amounts.iter().filter(|a| (**a - med).abs() <= tol).count();
         if stable * 3 < amounts.len() * 2 {
             continue;
         }
@@ -249,7 +249,10 @@ fn monthly_spend(items: &[&Transaction], now: i64) -> MonthlySpend {
         *by_month.entry(mi).or_insert(0) += t.amount.cents().abs();
     }
     if by_month.is_empty() {
-        return MonthlySpend { completed: vec![], spark: vec![] };
+        return MonthlySpend {
+            completed: vec![],
+            spark: vec![],
+        };
     }
     // Dense range from first to last observed month so gaps count as $0 months.
     let first = *by_month.keys().next().unwrap();
@@ -286,7 +289,11 @@ fn rate_and_trend(completed: &[i64]) -> (i64, f64) {
     let last = *completed.last().unwrap() as f64;
     let prior = &completed[completed.len().saturating_sub(4)..completed.len() - 1];
     let base = prior.iter().sum::<i64>() as f64 / prior.len() as f64;
-    let pct = if base > 0.0 { (last - base) / base * 100.0 } else { 0.0 };
+    let pct = if base > 0.0 {
+        (last - base) / base * 100.0
+    } else {
+        0.0
+    };
     (rate, pct)
 }
 
@@ -395,7 +402,10 @@ pub fn rhythm_for_items(merchant: String, items: &[&Transaction], now: i64) -> O
         // Erratic (or too few) spacing: label Irregular and derive the median
         // gap directly for the monthly-rate fallback. A lone occurrence has no
         // gap, so assume ~monthly rather than divide by zero.
-        None => (StreamCadence::Irregular, median_gap_days(&dates).unwrap_or(MONTH_DAYS)),
+        None => (
+            StreamCadence::Irregular,
+            median_gap_days(&dates).unwrap_or(MONTH_DAYS),
+        ),
     };
     Some(build_rhythm(merchant, &items, cadence, med_gap, now))
 }
@@ -548,7 +558,10 @@ mod tests {
             let cents = -(400 + (d % 5) * 30); // $4.00–$5.20, varying
             txns.push(charge(&format!("c{d}"), d, cents, "Starbucks"));
         }
-        assert!(detect(&txns).is_empty(), "fixed-amount detector must not see it");
+        assert!(
+            detect(&txns).is_empty(),
+            "fixed-amount detector must not see it"
+        );
         let r = detect_rhythms(&txns, LATER);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].merchant, "starbucks");

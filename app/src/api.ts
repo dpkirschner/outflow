@@ -182,8 +182,11 @@ export const api = {
     get<SyncEntry[]>(`/sync_log${limit !== undefined ? `?limit=${limit}` : ""}`),
 
   // Plaid item lifecycle. Linking runs in the browser via Plaid Link.
-  plaidLinkToken: (itemId?: string) =>
-    post<{ link_token: string }>("/plaid/link_token", { item_id: itemId ?? null }),
+  plaidLinkToken: (itemId?: string, consentInvestments = false) =>
+    post<{ link_token: string }>("/plaid/link_token", {
+      item_id: itemId ?? null,
+      consent_investments: consentInvestments,
+    }),
   plaidExchange: (publicToken: string, institution: string | null) =>
     post<{
       item_id: string;

@@ -15,6 +15,10 @@ use crate::state::{now_secs, with_store, ApiError, ApiResult, AppState};
 struct LinkTokenBody {
     /// Present = update (re-auth) mode for an existing item.
     item_id: Option<String>,
+    /// Update mode only: also ask the user to grant Investments (holdings)
+    /// access on an item linked before outflow requested it.
+    #[serde(default)]
+    consent_investments: bool,
 }
 
 /// Create a Link token. Passes the configured OAuth redirect URI when set —
@@ -35,6 +39,7 @@ async fn link_token(
             &pcfg,
             cfg.oauth_redirect.as_deref(),
             access_token.as_deref(),
+            body.consent_investments,
         )
     })
     .await

@@ -61,7 +61,11 @@ pub(crate) enum Cmd {
     /// Search/sort/filter the transaction list.
     Txns(TxnsArgs),
     /// List ingested accounts.
-    Accounts,
+    Accounts {
+        /// Include hidden accounts (marked `hidden`).
+        #[arg(long)]
+        all: bool,
+    },
     /// Card-payment match review (list / accept / reject).
     Matches {
         #[command(subcommand)]
@@ -644,19 +648,25 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-fn cmd_accounts(store: &Store, json: bool) -> Result<(), String> {
-    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
+fn cmd_accounts(store: &Store, all: bool, json: bool) -> Result<(), String> {
+    let accounts = if all {
+        store.all_accounts()
+    } else {
+        store.accounts()
+    }
+    .map_err(|e| format!("{e}"))?;
     if json {
         return json_out(&accounts);
     }
     for a in &accounts {
         println!(
-            "{:<40} {:<9} {:>12}  [{}] {}",
+            "{:<40} {:<9} {:>12}  [{}] {}{}",
             a.name,
             a.kind.as_str(),
             dollars(a.balance.cents()),
             a.source,
-            a.id
+            a.id,
+            if a.hidden { "  hidden" } else { "" }
         );
     }
     Ok(())
@@ -806,7 +816,7 @@ fn run() -> Result<(), String> {
             no_learn,
         } => cmd_fix(&store, txn_id, category, no_learn),
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
-        Cmd::Accounts => cmd_accounts(&store, cli.json),
+        Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
         Cmd::Status { limit } => cmd_status(&store, limit, cli.json),
         Cmd::Perks {

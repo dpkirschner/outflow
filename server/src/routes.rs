@@ -65,10 +65,51 @@ pub struct PullResult {
     pub warnings: Vec<String>,
 }
 
-async fn accounts(State(state): State<AppState>) -> ApiResult<Vec<Account>> {
-    with_store(&state, |s| s.accounts().map_err(|e| e.to_string()))
-        .await
-        .map(Json)
+#[derive(Deserialize)]
+struct AccountsParams {
+    /// Include hidden accounts (the Connections screen). Default false.
+    include_hidden: Option<bool>,
+}
+
+async fn accounts(
+    State(state): State<AppState>,
+    Query(p): Query<AccountsParams>,
+) -> ApiResult<Vec<Account>> {
+    let all = p.include_hidden.unwrap_or(false);
+    with_store(&state, move |s| {
+        if all { s.all_accounts() } else { s.accounts() }.map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct HiddenBody {
+    hidden: bool,
+}
+
+/// Hide (or un-hide) an account everywhere: its rows drop out of every list,
+/// aggregate and dropdown. Data keeps syncing; un-hiding restores it all.
+async fn set_account_hidden(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    Json(body): Json<HiddenBody>,
+) -> ApiResult<()> {
+    let found = with_store(&state, {
+        let id = account_id.clone();
+        move |s| {
+            s.set_account_hidden(&id, body.hidden)
+                .map_err(|e| e.to_string())
+        }
+    })
+    .await?;
+    if !found {
+        return Err(ApiError(
+            axum::http::StatusCode::NOT_FOUND,
+            format!("no account {account_id}"),
+        ));
+    }
+    Ok(Json(()))
 }
 
 /// Full search/sort/filter over the transaction list (the Outflows screen and
@@ -530,6 +571,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/txn/{txn_id}/category", post(set_category))
         .route("/txn/{txn_id}/flag", post(set_flag))
         .route("/account/{account_id}/nickname", post(set_account_nickname))
+        .route("/account/{account_id}/hidden", post(set_account_hidden))
         .route("/apply_flags", post(apply_flags))
         .route("/mark_stream", post(mark_stream))
         .route("/clear_stream_mark", post(clear_stream_mark))
@@ -605,6 +647,132 @@ mod tests {
             })
         };
         (status, body)
+    }
+
+    /// Accounts acct-1 (visible) and acct-2 (to be hidden), one charge each,
+    /// plus a proposed card-payment pair whose bank leg is on acct-2. Routes
+    /// from both `api_router` and `match_routes` so match review is covered.
+    fn app_with_two_accounts() -> Router {
+        let store = Store::open_in_memory().expect("in-memory store");
+        let acct = |id: &str| Account {
+            id: id.into(),
+            org: "Bank".into(),
+            name: format!("{id} (0000)"),
+            kind: outflow_core::AccountKind::Checking,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: "plaid".into(),
+            nickname: None,
+            hidden: false,
+        };
+        store
+            .upsert_accounts(&[acct("acct-1"), acct("acct-2")])
+            .unwrap();
+        let mut other = txn("t2", -900, "Sightglass");
+        other.account_id = "acct-2".into();
+        store
+            .upsert_transactions(&[txn("t1", -1500, "Blue Bottle"), other])
+            .unwrap();
+        store
+            .insert_match(
+                "t2",
+                "t1",
+                outflow_core::MatchStatus::Proposed,
+                outflow_core::MatchConfidence::Medium,
+                None,
+                0,
+            )
+            .unwrap();
+        let cfg = crate::state::Config {
+            db_path: ":memory:".into(),
+            listen: "127.0.0.1:0".into(),
+            web_dir: "app/dist".into(),
+            plaid_tokens_file: "/dev/null".into(),
+            oauth_redirect: None,
+            api_token: None,
+            api_token_ro: None,
+            sync_interval_secs: 21_600,
+            perks_path: None,
+        };
+        let state = AppState {
+            store: Arc::new(Mutex::new(store)),
+            sync_lock: Arc::new(tokio::sync::Mutex::new(())),
+            cfg: Arc::new(cfg),
+        };
+        Router::new()
+            .merge(api_router())
+            .merge(crate::match_routes::router())
+            .with_state(state)
+    }
+
+    async fn post_status(app: Router, uri: &str, body: serde_json::Value) -> StatusCode {
+        app.oneshot(
+            Request::post(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+    }
+
+    #[tokio::test]
+    async fn hidden_account_disappears_everywhere_but_connections() {
+        let app = app_with_two_accounts();
+        let hide = serde_json::json!({ "hidden": true });
+        assert_eq!(
+            post_status(app.clone(), "/account/acct-2/hidden", hide.clone()).await,
+            StatusCode::OK
+        );
+
+        // Dropdowns / balances read /accounts: hidden account gone.
+        let (_, accts) = get_json(app.clone(), "/accounts").await;
+        let ids: Vec<&str> = accts
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["acct-1"]);
+        // Connections asks for everything and sees the flag.
+        let (_, all) = get_json(app.clone(), "/accounts?include_hidden=true").await;
+        let all = all.as_array().unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(
+            all.iter().find(|a| a["id"] == "acct-2").unwrap()["hidden"],
+            true
+        );
+
+        // Transaction list, aggregates and match review drop its rows.
+        let (_, page) = get_json(app.clone(), "/transactions").await;
+        assert_eq!(page["total"], 1);
+        assert_eq!(page["items"][0]["id"], "t1");
+        let (_, spend) = get_json(app.clone(), "/spend/categories").await;
+        let total: i64 = spend
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["total_cents"].as_i64().unwrap())
+            .sum();
+        assert_eq!(total.abs(), 1500);
+        let (_, matches) = get_json(app.clone(), "/matches").await;
+        assert_eq!(matches.as_array().unwrap().len(), 0);
+
+        // Un-hiding brings it all back.
+        let show = serde_json::json!({ "hidden": false });
+        post_status(app.clone(), "/account/acct-2/hidden", show).await;
+        let (_, page) = get_json(app.clone(), "/transactions").await;
+        assert_eq!(page["total"], 2);
+        let (_, matches) = get_json(app.clone(), "/matches").await;
+        assert_eq!(matches.as_array().unwrap().len(), 1);
+
+        // Unknown account is a 404, not a silent no-op.
+        assert_eq!(
+            post_status(app, "/account/nope/hidden", hide).await,
+            StatusCode::NOT_FOUND
+        );
     }
 
     // Regression: the Outflows tab query carries flattened FilterParams fields

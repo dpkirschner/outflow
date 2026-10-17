@@ -58,7 +58,7 @@ string round-tripping in SQLite.
 
 | Table | Role | Key notes |
 |---|---|---|
-| `accounts` | latest account snapshot | upsert by `id`; `source` column |
+| `accounts` | latest account snapshot | upsert by `id`; `source` column; user-owned `nickname` + `hidden` (never overwritten by a re-pull) |
 | `transactions` | the durable archive | grows past the providers' pull windows; this is the permanent history; `source` column |
 | `category_rules` | learned/manual rules | `match_type` (exact/contains), `pattern` (lowercased), `category` |
 | `flag_rules` | learned/manual suppression rules | same shape but carries a `flag` — an independent axis |
@@ -72,7 +72,8 @@ Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
 
 Schema changes run through the `PRAGMA user_version` migration runner
 (`store::migrate`): v1 `transacted_at`+`flag`, v2 `merchant_overrides`, v3
-`source` on accounts+transactions (+ new tables). Column lists are positional
+`source` on accounts+transactions (+ new tables), v4 `accounts.nickname`, v5
+`accounts.hidden`. Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)

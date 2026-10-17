@@ -7,6 +7,7 @@
 //! never the keychain (locked without a GUI session) and never the DB.
 
 mod match_routes;
+mod perks_routes;
 mod plaid_routes;
 mod routes;
 mod state;
@@ -170,6 +171,7 @@ async fn main() {
     let api = routes::api_router()
         .merge(plaid_routes::router())
         .merge(match_routes::router())
+        .merge(perks_routes::router())
         // Unknown /api paths must 404 as JSON — never fall through to the SPA
         // shell (a 200 HTML page masquerading as an API response).
         .fallback(|| async {
@@ -229,6 +231,7 @@ mod tests {
             api_token: full.map(Into::into),
             api_token_ro: ro.map(Into::into),
             sync_interval_secs: 21_600,
+            perks_path: None,
         };
         let state = AppState {
             store: Arc::new(Mutex::new(store)),

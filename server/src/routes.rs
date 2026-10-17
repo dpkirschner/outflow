@@ -563,6 +563,7 @@ mod tests {
             api_token: None,
             api_token_ro: None,
             sync_interval_secs: 21_600,
+            perks_path: None,
         };
         let state = AppState {
             store: Arc::new(Mutex::new(store)),

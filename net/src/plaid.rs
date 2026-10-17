@@ -82,7 +82,23 @@ pub fn link_token_create(
     cfg: &PlaidConfig,
     redirect_uri: Option<&str>,
     access_token: Option<&str>,
+    consent_investments: bool,
 ) -> Result<String, String> {
+    let body = link_token_body(redirect_uri, access_token, consent_investments);
+    post(cfg, "/link/token/create", body)
+}
+
+/// The `/link/token/create` request minus credentials. New links collect
+/// Investments consent up front via `additional_consented_products`: it never
+/// fails Item creation (card-only banks just ignore it) and isn't billed until
+/// a holdings endpoint is called. Existing items linked before that need
+/// update mode with `consent_investments` to grant it — calling
+/// `/investments/*` on them returns ADDITIONAL_CONSENT_REQUIRED.
+fn link_token_body(
+    redirect_uri: Option<&str>,
+    access_token: Option<&str>,
+    consent_investments: bool,
+) -> serde_json::Value {
     let mut body = serde_json::json!({
         "client_name": "outflow",
         "user": { "client_user_id": "outflow-local" },
@@ -90,13 +106,21 @@ pub fn link_token_create(
         "language": "en",
     });
     match access_token {
-        Some(token) => body["access_token"] = token.into(),
-        None => body["products"] = serde_json::json!(["transactions"]),
+        Some(token) => {
+            body["access_token"] = token.into();
+            if consent_investments {
+                body["additional_consented_products"] = serde_json::json!(["investments"]);
+            }
+        }
+        None => {
+            body["products"] = serde_json::json!(["transactions"]);
+            body["additional_consented_products"] = serde_json::json!(["investments"]);
+        }
     }
     if let Some(uri) = redirect_uri {
         body["redirect_uri"] = uri.into();
     }
-    post(cfg, "/link/token/create", body)
+    body
 }
 
 /// Exchange a Link `public_token` for the durable `(access_token, item_id)`.
@@ -158,4 +182,38 @@ pub fn item_remove(cfg: &PlaidConfig, access_token: &str) -> Result<(), String> 
         serde_json::json!({ "access_token": access_token }),
     )
     .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_link_asks_for_transactions_and_investments_consent() {
+        let b = link_token_body(Some("https://x/oauth-return"), None, false);
+        assert_eq!(b["products"], serde_json::json!(["transactions"]));
+        assert_eq!(
+            b["additional_consented_products"],
+            serde_json::json!(["investments"])
+        );
+        assert_eq!(b["redirect_uri"], "https://x/oauth-return");
+        assert!(b.get("access_token").is_none());
+    }
+
+    /// Update mode must omit `products` (Plaid rejects it) and only asks for
+    /// the extra consent when requested.
+    #[test]
+    fn update_mode_omits_products_and_adds_consent_only_on_request() {
+        let plain = link_token_body(None, Some("access-tok"), false);
+        assert_eq!(plain["access_token"], "access-tok");
+        assert!(plain.get("products").is_none());
+        assert!(plain.get("additional_consented_products").is_none());
+
+        let consent = link_token_body(None, Some("access-tok"), true);
+        assert!(consent.get("products").is_none());
+        assert_eq!(
+            consent["additional_consented_products"],
+            serde_json::json!(["investments"])
+        );
+    }
 }

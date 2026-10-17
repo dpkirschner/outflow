@@ -219,6 +219,10 @@ pub struct PlaidItem {
     pub status: String,
     pub created: i64,
     pub last_synced: Option<i64>,
+    /// The user granted Investments (holdings) access on this item, per the
+    /// `item` block of the last `/accounts/get`. Refreshed every sync.
+    #[serde(default)]
+    pub investments_consent: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -33,7 +33,9 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/pl
 Subcommands: `pull --from-file P` (offline fixture; live syncs run on the
 server), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`,
-`subs`, `fix <id> <category> [--no-learn]`, plus server/JSON mode (`--server
+`subs`, `fix <id> <category> [--no-learn]`,
+`perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
+vs spending; file from `--file`/`OUTFLOW_PERKS`), plus server/JSON mode (`--server
 URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
 DB path from `--db` or `OUTFLOW_DB`.
 
@@ -58,7 +60,7 @@ Server env: `OUTFLOW_DB`, `OUTFLOW_LISTEN` (default 127.0.0.1:8080),
 `OUTFLOW_PLAID_SECRET[_FILE]`, `OUTFLOW_PLAID_ENV=sandbox|production`,
 `OUTFLOW_PLAID_TOKENS_FILE`, `OUTFLOW_OAUTH_REDIRECT` (the ts.net HTTPS URL +
 `/oauth-return`, required for OAuth banks), `OUTFLOW_SYNC_INTERVAL_SECS`
-(default 21600), optional `OUTFLOW_API_TOKEN[_FILE]` (full access) and
+(default 21600), `OUTFLOW_PERKS` (card-offers TOML file or dir), optional `OUTFLOW_API_TOKEN[_FILE]` (full access) and
 `OUTFLOW_API_TOKEN_RO[_FILE]` (GET only, 403 on mutations — for agents/scripts),
 and with `--features encryption`: `OUTFLOW_DB_KEY[_FILE]`. Setting **either**
 token flips all of `/api/*` to deny-by-default; with neither, the API is open to

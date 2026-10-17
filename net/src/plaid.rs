@@ -158,6 +158,17 @@ pub fn accounts_get(cfg: &PlaidConfig, access_token: &str) -> Result<String, Str
     )
 }
 
+/// Raw `/investments/holdings/get` JSON; parse with
+/// `core::plaid::parse_holdings_get`. Needs Investments consent on the item
+/// (else ADDITIONAL_CONSENT_REQUIRED); the first success starts billing.
+pub fn investments_holdings_get(cfg: &PlaidConfig, access_token: &str) -> Result<String, String> {
+    post(
+        cfg,
+        "/investments/holdings/get",
+        serde_json::json!({ "access_token": access_token }),
+    )
+}
+
 /// One `/transactions/sync` page (raw JSON); parse with
 /// `core::plaid::parse_sync_page` and loop while `has_more`. On
 /// `TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION` the caller restarts from the

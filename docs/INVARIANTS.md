@@ -90,3 +90,21 @@ data integrity or the domain contract — treat them as load-bearing.
     keep hidden data correct (`apply_flags`, card-payment matching via
     `all_transactions_including_hidden`) see them. Hidden data keeps syncing;
     un-hiding restores it. (`store`)
+
+15. **Holdings are current state; snapshots are append-only history.**
+    `Store::record_item_snapshot` runs once per successful item sync, in one
+    transaction: it replaces the item's investment-account positions (when
+    fresh holdings arrived) and appends a `balance_snapshots` row per account
+    plus a `holding_snapshots` row per position. Nothing updates or deletes a
+    snapshot (`reset_data` keeps them). A failed holdings fetch never fails
+    the item or flips its status — last-known positions stay current and the
+    leg reports a `warning`. Share quantities and unit prices stay exact
+    decimal text; only `value`/`cost_basis` are `Money`. (`store`,
+    `server/src/sync.rs::snapshot_item`)
+
+16. **One cash rule: `balances::account_cash`.** Checking/savings are all cash;
+    an investment account's cash is its cash-equivalent holdings (Plaid
+    `is_cash_equivalent` or `type: cash`, e.g. VMFXX) plus any balance the
+    holdings don't cover (so a holdings-less HSA is 100% cash); credit/other
+    hold none. Snapshots, the Balances view and the CLI all call it — don't
+    compute cash anywhere else. (`core/src/balances.rs`)

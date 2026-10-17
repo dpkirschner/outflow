@@ -16,10 +16,19 @@ every amount as integer cents. See `core/src/money.rs`, `core/src/plaid.rs`.
 ```rust
 Account { id, org, name, kind: AccountKind, balance: Money, currency,
           last_synced, source }        // source: provenance ("plaid")
-AccountKind = Checking | Savings | Credit | Other
+AccountKind = Checking | Savings | Credit | Investment | Other
 // Real Plaid type/subtype mapping — credit/* → Credit (balance negated: Plaid
 // reports positive-owed), depository/checking → Checking,
-// depository/savings|cd|money market|hsa → Savings.
+// depository/savings|cd|money market|hsa → Savings, investment/* → Investment
+// (IRA, 401k, brokerage, investment HSA). Loans and unknowns → Other.
+
+Security { security_id, ticker: Option<String>, name, sec_type,
+           is_cash }   // is_cash = Plaid is_cash_equivalent || type "cash"
+Holding { account_id, security_id, quantity: String, price: String,
+          value: Money, cost_basis: Option<Money> }
+          // quantity/price are EXACT decimal text (4+ share decimals, sub-cent
+          // prices); only value/cost_basis are money
+BalanceSnapshot { taken_at, account_id, balance: Money, cash: Money }
 
 Transaction {
     id,               // provider transaction id — the dedup key (stored raw)
@@ -54,7 +63,7 @@ keys off. Plaid calendar dates (`YYYY-MM-DD`) are anchored at **local noon** so
 they never straddle a month boundary. All enums have `as_str`/`from_str` for
 string round-tripping in SQLite.
 
-## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 3)
+## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 7)
 
 | Table | Role | Key notes |
 |---|---|---|
@@ -66,6 +75,10 @@ string round-tripping in SQLite.
 | `merchant_overrides` | per-merchant ledger marks | `Committed` / `Dismissed` / `Kept` |
 | `sync_log` | sync history | one row per source leg per run |
 | `plaid_items` | linked Plaid connections | item_id PK, institution, **cursor**, status (`ok`/`login_required`/`error`), created, last_synced, investments_consent (refreshed from `/accounts/get`'s `item` each sync) — no secrets |
+| `securities` | instruments seen in holdings | security_id PK; ticker, name, type, is_cash |
+| `holdings` | **current** positions | PK(account_id, security_id); replaced per item each sync (sold positions drop); quantity/price as decimal text |
+| `balance_snapshots` | **append-only** history | PK(taken_at, account_id); every account, every successful item sync; `cash_cents` from `balances::account_cash` |
+| `holding_snapshots` | **append-only** history | PK(taken_at, account_id, security_id); one row per position per sync |
 | `txn_matches` | card-payment pair decisions | UNIQUE(bank_txn_id, card_txn_id); status proposed/accepted/rejected; decided pairs are never re-proposed |
 
 Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
@@ -73,7 +86,8 @@ Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
 Schema changes run through the `PRAGMA user_version` migration runner
 (`store::migrate`): v1 `transacted_at`+`flag`, v2 `merchant_overrides`, v3
 `source` on accounts+transactions (+ new tables), v4 `accounts.nickname`, v5
-`accounts.hidden`, v6 `plaid_items.investments_consent`. Column lists are positional
+`accounts.hidden`, v6 `plaid_items.investments_consent`, v7 `securities` +
+`holdings` + `balance_snapshots` + `holding_snapshots` (new tables). Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)

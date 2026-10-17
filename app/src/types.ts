@@ -2,7 +2,7 @@
 // snake_case and enums as their variant names. Every money value is integer
 // cents (i64); outflows are negative.
 
-export type AccountKind = "Checking" | "Savings" | "Credit" | "Other";
+export type AccountKind = "Checking" | "Savings" | "Credit" | "Investment" | "Other";
 export type CategorySource = "Plaid" | "Rule" | "Llm" | "Manual";
 export type Cadence = "Monthly" | "Yearly";
 // Suppression flag: how spend analytics treat a transaction. Non-Spending rows
@@ -247,4 +247,45 @@ export interface TxnPage {
   total: number;
   total_cents: number; // signed sum over ALL matches, not just this page
   items: Transaction[];
+}
+
+// Balances (GET /balances, /balances/history). Money fields are cents;
+// quantity/price are exact decimal strings; *_bp are basis points (1% = 100).
+export type BalanceGroup = "cash" | "investments" | "credit" | "other";
+
+export interface HoldingRow {
+  security_id: string;
+  label: string; // ticker, else security name
+  name: string;
+  sec_type: string;
+  is_cash: boolean;
+  quantity: string;
+  price: string;
+  value: number;
+  cost_basis: number | null;
+  gain: number | null;
+  share_bp: number;
+}
+
+export interface AccountBalance {
+  account: Account;
+  group: BalanceGroup;
+  cash: number;
+  invested: number;
+  cash_bp: number;
+  idle_cash: boolean;
+  holdings: HoldingRow[];
+}
+
+export interface BalancesView {
+  totals: { net_worth: number; cash: number; invested: number; credit: number };
+  groups: { group: BalanceGroup; total: number; accounts: AccountBalance[] }[];
+}
+
+export interface DayTotals {
+  day: string; // YYYY-MM-DD
+  net_worth: number;
+  cash: number;
+  invested: number;
+  credit: number;
 }

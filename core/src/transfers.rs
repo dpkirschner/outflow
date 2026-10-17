@@ -85,7 +85,7 @@ pub fn detect_card_payments(
             AccountKind::Credit => {
                 card_accounts.insert(a.id.as_str());
             }
-            AccountKind::Other => {}
+            AccountKind::Investment | AccountKind::Other => {}
         }
     }
 

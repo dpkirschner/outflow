@@ -7,11 +7,12 @@ import { StatStrip, LedgerZones } from "./components/ledger/Zones";
 import { StreamsCard, type SortMode } from "./components/ledger/Streams";
 import { StreamSlideOver } from "./components/ledger/SlideOver";
 import { coverageText } from "./components/ledger/labels";
+import { Balances } from "./components/Balances";
 import { Connections } from "./components/Connections";
 import { MatchReview } from "./components/MatchReview";
 import { Outflows } from "./components/Outflows";
 
-type Tab = "ledger" | "outflows" | "review" | "connections";
+type Tab = "ledger" | "outflows" | "balances" | "review" | "connections";
 
 export default function App() {
   // A Plaid OAuth return must land on Connections so Link can resume there.
@@ -227,6 +228,12 @@ export default function App() {
             Outflows
           </span>
           <span
+            className={tab === "balances" ? "on" : "lg-navlink"}
+            onClick={() => setTab("balances")}
+          >
+            Balances
+          </span>
+          <span
             className={tab === "review" ? "on" : "lg-navlink"}
             onClick={() => setTab("review")}
           >
@@ -249,6 +256,11 @@ export default function App() {
       ) : tab === "review" ? (
         <>
           <MatchReview notify={notify} onChanged={() => void reload(win)} />
+          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+        </>
+      ) : tab === "balances" ? (
+        <>
+          <Balances notify={notify} />
           {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "outflows" ? (

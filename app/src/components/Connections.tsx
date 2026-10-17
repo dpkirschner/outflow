@@ -281,7 +281,7 @@ export function Connections({
                   <span className="lg-src investment" title="Holdings access granted">
                     ✓ HOLDINGS
                   </span>
-                ) : byOrg[it.institution]?.some((a) => a.kind === "Other") && (
+                ) : byOrg[it.institution]?.some((a) => a.kind === "Investment") && (
                   // Items linked before outflow requested Investments consent
                   // need this update-mode pass before holdings can be fetched.
                   <button

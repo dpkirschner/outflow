@@ -1,3 +1,4 @@
+pub mod balances;
 pub mod categorize;
 pub mod ledger;
 pub mod llm;
@@ -10,6 +11,10 @@ pub mod store;
 pub mod subscriptions;
 pub mod transfers;
 
+pub use balances::{
+    account_cash, history as balance_history, summarize as summarize_balances, AccountBalance,
+    BalancesView, DayTotals, Group, GroupBalance, HoldingRow, Totals,
+};
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 pub use ledger::{
     ledger, stream_preview, Coverage, LedgerStats, LedgerView, LineItem, Source, Stream,
@@ -17,8 +22,8 @@ pub use ledger::{
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
-    account_display_label, Account, AccountKind, CategorySource, Mark, MatchConfidence,
-    MatchStatus, PlaidItem, SyncEntry, Transaction, TxnFlag, TxnMatch,
+    account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding, Mark,
+    MatchConfidence, MatchStatus, PlaidItem, Security, SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use perks::{
@@ -26,8 +31,8 @@ pub use perks::{
     FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
 };
 pub use plaid::{
-    item_has_investments_consent, parse_accounts_get, parse_fixture, parse_sync_page, Fixture,
-    SourceError, SyncPage,
+    item_has_investments_consent, parse_accounts_get, parse_fixture, parse_holdings_get,
+    parse_sync_page, Fixture, SourceError, SyncPage,
 };
 pub use query::{
     monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,

@@ -34,6 +34,8 @@ pub struct SyncPage {
     pub modified: Vec<Transaction>,
     pub removed_ids: Vec<String>,
     pub pending_superseded: Vec<String>,
+    /// Empty when Plaid has no cursor to give yet (new item, initial pull not
+    /// ready); `store::apply_plaid_batch` then keeps the stored cursor.
     pub next_cursor: String,
     pub has_more: bool,
 }
@@ -299,7 +301,13 @@ pub fn parse_sync_page(json: &str) -> Result<SyncPage, SourceError> {
         modified,
         removed_ids,
         pending_superseded,
-        next_cursor: require_str(&v, "next_cursor")?,
+        // Present-but-empty is legitimate: a freshly linked item whose initial
+        // pull isn't ready (`transactions_update_status: NOT_READY`) answers
+        // with `"next_cursor": ""`. Absent or non-string stays an error.
+        next_cursor: match v.get("next_cursor") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            _ => return Err(SourceError::Json("missing field \"next_cursor\"".into())),
+        },
         has_more: v.get("has_more").and_then(|h| h.as_bool()).unwrap_or(false),
     })
 }
@@ -459,6 +467,32 @@ mod tests {
         match parse_sync_page(json) {
             Err(SourceError::Json(_)) => {} // string amount → missing number
             other => panic!("expected Json error, got {other:?}"),
+        }
+    }
+
+    /// A freshly linked item before Plaid's initial pull finishes. Real shape:
+    /// HTTP 200, every list empty, `next_cursor` present but "". This used to
+    /// fail as "missing field next_cursor", breaking every new link.
+    #[test]
+    fn not_ready_page_with_empty_cursor_parses() {
+        let json = r#"{"added":[],"modified":[],"removed":[],"accounts":[],
+            "next_cursor":"","has_more":false,
+            "transactions_update_status":"NOT_READY","request_id":"r1"}"#;
+        let page = parse_sync_page(json).expect("NOT_READY page must parse");
+        assert_eq!(page.next_cursor, "");
+        assert!(!page.has_more);
+        assert!(page.added.is_empty() && page.modified.is_empty());
+        assert!(page.removed_ids.is_empty() && page.pending_superseded.is_empty());
+    }
+
+    #[test]
+    fn non_string_cursor_is_an_error() {
+        for cursor in ["null", "123", "[]"] {
+            let json = format!(r#"{{"added":[],"next_cursor":{cursor},"has_more":false}}"#);
+            assert!(
+                matches!(parse_sync_page(&json), Err(SourceError::Json(_))),
+                "next_cursor = {cursor} should be rejected"
+            );
         }
     }
 

@@ -121,10 +121,17 @@ export function Connections({
         await api.pull();
       } else {
         const r = await api.plaidExchange(publicToken, institution);
-        notify({
-          kind: "ok",
-          text: `Linked ${r.institution}: ${r.added} transactions pulled`,
-        });
+        notify(
+          r.sync_error
+            ? {
+                kind: "err",
+                text: `Linked ${r.institution}, but the first sync failed (it will retry): ${r.sync_error}`,
+              }
+            : {
+                kind: "ok",
+                text: `Linked ${r.institution}: ${r.added} transactions pulled`,
+              },
+        );
       }
       await refresh();
     } catch (err) {

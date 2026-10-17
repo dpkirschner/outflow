@@ -96,10 +96,10 @@ export function Connections({
     }
   }, [notify]);
 
-  const startLink = async (itemId?: string) => {
+  const startLink = async (itemId?: string, consentInvestments = false) => {
     setBusy(true);
     try {
-      const r = await api.plaidLinkToken(itemId);
+      const r = await api.plaidLinkToken(itemId, consentInvestments);
       localStorage.setItem(LINK_TOKEN_KEY, r.link_token);
       if (itemId) localStorage.setItem(LINK_ITEM_KEY, itemId);
       else localStorage.removeItem(LINK_ITEM_KEY);
@@ -275,6 +275,18 @@ export function Connections({
                     onClick={() => void startLink(it.item_id)}
                   >
                     Reconnect
+                  </button>
+                )}
+                {byOrg[it.institution]?.some((a) => a.kind === "Other") && (
+                  // Items linked before outflow requested Investments consent
+                  // need this update-mode pass before holdings can be fetched.
+                  <button
+                    className="lg-pill ghost"
+                    disabled={busy}
+                    title="Re-open Plaid Link to grant access to holdings"
+                    onClick={() => void startLink(it.item_id, true)}
+                  >
+                    Allow holdings
                   </button>
                 )}
                 <button className="lg-pill ghost" disabled={busy} onClick={() => void onRemove(it)}>

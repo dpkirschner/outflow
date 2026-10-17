@@ -3,6 +3,7 @@ pub mod ledger;
 pub mod llm;
 pub mod model;
 pub mod money;
+pub mod perks;
 pub mod plaid;
 pub mod query;
 pub mod store;
@@ -16,6 +17,10 @@ pub use model::{
     MatchStatus, PlaidItem, SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
+pub use perks::{
+    evaluate as evaluate_perks, load_offers, parse_offers, Cap, CardOffers, CardStatus, Finding,
+    FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
+};
 pub use plaid::{parse_accounts_get, parse_fixture, parse_sync_page, Fixture, SourceError, SyncPage};
 pub use query::{
     monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,

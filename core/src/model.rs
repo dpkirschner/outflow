@@ -71,7 +71,7 @@ pub fn account_display_label(name: &str, nickname: Option<&str>) -> String {
 
 /// The trailing `"(1234)"`-style suffix `plaid.rs` appends to an account name,
 /// if present. Strips only the last parenthesized group.
-fn mask_suffix(name: &str) -> Option<&str> {
+pub(crate) fn mask_suffix(name: &str) -> Option<&str> {
     let name = name.trim_end();
     if !name.ends_with(')') {
         return None;

@@ -278,19 +278,19 @@ export function Connections({
                   </button>
                 )}
                 {it.investments_consent ? (
-                  <span className="cx-consent-tag" title="Holdings access granted">
-                    holdings allowed
+                  <span className="lg-src investment" title="Holdings access granted">
+                    ✓ HOLDINGS
                   </span>
                 ) : byOrg[it.institution]?.some((a) => a.kind === "Other") && (
                   // Items linked before outflow requested Investments consent
                   // need this update-mode pass before holdings can be fetched.
                   <button
-                    className="lg-pill ghost"
+                    className="lg-src investment cx-holdings-btn"
                     disabled={busy}
                     title="Re-open Plaid Link to grant access to holdings"
                     onClick={() => void startLink(it.item_id, true)}
                   >
-                    Allow holdings
+                    + ALLOW HOLDINGS
                   </button>
                 )}
                 <button className="lg-pill ghost" disabled={busy} onClick={() => void onRemove(it)}>

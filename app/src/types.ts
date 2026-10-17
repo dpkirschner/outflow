@@ -199,6 +199,7 @@ export interface PlaidItem {
   status: string; // "ok" | "login_required" | "error"
   created: number;
   last_synced: number | null;
+  investments_consent: boolean; // holdings access granted (refreshed each sync)
 }
 
 export type MatchStatus = "Proposed" | "Accepted" | "Rejected";

@@ -277,7 +277,11 @@ export function Connections({
                     Reconnect
                   </button>
                 )}
-                {byOrg[it.institution]?.some((a) => a.kind === "Other") && (
+                {it.investments_consent ? (
+                  <span className="cx-consent-tag" title="Holdings access granted">
+                    holdings allowed
+                  </span>
+                ) : byOrg[it.institution]?.some((a) => a.kind === "Other") && (
                   // Items linked before outflow requested Investments consent
                   // need this update-mode pass before holdings can be fetched.
                   <button

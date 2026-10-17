@@ -10,7 +10,9 @@
 
 use axum::http::StatusCode;
 use outflow_core::store::PlaidBatch;
-use outflow_core::{parse_accounts_get, parse_sync_page, PlaidItem, Store};
+use outflow_core::{
+    item_has_investments_consent, parse_accounts_get, parse_sync_page, PlaidItem, Store,
+};
 use outflow_net::{plaid, plaid_tokens, PlaidConfig};
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
@@ -233,6 +235,17 @@ pub fn run_plaid_item(
     let accounts_json = plaid::accounts_get(pcfg, &token)?;
     let accounts = parse_accounts_get(&accounts_json, &item.institution, synced_at)
         .map_err(|e| format!("parse accounts: {e:?}"))?;
+    // Consent is display-only metadata (drives "Allow holdings" in the UI), so
+    // a malformed item block is logged rather than failing the sync.
+    match item_has_investments_consent(&accounts_json) {
+        Ok(granted) => {
+            let _ = lock(store, |s| {
+                s.set_plaid_item_investments_consent(&item.item_id, granted)
+                    .map_err(|e| e.to_string())
+            });
+        }
+        Err(e) => tracing::warn!(item_id = %item.item_id, error = ?e, "unreadable item consent"),
+    }
 
     const MAX_RESTARTS: usize = 3;
     let mut restarts = 0;

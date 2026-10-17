@@ -40,7 +40,7 @@ Transaction {
 TxnFlag = Spending | Transfer | CardPayment   // suppression axis; see below
 
 PlaidItem { item_id, institution, cursor: Option<String>, status, created,
-            last_synced }   // NON-secret metadata; access token lives in the
+            last_synced, investments_consent }   // NON-secret metadata; access token lives in the
                             // 0600 tokens file, never here
 TxnMatch { id, bank_txn_id, card_txn_id, status: Proposed|Accepted|Rejected,
            confidence: High|Medium, reason, created }
@@ -65,7 +65,7 @@ string round-tripping in SQLite.
 | `categories` | the vocabulary | seeded on first open; constrains the LLM |
 | `merchant_overrides` | per-merchant ledger marks | `Committed` / `Dismissed` / `Kept` |
 | `sync_log` | sync history | one row per source leg per run |
-| `plaid_items` | linked Plaid connections | item_id PK, institution, **cursor**, status (`ok`/`login_required`/`error`), created, last_synced — no secrets |
+| `plaid_items` | linked Plaid connections | item_id PK, institution, **cursor**, status (`ok`/`login_required`/`error`), created, last_synced, investments_consent (refreshed from `/accounts/get`'s `item` each sync) — no secrets |
 | `txn_matches` | card-payment pair decisions | UNIQUE(bank_txn_id, card_txn_id); status proposed/accepted/rejected; decided pairs are never re-proposed |
 
 Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
@@ -73,7 +73,7 @@ Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
 Schema changes run through the `PRAGMA user_version` migration runner
 (`store::migrate`): v1 `transacted_at`+`flag`, v2 `merchant_overrides`, v3
 `source` on accounts+transactions (+ new tables), v4 `accounts.nickname`, v5
-`accounts.hidden`. Column lists are positional
+`accounts.hidden`, v6 `plaid_items.investments_consent`. Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)

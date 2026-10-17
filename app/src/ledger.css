@@ -967,7 +967,8 @@ body:has(.lg-app) {
 .cx-acct-hidden {
   opacity: 0.55;
 }
-.cx-hidden-tag {
+.cx-hidden-tag,
+.cx-consent-tag {
   font-size: 11px;
   color: var(--lg-dim);
   border: 1px solid var(--lg-line);

@@ -293,7 +293,8 @@ CREATE TABLE IF NOT EXISTS plaid_items (
     cursor TEXT,
     status TEXT NOT NULL DEFAULT 'ok',
     created INTEGER NOT NULL,
-    last_synced INTEGER
+    last_synced INTEGER,
+    investments_consent INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS txn_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -313,8 +314,8 @@ CREATE TABLE IF NOT EXISTS txn_matches (
 /// bumping documents the change.
 /// v1: transactions.transacted_at + transactions.flag. v2: merchant_overrides.
 /// v3: accounts.source + transactions.source (+ plaid_items, txn_matches tables).
-/// v4: accounts.nickname. v5: accounts.hidden.
-const SCHEMA_VERSION: i64 = 5;
+/// v4: accounts.nickname. v5: accounts.hidden. v6: plaid_items.investments_consent.
+const SCHEMA_VERSION: i64 = 6;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -381,6 +382,14 @@ impl Store {
         if version < 5 {
             // v5: user-hidden accounts. 0 = visible.
             self.add_column_if_missing("accounts", "hidden", "INTEGER NOT NULL DEFAULT 0")?;
+        }
+        if version < 6 {
+            // v6: Investments consent per item, refreshed each sync. 0 = not granted.
+            self.add_column_if_missing(
+                "plaid_items",
+                "investments_consent",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -894,7 +903,8 @@ impl Store {
 
     pub fn plaid_items(&self) -> rusqlite::Result<Vec<PlaidItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT item_id, institution, cursor, status, created, last_synced
+            "SELECT item_id, institution, cursor, status, created, last_synced,
+                    investments_consent
              FROM plaid_items ORDER BY created",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -905,6 +915,7 @@ impl Store {
                 status: r.get(3)?,
                 created: r.get(4)?,
                 last_synced: r.get(5)?,
+                investments_consent: r.get(6)?,
             })
         })?;
         rows.collect()
@@ -916,6 +927,20 @@ impl Store {
         self.conn.execute(
             "UPDATE plaid_items SET status = ?1 WHERE item_id = ?2",
             params![status, item_id],
+        )?;
+        Ok(())
+    }
+
+    /// Record whether the item currently has Investments consent (from the
+    /// latest `/accounts/get`), so the UI can stop offering the grant.
+    pub fn set_plaid_item_investments_consent(
+        &self,
+        item_id: &str,
+        granted: bool,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE plaid_items SET investments_consent = ?1 WHERE item_id = ?2",
+            params![granted, item_id],
         )?;
         Ok(())
     }
@@ -1706,6 +1731,39 @@ mod tests {
         let accts = s.accounts().unwrap();
         assert_eq!(accts.len(), 1);
         assert!(!accts[0].hidden);
+        drop(s);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn investments_consent_migrates_off_and_round_trips() {
+        // A v5 plaid_items table (no consent column) gains it, defaulting off.
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-v5-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE plaid_items (
+                    item_id TEXT PRIMARY KEY, institution TEXT NOT NULL, cursor TEXT,
+                    status TEXT NOT NULL DEFAULT 'ok', created INTEGER NOT NULL,
+                    last_synced INTEGER
+                );
+                INSERT INTO plaid_items VALUES ('i1', 'Vanguard', 'c', 'ok', 1, NULL);
+                PRAGMA user_version = 5;",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert!(!s.plaid_items().unwrap()[0].investments_consent);
+
+        s.set_plaid_item_investments_consent("i1", true).unwrap();
+        // Re-registering the item (re-link) must not clobber the flag.
+        s.upsert_plaid_item("i1", "Vanguard", 2).unwrap();
+        assert!(s.plaid_items().unwrap()[0].investments_consent);
+        s.set_plaid_item_investments_consent("i1", false).unwrap();
+        assert!(!s.plaid_items().unwrap()[0].investments_consent);
         drop(s);
         let _ = std::fs::remove_file(&path);
     }

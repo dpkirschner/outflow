@@ -25,6 +25,9 @@ pub struct Config {
     /// archive but never wipe it, trigger Plaid, or spend LLM budget.
     pub api_token_ro: Option<String>,
     pub sync_interval_secs: u64,
+    /// Card-offers TOML file, or a directory of them (`OUTFLOW_PERKS`). Not a
+    /// secret. `None` = `/api/perks` answers 400.
+    pub perks_path: Option<String>,
 }
 
 impl Config {
@@ -71,6 +74,7 @@ impl Config {
             sync_interval_secs: env("OUTFLOW_SYNC_INTERVAL_SECS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(21_600), // 6h
+            perks_path: env("OUTFLOW_PERKS"),
         }
     }
 }

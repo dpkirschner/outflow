@@ -338,6 +338,8 @@ pub fn parse_fixture(json: &str, synced_at: i64) -> Result<Fixture, SourceError>
 }
 
 #[cfg(test)]
+// Amounts are written dollars_cents (110_24 = $110.24) for readability.
+#[allow(clippy::inconsistent_digit_grouping)]
 mod tests {
     use super::*;
 

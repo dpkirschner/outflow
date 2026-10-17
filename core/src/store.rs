@@ -100,13 +100,18 @@ fn match_flag<'a>(rules: &'a [FlagRule], merchant: &str) -> Option<&'a FlagRule>
     best
 }
 
+/// SQL predicate: the transaction's account is not hidden.
+const VISIBLE: &str = "account_id NOT IN (SELECT id FROM accounts WHERE hidden = 1)";
+
 /// Account upsert loop shared by `upsert_accounts` and `apply_plaid_batch`;
 /// runs inside the caller's transaction.
 fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Result<()> {
     for a in accounts {
         // `nickname` is intentionally absent from the conflict-update: a re-pull
         // (which carries no nickname) must not wipe a user-set one. Same rule as
-        // `flag` on transactions — see `insert_txn_batch`.
+        // `flag` on transactions — see `insert_txn_batch`. `hidden` isn't
+        // written at all: new accounts take the column default (visible) and a
+        // re-pull never un-hides one.
         conn.execute(
             "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced, source, nickname)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -233,7 +238,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     currency TEXT NOT NULL,
     last_synced INTEGER NOT NULL,
     source TEXT NOT NULL DEFAULT 'plaid',
-    nickname TEXT
+    nickname TEXT,
+    hidden INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -307,8 +313,8 @@ CREATE TABLE IF NOT EXISTS txn_matches (
 /// bumping documents the change.
 /// v1: transactions.transacted_at + transactions.flag. v2: merchant_overrides.
 /// v3: accounts.source + transactions.source (+ plaid_items, txn_matches tables).
-/// v4: accounts.nickname.
-const SCHEMA_VERSION: i64 = 4;
+/// v4: accounts.nickname. v5: accounts.hidden.
+const SCHEMA_VERSION: i64 = 5;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -371,6 +377,10 @@ impl Store {
         if version < 4 {
             // v4: user-editable per-account nickname. NULL = no nickname.
             self.add_column_if_missing("accounts", "nickname", "TEXT")?;
+        }
+        if version < 5 {
+            // v5: user-hidden accounts. 0 = visible.
+            self.add_column_if_missing("accounts", "hidden", "INTEGER NOT NULL DEFAULT 0")?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -453,11 +463,23 @@ impl Store {
         tx.commit()
     }
 
+    /// Visible accounts — what every user-facing view reads. Hidden ones are
+    /// only reachable through `all_accounts`.
     pub fn accounts(&self) -> rusqlite::Result<Vec<Account>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source, nickname
-             FROM accounts ORDER BY name",
-        )?;
+        self.query_accounts("WHERE hidden = 0")
+    }
+
+    /// Every account including hidden ones: the Connections screen (so they
+    /// can be un-hidden) and internal maintenance like the card-payment matcher.
+    pub fn all_accounts(&self) -> rusqlite::Result<Vec<Account>> {
+        self.query_accounts("")
+    }
+
+    fn query_accounts(&self, filter: &str) -> rusqlite::Result<Vec<Account>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source, nickname, hidden
+             FROM accounts {filter} ORDER BY name"
+        ))?;
         let rows = stmt.query_map([], |r| {
             let kind: String = r.get(3)?;
             Ok(Account {
@@ -470,6 +492,7 @@ impl Store {
                 last_synced: r.get(6)?,
                 source: r.get(7)?,
                 nickname: r.get(8)?,
+                hidden: r.get(9)?,
             })
         })?;
         rows.collect()
@@ -527,7 +550,24 @@ impl Store {
         Ok(n)
     }
 
+    /// Transactions on visible accounts — the single read behind search,
+    /// spend, ledger, subscriptions and perks, so hiding an account drops its
+    /// rows from all of them. Rows whose account isn't in `accounts` at all
+    /// (e.g. fixture-only ingests) are kept.
     pub fn all_transactions(&self) -> rusqlite::Result<Vec<Transaction>> {
+        let sql = format!(
+            "SELECT {} FROM transactions WHERE {VISIBLE} ORDER BY posted ASC",
+            TXN_COLUMNS
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], row_to_txn)?;
+        rows.collect()
+    }
+
+    /// Every transaction including hidden accounts' — for maintenance passes
+    /// (flag rules, card-payment matching) that must keep hidden data correct
+    /// so un-hiding restores a consistent account.
+    pub fn all_transactions_including_hidden(&self) -> rusqlite::Result<Vec<Transaction>> {
         let sql = format!(
             "SELECT {} FROM transactions ORDER BY posted ASC",
             TXN_COLUMNS
@@ -539,7 +579,7 @@ impl Store {
 
     pub fn uncategorized(&self) -> rusqlite::Result<Vec<Transaction>> {
         let sql = format!(
-            "SELECT {} FROM transactions WHERE category IS NULL ORDER BY posted ASC",
+            "SELECT {} FROM transactions WHERE category IS NULL AND {VISIBLE} ORDER BY posted ASC",
             TXN_COLUMNS
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -717,6 +757,24 @@ impl Store {
         Ok(())
     }
 
+    /// Hide or un-hide an account. Returns false when no such account exists.
+    pub fn set_account_hidden(&self, id: &str, hidden: bool) -> rusqlite::Result<bool> {
+        let n = self.conn.execute(
+            "UPDATE accounts SET hidden = ?1 WHERE id = ?2",
+            params![hidden, id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Ids of hidden accounts.
+    pub fn hidden_account_ids(&self) -> rusqlite::Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id FROM accounts WHERE hidden = 1")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect()
+    }
+
     /// Apply every flag rule to matching transactions. Only touches rows whose
     /// current flag differs from the rule's, and never resets a row to
     /// `Spending` (rules only assign the flag they carry). Returns the count
@@ -726,7 +784,7 @@ impl Store {
         if rules.is_empty() {
             return Ok(0);
         }
-        let txns = self.all_transactions()?;
+        let txns = self.all_transactions_including_hidden()?;
         let tx = self.conn.unchecked_transaction()?;
         let mut n = 0;
         for t in &txns {
@@ -1114,6 +1172,7 @@ mod tests {
             last_synced: 42,
             source: default_source(),
             nickname: None,
+            hidden: false,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         let got = s.accounts().unwrap();
@@ -1517,6 +1576,7 @@ mod tests {
             last_synced: 0,
             source: default_source(),
             nickname: None,
+            hidden: false,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         s.set_account_nickname("acct1", Some("Sapphire")).unwrap();
@@ -1529,6 +1589,125 @@ mod tests {
         // Empty/whitespace clears back to NULL.
         s.set_account_nickname("acct1", Some("  ")).unwrap();
         assert_eq!(s.accounts().unwrap()[0].nickname, None);
+    }
+
+    fn account(id: &str) -> Account {
+        Account {
+            id: id.into(),
+            org: "Bank".into(),
+            name: format!("{id} (0000)"),
+            kind: AccountKind::Checking,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: default_source(),
+            nickname: None,
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn hidden_survives_repull_and_unhides() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("a"), account("b")]).unwrap();
+        assert!(s.set_account_hidden("a", true).unwrap());
+        // A re-pull carries `hidden: false` but must not un-hide.
+        s.upsert_accounts(&[account("a")]).unwrap();
+        let visible: Vec<String> = s.accounts().unwrap().into_iter().map(|a| a.id).collect();
+        assert_eq!(visible, vec!["b".to_string()]);
+        let all = s.all_accounts().unwrap();
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().find(|a| a.id == "a").unwrap().hidden);
+        assert_eq!(s.hidden_account_ids().unwrap(), vec!["a".to_string()]);
+
+        assert!(s.set_account_hidden("a", false).unwrap());
+        assert_eq!(s.accounts().unwrap().len(), 2);
+        // Unknown id reports not-found instead of silently succeeding.
+        assert!(!s.set_account_hidden("nope", true).unwrap());
+    }
+
+    #[test]
+    fn hidden_account_rows_drop_out_of_user_facing_reads() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("shown"), account("gone")])
+            .unwrap();
+        s.upsert_transactions(&[
+            txn("t-shown", "shown", 100, -500, false),
+            txn("t-gone", "gone", 100, -700, false),
+            // Account not in the accounts table (fixture-style ingest): kept.
+            txn("t-orphan", "unknown", 100, -300, false),
+        ])
+        .unwrap();
+        s.set_account_hidden("gone", true).unwrap();
+
+        let ids = |v: Vec<Transaction>| -> Vec<String> {
+            let mut ids: Vec<String> = v.into_iter().map(|t| t.id).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(
+            ids(s.all_transactions().unwrap()),
+            vec!["t-orphan", "t-shown"]
+        );
+        assert_eq!(ids(s.uncategorized().unwrap()), vec!["t-orphan", "t-shown"]);
+        assert_eq!(
+            ids(s.all_transactions_including_hidden().unwrap()),
+            vec!["t-gone", "t-orphan", "t-shown"]
+        );
+        // Direct lookup by id still works (match review enrichment etc.).
+        assert!(s.transaction("t-gone").unwrap().is_some());
+
+        // Aggregates read through all_transactions, so the hidden spend is gone.
+        let spend: i64 = crate::query::spend_by_category(&s, &crate::query::TxnFilter::all())
+            .unwrap()
+            .iter()
+            .map(|c| c.total_cents)
+            .sum();
+        assert_eq!(spend.abs(), 800);
+
+        s.set_account_hidden("gone", false).unwrap();
+        assert_eq!(s.all_transactions().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn flag_rules_still_apply_to_hidden_accounts() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("gone")]).unwrap();
+        s.upsert_transactions(&[txn("t", "gone", 100, -500, false)])
+            .unwrap();
+        s.set_account_hidden("gone", true).unwrap();
+        s.add_flag_rule(MatchType::Exact, "d", TxnFlag::Transfer)
+            .unwrap();
+        assert_eq!(s.apply_flags().unwrap(), 1);
+        assert_eq!(s.transaction("t").unwrap().unwrap().flag, TxnFlag::Transfer);
+    }
+
+    #[test]
+    fn v4_db_migrates_to_visible_accounts() {
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-v4-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE accounts (
+                    id TEXT PRIMARY KEY, org TEXT NOT NULL, name TEXT NOT NULL,
+                    kind TEXT NOT NULL, balance_cents INTEGER NOT NULL,
+                    currency TEXT NOT NULL, last_synced INTEGER NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'plaid', nickname TEXT
+                );
+                INSERT INTO accounts VALUES ('a', 'Bank', 'Old (1)', 'checking', 0, 'USD', 0, 'plaid', NULL);
+                PRAGMA user_version = 4;",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let accts = s.accounts().unwrap();
+        assert_eq!(accts.len(), 1);
+        assert!(!accts[0].hidden);
+        drop(s);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1589,6 +1768,7 @@ mod tests {
             last_synced: 0,
             source: default_source(),
             nickname: None,
+            hidden: false,
         }])
         .unwrap();
         assert!(s.has_credit_account().unwrap());

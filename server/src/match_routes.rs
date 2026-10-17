@@ -36,6 +36,11 @@ async fn list(
     };
     with_store(&state, move |store| {
         let ms = store.matches(status).map_err(|e| e.to_string())?;
+        let hidden: std::collections::HashSet<String> = store
+            .hidden_account_ids()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect();
         ms.into_iter()
             .map(|m| {
                 let bank = store
@@ -47,6 +52,18 @@ async fn list(
                 Ok(MatchView { m, bank, card })
             })
             .collect::<Result<Vec<_>, String>>()
+            // A pair with a leg on a hidden account stays recorded (and keeps
+            // suppressing) but isn't shown for review.
+            .map(|views| {
+                views
+                    .into_iter()
+                    .filter(|v| {
+                        ![&v.bank, &v.card]
+                            .iter()
+                            .any(|t| t.as_ref().is_some_and(|t| hidden.contains(&t.account_id)))
+                    })
+                    .collect()
+            })
     })
     .await
     .map(Json)

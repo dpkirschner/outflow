@@ -952,6 +952,28 @@ body:has(.lg-app) {
 .cx-nick-edit:hover {
   text-decoration: underline;
 }
+.cx-hide {
+  background: none;
+  border: 0;
+  color: var(--lg-dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.cx-hide:hover {
+  color: var(--lg-text);
+  text-decoration: underline;
+}
+.cx-acct-hidden {
+  opacity: 0.55;
+}
+.cx-hidden-tag {
+  font-size: 11px;
+  color: var(--lg-dim);
+  border: 1px solid var(--lg-line);
+  border-radius: 4px;
+  padding: 0 5px;
+}
 .cx-nick-input {
   margin-left: auto;
   width: 200px;

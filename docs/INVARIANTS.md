@@ -56,7 +56,8 @@ data integrity or the domain contract — treat them as load-bearing.
    legs. (`query`)
 
 10. **User edits survive re-sync.** The upsert conflict-updates omit any
-    user-owned column: transactions omit `flag`, accounts omit `nickname`. A
+    user-owned column: transactions omit `flag`, accounts omit `nickname`
+    (and never write `hidden` at all — new accounts default visible). A
     re-pull carries neither (it binds `flag`'s parse-time seed / a NULL nickname
     on *insert* only), so a stored value is never clobbered on *conflict*.
     Likewise `apply_flags` only ever assigns a rule's flag, never resets to
@@ -80,3 +81,12 @@ data integrity or the domain contract — treat them as load-bearing.
     rejecting is permanent unless the user re-accepts by hand. Auto-accept only
     on High confidence (payment signal AND unambiguous pairing).
     (`transfers::detect_card_payments`, `store::insert_match`)
+
+14. **Hidden accounts are filtered at the store, not per view.** `Store::accounts`
+    and `Store::all_transactions` (and `uncategorized`) exclude hidden accounts,
+    so every list, dropdown, balance and aggregate drops them at once — new
+    features inherit it for free. Only the Connections screen
+    (`all_accounts`, `?include_hidden=true`) and maintenance passes that must
+    keep hidden data correct (`apply_flags`, card-payment matching via
+    `all_transactions_including_hidden`) see them. Hidden data keeps syncing;
+    un-hiding restores it. (`store`)

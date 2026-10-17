@@ -100,7 +100,9 @@ function filterQuery(filter?: Filter, extra?: Record<string, string>): string {
 }
 
 export const api = {
-  accounts: () => get<Account[]>("/accounts"),
+  // Visible accounts; `includeHidden` adds hidden ones (Connections only).
+  accounts: (includeHidden = false) =>
+    get<Account[]>(includeHidden ? "/accounts?include_hidden=true" : "/accounts"),
   // Search/sort/filter over the whole archive; returns one page + totals.
   transactions: (s?: TxnSearch) => {
     const q = new URLSearchParams();
@@ -156,6 +158,9 @@ export const api = {
   // Rename an account. Empty string clears the nickname (chip reverts to name).
   setAccountNickname: (accountId: string, nickname: string) =>
     post<void>(`/account/${encodeURIComponent(accountId)}/nickname`, { nickname }),
+  // Hide/un-hide an account everywhere (lists, dropdowns, balances, analytics).
+  setAccountHidden: (accountId: string, hidden: boolean) =>
+    post<void>(`/account/${encodeURIComponent(accountId)}/hidden`, { hidden }),
   applyFlags: () => post<number>("/apply_flags"),
   hasCreditAccount: () => get<boolean>("/has_credit_account"),
   resetData: () => post<void>("/reset_data"),

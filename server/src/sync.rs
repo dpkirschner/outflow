@@ -97,8 +97,12 @@ fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
 fn detect_and_record_matches(s: &Store) -> Result<(usize, usize), String> {
     use outflow_core::{detect_card_payments, MatchConfidence, MatchOptions, MatchStatus, TxnFlag};
 
-    let accounts = s.accounts().map_err(|e| e.to_string())?;
-    let txns = s.all_transactions().map_err(|e| e.to_string())?;
+    // Hidden accounts included: a hidden checking account can still pay a
+    // visible card, and that card's payment leg must be suppressed.
+    let accounts = s.all_accounts().map_err(|e| e.to_string())?;
+    let txns = s
+        .all_transactions_including_hidden()
+        .map_err(|e| e.to_string())?;
     let decided = s.decided_pairs().map_err(|e| e.to_string())?;
     let proposals = detect_card_payments(&accounts, &txns, &decided, &MatchOptions::default());
 

@@ -31,6 +31,7 @@ export interface Account {
   last_synced: number; // epoch seconds
   source: string; // provenance: "plaid" (or "simplefin" from the retired era)
   nickname: string | null; // user-set; null = show the raw name
+  hidden: boolean; // user-hidden: excluded from every view except Connections
 }
 
 export interface Transaction {

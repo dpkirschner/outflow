@@ -51,7 +51,7 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 
 | Method · Path | Query params | Returns |
 |---|---|---|
-| `GET /accounts` | — | `Account[]` — latest snapshot per account incl. `balance` (cents; credit balances negated) |
+| `GET /accounts` | `include_hidden` (default `false`) | `Account[]` — latest snapshot per account incl. `balance` (cents; credit balances negated) and `hidden`. Hidden accounts are omitted unless `include_hidden=true` (the Connections screen) |
 | `GET /transactions` | see **Transaction query** below | `TxnPage { items: Transaction[], total, total_cents }` — paginated |
 | `GET /spend/categories` | `since`, `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
 | `GET /merchants` | `since`, `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
@@ -104,6 +104,7 @@ An RO token gets **403** on all of these.
 | `POST /txn/{txn_id}/category` | `{ category, learn? }` | set a manual category; `learn:true` writes an exact rule so siblings follow |
 | `POST /txn/{txn_id}/flag` | `{ flag, learn? }` | set suppression flag (`Spending`\|`Transfer`\|`CardPayment`) |
 | `POST /account/{account_id}/nickname` | `{ nickname }` | set/clear account nickname (empty clears) |
+| `POST /account/{account_id}/hidden` | `{ hidden }` | hide/un-hide an account: its rows leave every list, aggregate, dropdown and match review (data keeps syncing). `404` for an unknown id |
 | `POST /apply_flags` | — | re-apply flag rules → count (`number`) |
 | `POST /mark_stream` | `{ merchant, mark }` | ledger mark (`Committed`\|`Dismissed`\|`Kept`) |
 | `POST /clear_stream_mark` | `{ merchant }` | clear a ledger mark |

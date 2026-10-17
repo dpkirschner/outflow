@@ -79,6 +79,7 @@ mod tests {
                 last_synced: 0,
                 source: "plaid".into(),
                 nickname: None,
+                hidden: false,
             }])
             .unwrap();
         let now = now_secs();

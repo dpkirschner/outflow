@@ -120,6 +120,7 @@ async fn exchange(
             status: "ok".into(),
             created: now_secs(),
             last_synced: None,
+            investments_consent: false,
         };
         // The link itself has succeeded at this point (token saved, item
         // registered), so a failed first sync must not turn into a 500 — the

@@ -26,7 +26,8 @@ pub use perks::{
     FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
 };
 pub use plaid::{
-    parse_accounts_get, parse_fixture, parse_sync_page, Fixture, SourceError, SyncPage,
+    item_has_investments_consent, parse_accounts_get, parse_fixture, parse_sync_page, Fixture,
+    SourceError, SyncPage,
 };
 pub use query::{
     monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,

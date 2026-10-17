@@ -203,6 +203,36 @@ pub fn parse_accounts_get(
     Ok(accounts)
 }
 
+/// Whether an `/accounts/get` response's `item` has Investments access:
+/// listed in `consented_products` (granted, maybe not yet billed) or in
+/// `products`/`billed_products` (already initialized). A missing `item` or
+/// list means no; a list that isn't an array of strings is malformed.
+pub fn item_has_investments_consent(json: &str) -> Result<bool, SourceError> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
+    let Some(item) = v.get("item") else {
+        return Ok(false);
+    };
+    for key in ["consented_products", "products", "billed_products"] {
+        let Some(list) = item.get(key) else { continue };
+        let arr = list
+            .as_array()
+            .ok_or_else(|| SourceError::Json(format!("item.{key} is not an array")))?;
+        for p in arr {
+            match p.as_str() {
+                Some("investments") => return Ok(true),
+                Some(_) => {}
+                None => {
+                    return Err(SourceError::Json(format!(
+                        "item.{key} has a non-string entry"
+                    )))
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 fn parse_txn(v: &serde_json::Value) -> Result<Transaction, SourceError> {
     let id = require_str(v, "transaction_id")?;
     let account_id = require_str(v, "account_id")?;
@@ -484,6 +514,29 @@ mod tests {
         assert!(!page.has_more);
         assert!(page.added.is_empty() && page.modified.is_empty());
         assert!(page.removed_ids.is_empty() && page.pending_superseded.is_empty());
+    }
+
+    #[test]
+    fn investments_consent_reads_any_product_list() {
+        let consented = r#"{"accounts":[],"item":{"products":["transactions"],
+            "consented_products":["transactions","investments"]}}"#;
+        assert!(item_has_investments_consent(consented).unwrap());
+        let initialized = r#"{"accounts":[],"item":{"billed_products":["investments"]}}"#;
+        assert!(item_has_investments_consent(initialized).unwrap());
+        // The ADDITIONAL_CONSENT_REQUIRED shape: transactions only.
+        let not_yet = r#"{"accounts":[],"item":{"products":["transactions"],
+            "consented_products":["transactions"]}}"#;
+        assert!(!item_has_investments_consent(not_yet).unwrap());
+        assert!(!item_has_investments_consent(r#"{"accounts":[]}"#).unwrap());
+    }
+
+    #[test]
+    fn malformed_product_list_is_an_error() {
+        assert!(
+            item_has_investments_consent(r#"{"item":{"consented_products":"investments"}}"#)
+                .is_err()
+        );
+        assert!(item_has_investments_consent(r#"{"item":{"products":[7]}}"#).is_err());
     }
 
     #[test]

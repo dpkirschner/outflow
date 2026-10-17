@@ -1,0 +1,120 @@
+# Amex Offers available to add on the card ending 1006, captured 2026-10-17.
+#
+# One line per offer. Exactly one reward key per offer:
+#   back           = "20.00"  fixed statement credit (decimal string, parsed
+#                             via Money::from_decimal_str — never floats)
+#   pct            = 10       percent back
+#   pts            = 1500     flat Membership Rewards points
+#   pts_per_dollar = 5        extra MR points per dollar
+#
+# Optional keys:
+#   min      = "80.00"   minimum spend per qualifying purchase
+#   uses     = 1         times the offer can trigger (absent = until max is hit)
+#   max      = "20.00"   total cash cap; max_pts = total points cap
+#   single   = true      must be a single purchase
+#   per_year = true      the cap resets yearly instead of once per offer
+#   added    = true      the offer has been added (enrolled) on the card. Absent = false:
+#                        it's only available, and charges don't earn it yet.
+#                        At capture time none of these offers were added.
+#   note     = "..."     terms the matcher can't check (location, new members only, ...)
+#   match    = [...]     DRAFT normalized-payee patterns (see subscriptions::normalize_payee:
+#                        lowercase alphanumeric tokens joined by spaces). Not yet verified
+#                        against real bank descriptors.
+
+[card]
+issuer = "American Express"
+mask = "1006"   # matches the " (1006)" suffix plaid.rs bakes onto the account name
+captured = 2026-10-17
+
+offers = [
+  { merchant = "Airbnb – Experiences & Services", back = "20.00", min = "80.00", uses = 1, max = "20.00", expires = 2026-10-19, match = ["airbnb"], note = "Experiences & Services only, not stays" },
+  { merchant = "NFL London Games – NFL Shop merch", back = "20.00", min = "100.00", uses = 1, max = "20.00", expires = 2026-10-19, match = ["nfl shop", "nflshop"], note = "London Games merchandise" },
+  { merchant = "MUJI", back = "20.00", min = "100.00", uses = 1, max = "20.00", expires = 2026-10-22, match = ["muji"] },
+  { merchant = "STARZ", back = "3.00", min = "3.00", uses = 1, max = "3.00", expires = 2026-10-23, match = ["starz"] },
+  { merchant = "Sprouts Farmers Market", pct = 5, single = true, uses = 1, max = "4.00", expires = 2026-10-25, match = ["sprouts"] },
+  { merchant = "US Grand Prix (Austin) – merch", back = "20.00", min = "100.00", uses = 1, max = "20.00", expires = 2026-10-25, match = ["cota", "circuit of the americas"] },
+  { merchant = "NFL Paris Game – NFL Shop merch", back = "20.00", min = "100.00", uses = 1, max = "20.00", expires = 2026-10-25, match = ["nfl shop", "nflshop"], note = "Paris Game merchandise" },
+  { merchant = "Free People", back = "25.00", min = "150.00", uses = 1, max = "25.00", expires = 2026-10-27, match = ["free people", "freepeople"] },
+  { merchant = "Sky Zone", pct = 25, max = "15.00", expires = 2026-10-30, match = ["sky zone", "skyzone"] },
+  { merchant = "Chevron / Texaco (pump & app)", back = "5.00", min = "30.00", uses = 1, max = "5.00", expires = 2026-10-31, match = ["chevron", "texaco"], note = "pump & app" },
+  { merchant = "CVS", pct = 10, max = "5.00", expires = 2026-10-31, match = ["cvs"] },
+  { merchant = "Auntie Anne’s", pct = 10, single = true, uses = 1, max = "4.00", expires = 2026-10-31, match = ["auntie anne"] },
+  { merchant = "Little Caesars", pct = 15, single = true, uses = 1, max = "5.00", expires = 2026-10-31, match = ["little caesars"] },
+  { merchant = "Spirit Halloween", back = "15.00", min = "75.00", uses = 1, max = "15.00", expires = 2026-10-31, match = ["spirit halloween"] },
+  { merchant = "Cracker Barrel", pct = 10, single = true, uses = 1, max = "6.00", expires = 2026-10-31, match = ["cracker barrel"] },
+  { merchant = "IKEA", pct = 7, max = "27.00", expires = 2026-10-31, match = ["ikea"] },
+  { merchant = "Printemps Paris Haussmann (in France)", back = "60.00", min = "300.00", uses = 1, max = "60.00", expires = 2026-10-31, match = ["printemps"], note = "in France" },
+  { merchant = "Wyndham Value Destinations (US/Canada)", back = "20.00", min = "100.00", uses = 1, max = "20.00", expires = 2026-10-31, match = ["wyndham"], note = "Value Destinations brands, US/Canada" },
+  { merchant = "Calvin Klein", back = "15.00", min = "75.00", uses = 1, max = "15.00", expires = 2026-10-31, match = ["calvin klein"] },
+  { merchant = "TodayTix.com", back = "25.00", min = "150.00", uses = 1, max = "25.00", expires = 2026-11-01, match = ["todaytix"] },
+  { merchant = "Sportsman’s Warehouse", pct = 4, max = "250.00", expires = 2026-11-02, match = ["sportsman s warehouse", "sportsmans warehouse"] },
+  { merchant = "thriftbooks.com", pct = 4, max = "250.00", expires = 2026-11-02, match = ["thriftbooks"] },
+  { merchant = "pura.com", pct = 4, max = "250.00", expires = 2026-11-02, match = ["pura com"] },
+  { merchant = "tnuck.com", pct = 5, max = "250.00", expires = 2026-11-02, match = ["tnuck"] },
+  { merchant = "iherb.com", pct = 4, max = "250.00", expires = 2026-11-02, match = ["iherb"] },
+  { merchant = "logitech.com", pct = 4, max = "250.00", expires = 2026-11-02, match = ["logitech"] },
+  { merchant = "dyson.com", pct = 2, max = "250.00", expires = 2026-11-02, match = ["dyson"] },
+  { merchant = "tartecosmetics.com", pct = 8, max = "250.00", expires = 2026-11-02, match = ["tarte"] },
+  { merchant = "rugsusa.com", pct = 4, max = "250.00", expires = 2026-11-02, match = ["rugsusa", "rugs usa"] },
+  { merchant = "kiwico.com", pct = 4, max = "250.00", expires = 2026-11-02, match = ["kiwico"] },
+  { merchant = "openfarmpet.com", pct = 5, max = "250.00", expires = 2026-11-02, match = ["open farm", "openfarm"] },
+  { merchant = "Fubo", back = "30.00", min = "65.00", uses = 3, max = "90.00", expires = 2026-11-07, match = ["fubo"] },
+  { merchant = "Great American Cookies", pct = 10, single = true, uses = 1, max = "2.00", expires = 2026-11-09, match = ["great american cookie"] },
+  { merchant = "Hanna Andersson", back = "20.00", min = "150.00", uses = 1, max = "20.00", expires = 2026-11-10, match = ["hanna andersson"] },
+  { merchant = "Oakley", back = "30.00", min = "150.00", uses = 2, max = "60.00", expires = 2026-11-13, match = ["oakley"] },
+  { merchant = "Round Table Pizza", pct = 10, single = true, uses = 1, max = "6.00", expires = 2026-11-13, match = ["round table pizza"] },
+  { merchant = "REVOLVE", pts_per_dollar = 5, max_pts = 5000, expires = 2026-11-14, match = ["revolve"] },
+  { merchant = "Peets.com", pts = 1500, min = "30.00", uses = 1, max_pts = 1500, expires = 2026-11-14, match = ["peets"], note = "online at peets.com, not in-store" },
+  { merchant = "GlassesUSA.com", back = "30.00", min = "150.00", uses = 1, max = "30.00", expires = 2026-11-14, match = ["glassesusa"] },
+  { merchant = "Nothing Bundt Cakes", pct = 15, single = true, uses = 1, max = "7.00", expires = 2026-11-15, match = ["nothing bundt"] },
+  { merchant = "Tecovas", back = "50.00", min = "250.00", uses = 1, max = "50.00", expires = 2026-11-15, match = ["tecovas"] },
+  { merchant = "Charles Tyrwhitt", back = "30.00", min = "150.00", uses = 1, max = "30.00", expires = 2026-11-16, match = ["charles tyrwhitt", "ctshirts"] },
+  { merchant = "Sam’s Club (new membership only)", pct = 30, single = true, uses = 1, max = "24.00", expires = 2026-11-18, match = ["sams club", "sam s club", "samsclub"], note = "new membership only" },
+  { merchant = "MegaSeats.com", back = "50.00", min = "250.00", uses = 2, max = "100.00", expires = 2026-11-19, match = ["megaseats"] },
+  { merchant = "Scheels", back = "40.00", min = "225.00", uses = 1, max = "40.00", expires = 2026-11-20, match = ["scheels"] },
+  { merchant = "Whatnot", back = "5.00", min = "25.00", uses = 2, max = "10.00", expires = 2026-11-24, match = ["whatnot"] },
+  { merchant = "Dropbox", pct = 40, max = "30.00", expires = 2026-11-25, match = ["dropbox"] },
+  { merchant = "Sling TV", back = "15.00", min = "19.99", uses = 2, max = "30.00", expires = 2026-11-30, match = ["sling"] },
+  { merchant = "LegalZoom", pct = 20, single = true, uses = 1, max = "100.00", expires = 2026-11-30, match = ["legalzoom"] },
+  { merchant = "Teleflora", back = "15.00", min = "15.00", uses = 10, max = "150.00", expires = 2026-11-30, match = ["teleflora"] },
+  { merchant = "CNN", back = "6.99", min = "6.99", uses = 3, max = "20.97", expires = 2026-11-30, match = ["cnn"] },
+  { merchant = "Amazon.com", pts = 500, min = "50.00", uses = 3, max_pts = 1500, expires = 2026-12-05, match = ["amazon", "amzn"] },
+  { merchant = "Broadway.com", back = "50.00", min = "250.00", uses = 1, max = "50.00", expires = 2026-12-08, match = ["broadway com"] },
+  { merchant = "Hertz (corporate-owned locations)", back = "75.00", min = "350.00", uses = 1, max = "75.00", expires = 2026-12-14, match = ["hertz"], note = "corporate-owned locations only" },
+  { merchant = "JetBlue", back = "60.00", min = "300.00", uses = 1, max = "60.00", expires = 2026-12-14, match = ["jetblue"] },
+  { merchant = "LensDirect", back = "40.00", min = "200.00", uses = 1, max = "40.00", expires = 2026-12-18, match = ["lensdirect"] },
+  { merchant = "Simply Blooms", back = "25.00", min = "50.00", uses = 1, max = "25.00", expires = 2026-12-19, match = ["simply blooms"] },
+  { merchant = "NOBULL", back = "30.00", min = "150.00", uses = 1, max = "30.00", expires = 2026-12-22, match = ["nobull"] },
+  { merchant = "Vineyard Vines", pts = 4000, min = "250.00", uses = 1, max_pts = 4000, expires = 2026-12-24, match = ["vineyard vines"] },
+  { merchant = "Tory Burch", back = "60.00", min = "300.00", uses = 1, max = "60.00", expires = 2026-12-24, match = ["tory burch"] },
+  { merchant = "Italo train (Italy)", back = "50.00", min = "250.00", uses = 1, max = "50.00", expires = 2026-12-27, match = ["italo"], note = "in Italy" },
+  { merchant = "Perplexity AI Pro & Max", back = "100.00", min = "200.00", uses = 1, max = "100.00", expires = 2026-12-28, match = ["perplexity"], note = "Pro & Max plans" },
+  { merchant = "Ancestry", pct = 20, max = "100.00", expires = 2026-12-29, match = ["ancestry"] },
+  { merchant = "Bose.com", back = "75.00", min = "300.00", uses = 1, max = "75.00", expires = 2026-12-31, match = ["bose"] },
+  { merchant = "Amex Venue Collection (concessions)", pct = 10, max = "250.00", per_year = true, expires = 2026-12-31, match = [], note = "concessions at Amex Venue Collection venues; no single merchant descriptor" },
+  { merchant = "adidas.com", pts_per_dollar = 6, max_pts = 5000, expires = 2026-12-31, match = ["adidas"] },
+  { merchant = "Turo", back = "30.00", min = "150.00", uses = 1, max = "30.00", expires = 2026-12-31, match = ["turo"] },
+  { merchant = "MGM+", back = "7.99", min = "7.99", uses = 3, max = "23.97", expires = 2026-12-31, match = ["mgm plus", "mgmplus"] },
+  { merchant = "Patagonia.com", back = "30.00", min = "200.00", uses = 1, max = "30.00", expires = 2026-12-31, match = ["patagonia"] },
+  { merchant = "Groupon", back = "10.00", min = "50.00", uses = 1, max = "10.00", expires = 2026-12-31, match = ["groupon"] },
+  { merchant = "BBC.com (annual sub)", back = "49.99", min = "49.99", uses = 1, max = "49.99", expires = 2026-12-31, match = ["bbc"], note = "annual subscription" },
+  { merchant = "Ray-Ban", back = "35.00", min = "175.00", uses = 2, max = "70.00", expires = 2026-12-31, match = ["ray ban", "rayban"] },
+  { merchant = "Tommy Hilfiger", back = "25.00", min = "100.00", uses = 1, max = "25.00", expires = 2026-12-31, match = ["tommy hilfiger"] },
+  { merchant = "LensCrafters", back = "40.00", min = "200.00", uses = 1, max = "40.00", expires = 2026-12-31, match = ["lenscrafters"] },
+  { merchant = "Snake River Farms", back = "30.00", min = "150.00", uses = 1, max = "30.00", expires = 2026-12-31, match = ["snake river farms"] },
+  { merchant = "Cozy Earth", back = "115.00", min = "350.00", uses = 1, max = "115.00", expires = 2026-12-31, match = ["cozy earth", "cozyearth"] },
+  { merchant = "HUGO BOSS", back = "50.00", min = "250.00", uses = 1, max = "50.00", expires = 2026-12-31, match = ["hugo boss"] },
+  { merchant = "Fanatics.com (points offer)", pts_per_dollar = 5, max_pts = 15000, expires = 2027-01-01, match = ["fanatics"] },
+  { merchant = "Function Health", back = "150.00", min = "799.00", uses = 1, max = "150.00", expires = 2027-01-15, match = ["function health"] },
+  { merchant = "HBO Max (annual sub)", back = "25.00", min = "99.00", uses = 1, max = "25.00", expires = 2027-01-15, match = ["hbo max", "hbomax"], note = "annual subscription" },
+  { merchant = "crocs.com", pct = 10, max = "20.00", expires = 2027-01-15, match = ["crocs"] },
+  { merchant = "SpotHero", pct = 20, max = "10.00", expires = 2027-01-16, match = ["spothero"] },
+  { merchant = "Wine Insiders", back = "40.00", min = "80.00", uses = 1, max = "40.00", expires = 2027-01-31, match = ["wine insiders", "wineinsiders"] },
+  { merchant = "Fragrance.com", back = "25.00", min = "125.00", uses = 2, max = "50.00", expires = 2027-02-09, match = ["fragrance com"] },
+  { merchant = "NFLShop.com", back = "20.00", min = "100.00", uses = 2, max = "40.00", expires = 2027-02-28, match = ["nfl shop", "nflshop"] },
+  { merchant = "NBAStore.com", back = "20.00", min = "100.00", uses = 2, max = "40.00", expires = 2027-02-28, match = ["nba store", "nbastore"] },
+  { merchant = "NHL Shop", back = "20.00", min = "100.00", uses = 2, max = "40.00", expires = 2027-03-12, match = ["nhl shop", "nhlshop"] },
+  { merchant = "Fanatics.com (cash offer)", back = "20.00", min = "125.00", uses = 2, max = "40.00", expires = 2027-03-30, match = ["fanatics"] },
+  { merchant = "Zenni", back = "20.00", min = "60.00", uses = 1, max = "20.00", expires = 2027-03-30, match = ["zenni"] },
+  { merchant = "Sony Electronics", pct = 20, max = "50.00", expires = 2027-04-04, match = ["sony electronics", "sony com"] },
+]

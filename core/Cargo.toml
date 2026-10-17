@@ -11,6 +11,7 @@ serde_json = "1"
 # local timezone, which raw epoch math cannot do DST-correctly. Keeps invariant
 # #3 (no network/GUI in core) intact.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+toml = { version = "0.8", default-features = false, features = ["parse"] }
 
 
 [features]

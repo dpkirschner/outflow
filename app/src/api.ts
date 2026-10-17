@@ -180,7 +180,13 @@ export const api = {
   plaidLinkToken: (itemId?: string) =>
     post<{ link_token: string }>("/plaid/link_token", { item_id: itemId ?? null }),
   plaidExchange: (publicToken: string, institution: string | null) =>
-    post<{ item_id: string; institution: string; added: number; updated: number }>(
+    post<{
+      item_id: string;
+      institution: string;
+      added: number;
+      updated: number;
+      sync_error: string | null;
+    }>(
       "/plaid/exchange",
       { public_token: publicToken, institution },
     ),

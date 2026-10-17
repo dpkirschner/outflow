@@ -159,7 +159,7 @@ fn lock<T>(
     f(&guard)
 }
 
-fn sync_plaid_item(
+pub(crate) fn sync_plaid_item(
     store: &Arc<Mutex<Store>>,
     cfg: &Config,
     pcfg: &PlaidConfig,
@@ -261,6 +261,10 @@ pub fn run_plaid_item(
             batch.next_cursor = page.next_cursor.clone();
             if !page.has_more {
                 break;
+            }
+            if page.next_cursor.is_empty() {
+                // has_more with no cursor would re-request page one forever.
+                return Err("plaid sync: has_more with an empty next_cursor".into());
             }
             cursor = Some(page.next_cursor);
         }

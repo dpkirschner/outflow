@@ -58,6 +58,26 @@ struct ExchangeResult {
     institution: String,
     added: usize,
     updated: usize,
+    /// Set when the link succeeded but its first sync didn't; the background
+    /// sync retries it.
+    sync_error: Option<String>,
+}
+
+fn exchange_result(
+    item_id: String,
+    institution: String,
+    leg: crate::sync::LegReport,
+) -> ExchangeResult {
+    if let Some(e) = &leg.error {
+        tracing::warn!(%item_id, %institution, error = %e, "first sync after link failed");
+    }
+    ExchangeResult {
+        item_id,
+        institution,
+        added: leg.added,
+        updated: leg.updated,
+        sync_error: leg.error,
+    }
 }
 
 /// Exchange the Link public_token, persist the access token (0600 file),
@@ -96,13 +116,11 @@ async fn exchange(
             created: now_secs(),
             last_synced: None,
         };
-        let r = crate::sync::run_plaid_item(&store, &cfg, &pcfg, &item)?;
-        Ok::<ExchangeResult, String>(ExchangeResult {
-            item_id,
-            institution,
-            added: r.added,
-            updated: r.updated,
-        })
+        // The link itself has succeeded at this point (token saved, item
+        // registered), so a failed first sync must not turn into a 500 — the
+        // background sync retries it. Report it alongside the success instead.
+        let leg = crate::sync::sync_plaid_item(&store, &cfg, &pcfg, &item);
+        Ok::<ExchangeResult, String>(exchange_result(item_id, institution, leg))
     })
     .await
     .map_err(|e| ApiError::internal(format!("blocking task: {e}")))?
@@ -149,4 +167,41 @@ pub fn router() -> Router<AppState> {
         .route("/plaid/exchange", post(exchange))
         .route("/plaid/items", get(items))
         .route("/plaid/items/{item_id}", delete(remove_item))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sync::LegReport;
+
+    fn leg(error: Option<&str>) -> LegReport {
+        LegReport {
+            source: "plaid:Vanguard".into(),
+            added: 3,
+            updated: 1,
+            error: error.map(Into::into),
+        }
+    }
+
+    /// A first sync that fails after a successful link is reported in the
+    /// body, not as an error status — the item is already registered and the
+    /// background sync retries it.
+    #[test]
+    fn failed_first_sync_is_reported_not_raised() {
+        let r = exchange_result("item1".into(), "Vanguard".into(), leg(Some("boom")));
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["item_id"], "item1");
+        assert_eq!(v["sync_error"], "boom");
+    }
+
+    #[test]
+    fn successful_first_sync_has_null_sync_error() {
+        let r = exchange_result("item1".into(), "Vanguard".into(), leg(None));
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["added"], 3);
+        assert_eq!(v["updated"], 1);
+        // Present as null (the frontend type is `string | null`).
+        assert!(v.as_object().unwrap().contains_key("sync_error"));
+        assert!(v["sync_error"].is_null());
+    }
 }

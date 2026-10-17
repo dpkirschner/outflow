@@ -56,9 +56,21 @@ impl Money {
         };
         let mut cents = whole.checked_mul(100).ok_or(MoneyParseError::Overflow)?;
         let fb = frac_part.as_bytes();
-        let d0 = if !fb.is_empty() { (fb[0] - b'0') as i64 } else { 0 };
-        let d1 = if fb.len() > 1 { (fb[1] - b'0') as i64 } else { 0 };
-        let d2 = if fb.len() > 2 { (fb[2] - b'0') as i64 } else { 0 };
+        let d0 = if !fb.is_empty() {
+            (fb[0] - b'0') as i64
+        } else {
+            0
+        };
+        let d1 = if fb.len() > 1 {
+            (fb[1] - b'0') as i64
+        } else {
+            0
+        };
+        let d2 = if fb.len() > 2 {
+            (fb[2] - b'0') as i64
+        } else {
+            0
+        };
         let mut frac = d0 * 10 + d1;
         if d2 >= 5 {
             frac += 1;

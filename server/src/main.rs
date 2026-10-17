@@ -180,7 +180,10 @@ async fn main() {
                 axum::Json(serde_json::json!({ "error": "no such API route" })),
             )
         })
-        .layer(middleware::from_fn_with_state(state.clone(), require_bearer));
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ));
 
     // SPA fallback to index.html (status 200) is load-bearing: /oauth-return
     // must serve the app so Plaid Link can resume after an OAuth bank redirect.

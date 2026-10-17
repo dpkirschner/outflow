@@ -38,8 +38,12 @@ async fn list(
         let ms = store.matches(status).map_err(|e| e.to_string())?;
         ms.into_iter()
             .map(|m| {
-                let bank = store.transaction(&m.bank_txn_id).map_err(|e| e.to_string())?;
-                let card = store.transaction(&m.card_txn_id).map_err(|e| e.to_string())?;
+                let bank = store
+                    .transaction(&m.bank_txn_id)
+                    .map_err(|e| e.to_string())?;
+                let card = store
+                    .transaction(&m.card_txn_id)
+                    .map_err(|e| e.to_string())?;
                 Ok(MatchView { m, bank, card })
             })
             .collect::<Result<Vec<_>, String>>()

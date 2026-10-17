@@ -127,7 +127,9 @@ where
 {
     let store = state.store.clone();
     tokio::task::spawn_blocking(move || {
-        let guard = store.lock().map_err(|e| format!("store lock poisoned: {e}"))?;
+        let guard = store
+            .lock()
+            .map_err(|e| format!("store lock poisoned: {e}"))?;
         f(&guard)
     })
     .await

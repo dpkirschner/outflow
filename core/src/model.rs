@@ -306,13 +306,22 @@ mod tests {
     fn no_nickname_shows_raw_name() {
         assert_eq!(label("CREDIT CARD (4707)", None), "CREDIT CARD (4707)");
         assert_eq!(label("CREDIT CARD (4707)", Some("")), "CREDIT CARD (4707)");
-        assert_eq!(label("CREDIT CARD (4707)", Some("   ")), "CREDIT CARD (4707)");
+        assert_eq!(
+            label("CREDIT CARD (4707)", Some("   ")),
+            "CREDIT CARD (4707)"
+        );
     }
 
     #[test]
     fn nickname_keeps_the_trailing_mask() {
-        assert_eq!(label("CREDIT CARD (4707)", Some("Sapphire")), "Sapphire (4707)");
-        assert_eq!(label("CREDIT CARD (4707)", Some("  Sapphire  ")), "Sapphire (4707)");
+        assert_eq!(
+            label("CREDIT CARD (4707)", Some("Sapphire")),
+            "Sapphire (4707)"
+        );
+        assert_eq!(
+            label("CREDIT CARD (4707)", Some("  Sapphire  ")),
+            "Sapphire (4707)"
+        );
     }
 
     #[test]

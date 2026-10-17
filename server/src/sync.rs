@@ -54,8 +54,7 @@ fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
     let mut legs = Vec::new();
 
     // Plaid legs — one per linked item.
-    let items = lock(store, |s| s.plaid_items().map_err(|e| e.to_string()))
-        .unwrap_or_default();
+    let items = lock(store, |s| s.plaid_items().map_err(|e| e.to_string())).unwrap_or_default();
     if !items.is_empty() {
         match PlaidConfig::from_env() {
             Ok(pcfg) => {
@@ -81,8 +80,7 @@ fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
             .map_err(|e| e.to_string())
     })
     .unwrap_or(0);
-    let (matches_auto, matches_proposed) =
-        lock(store, detect_and_record_matches).unwrap_or((0, 0));
+    let (matches_auto, matches_proposed) = lock(store, detect_and_record_matches).unwrap_or((0, 0));
 
     SyncReport {
         legs,
@@ -155,7 +153,9 @@ fn lock<T>(
     store: &Arc<Mutex<Store>>,
     f: impl FnOnce(&Store) -> Result<T, String>,
 ) -> Result<T, String> {
-    let guard = store.lock().map_err(|e| format!("store lock poisoned: {e}"))?;
+    let guard = store
+        .lock()
+        .map_err(|e| format!("store lock poisoned: {e}"))?;
     f(&guard)
 }
 
@@ -173,7 +173,8 @@ fn sync_plaid_item(
         error: None,
     };
     let log_id = lock(store, |s| {
-        s.log_sync_start(&source, now_secs()).map_err(|e| e.to_string())
+        s.log_sync_start(&source, now_secs())
+            .map_err(|e| e.to_string())
     })
     .ok();
 
@@ -190,7 +191,8 @@ fn sync_plaid_item(
                 });
             } else {
                 let _ = lock(store, |s| {
-                    s.set_plaid_item_status(&item.item_id, "error").map_err(|e2| e2.to_string())
+                    s.set_plaid_item_status(&item.item_id, "error")
+                        .map_err(|e2| e2.to_string())
                 });
             }
             report.error = Some(e);
@@ -198,8 +200,14 @@ fn sync_plaid_item(
     }
     if let Some(id) = log_id {
         let _ = lock(store, |s| {
-            s.log_sync_finish(id, now_secs(), report.added, report.updated, report.error.as_deref())
-                .map_err(|e| e.to_string())
+            s.log_sync_finish(
+                id,
+                now_secs(),
+                report.added,
+                report.updated,
+                report.error.as_deref(),
+            )
+            .map_err(|e| e.to_string())
         });
     }
     report
@@ -257,7 +265,8 @@ pub fn run_plaid_item(
             cursor = Some(page.next_cursor);
         }
         return lock(store, |s| {
-            s.apply_plaid_batch(&batch, synced_at).map_err(|e| e.to_string())
+            s.apply_plaid_batch(&batch, synced_at)
+                .map_err(|e| e.to_string())
         });
     }
 }

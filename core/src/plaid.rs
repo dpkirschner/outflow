@@ -5,9 +5,7 @@
 //! amounts owed — both are negated here to match the domain (outflow < 0,
 //! credit balance < 0).
 
-use crate::model::{
-    Account, AccountKind, CategorySource, Transaction, TxnFlag,
-};
+use crate::model::{Account, AccountKind, CategorySource, Transaction, TxnFlag};
 use crate::money::Money;
 use chrono::{Local, NaiveDate, TimeZone};
 
@@ -88,7 +86,9 @@ fn date_to_epoch(s: &str) -> Result<i64, SourceError> {
 }
 
 fn str_field<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a str> {
-    v.get(key).and_then(|x| x.as_str()).filter(|s| !s.is_empty())
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
 }
 
 fn require_str(v: &serde_json::Value, key: &str) -> Result<String, SourceError> {
@@ -158,10 +158,7 @@ pub fn parse_accounts_get(
     let mut accounts = Vec::with_capacity(raw_accounts.len());
     for a in raw_accounts {
         let id = require_str(a, "account_id")?;
-        let kind = plaid_kind(
-            str_field(a, "type").unwrap_or(""),
-            str_field(a, "subtype"),
-        );
+        let kind = plaid_kind(str_field(a, "type").unwrap_or(""), str_field(a, "subtype"));
         let mut name = str_field(a, "name")
             .or_else(|| str_field(a, "official_name"))
             .unwrap_or("Account")
@@ -172,7 +169,9 @@ pub fn parse_accounts_get(
             }
         }
         let balances = a.get("balances");
-        let mut balance = match balances.and_then(|b| b.get("current")).and_then(|c| c.as_number())
+        let mut balance = match balances
+            .and_then(|b| b.get("current"))
+            .and_then(|c| c.as_number())
         {
             Some(n) => parse_amount(n, &id, "balance")?,
             None => Money::from_cents(0),
@@ -321,7 +320,9 @@ pub struct Fixture {
 pub fn parse_fixture(json: &str, synced_at: i64) -> Result<Fixture, SourceError> {
     let v: serde_json::Value =
         serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
-    let institution = str_field(&v, "institution").unwrap_or("Demo Bank").to_string();
+    let institution = str_field(&v, "institution")
+        .unwrap_or("Demo Bank")
+        .to_string();
     let accounts_raw = v
         .get("accounts")
         .ok_or_else(|| SourceError::Json("fixture: missing \"accounts\" object".into()))?

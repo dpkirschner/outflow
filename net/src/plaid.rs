@@ -37,9 +37,17 @@ impl PlaidConfig {
         let base_url = match std::env::var("OUTFLOW_PLAID_ENV").as_deref() {
             Ok("production") => "https://production.plaid.com".to_string(),
             Ok("sandbox") | Err(_) => "https://sandbox.plaid.com".to_string(),
-            Ok(other) => return Err(format!("OUTFLOW_PLAID_ENV must be sandbox|production, got {other:?}")),
+            Ok(other) => {
+                return Err(format!(
+                    "OUTFLOW_PLAID_ENV must be sandbox|production, got {other:?}"
+                ))
+            }
         };
-        Ok(PlaidConfig { client_id, secret, base_url })
+        Ok(PlaidConfig {
+            client_id,
+            secret,
+            base_url,
+        })
     }
 }
 
@@ -119,7 +127,11 @@ pub fn exchange_public_token(
 
 /// Raw `/accounts/get` JSON for one item; parse with `core::plaid::parse_accounts_get`.
 pub fn accounts_get(cfg: &PlaidConfig, access_token: &str) -> Result<String, String> {
-    post(cfg, "/accounts/get", serde_json::json!({ "access_token": access_token }))
+    post(
+        cfg,
+        "/accounts/get",
+        serde_json::json!({ "access_token": access_token }),
+    )
 }
 
 /// One `/transactions/sync` page (raw JSON); parse with
@@ -140,5 +152,10 @@ pub fn transactions_sync_page(
 
 /// Unlink an item at Plaid (stops billing for it). Local history is kept.
 pub fn item_remove(cfg: &PlaidConfig, access_token: &str) -> Result<(), String> {
-    post(cfg, "/item/remove", serde_json::json!({ "access_token": access_token })).map(|_| ())
+    post(
+        cfg,
+        "/item/remove",
+        serde_json::json!({ "access_token": access_token }),
+    )
+    .map(|_| ())
 }

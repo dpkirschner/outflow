@@ -346,26 +346,20 @@ impl Store {
     /// `PRAGMA user_version`; each column add is idempotent (skipped if the
     /// column already exists, e.g. on a fresh DB where SCHEMA created it).
     fn run_migrations(&self) -> rusqlite::Result<()> {
-        let version: i64 = self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let version: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < 1 {
             // v1: behavioral date + suppression flag on transactions.
             self.add_column_if_missing("transactions", "transacted_at", "INTEGER")?;
-            self.add_column_if_missing(
-                "transactions",
-                "flag",
-                "TEXT NOT NULL DEFAULT 'spending'",
-            )?;
+            self.add_column_if_missing("transactions", "flag", "TEXT NOT NULL DEFAULT 'spending'")?;
             // flag_rules is a new table → already created by SCHEMA, no ALTER.
         }
         if version < 3 {
             // v3: source provenance on pulled rows. Everything before v3 came
             // from the retired SimpleFIN integration — backfill stays
             // 'simplefin' so old archives keep truthful provenance.
-            self.add_column_if_missing(
-                "accounts",
-                "source",
-                "TEXT NOT NULL DEFAULT 'simplefin'",
-            )?;
+            self.add_column_if_missing("accounts", "source", "TEXT NOT NULL DEFAULT 'simplefin'")?;
             self.add_column_if_missing(
                 "transactions",
                 "source",
@@ -377,17 +371,15 @@ impl Store {
             // v4: user-editable per-account nickname. NULL = no nickname.
             self.add_column_if_missing("accounts", "nickname", "TEXT")?;
         }
-        self.conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        self.conn
+            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
 
-    fn add_column_if_missing(
-        &self,
-        table: &str,
-        column: &str,
-        decl: &str,
-    ) -> rusqlite::Result<()> {
-        let mut stmt = self.conn.prepare(&format!("PRAGMA table_info({})", table))?;
+    fn add_column_if_missing(&self, table: &str, column: &str, decl: &str) -> rusqlite::Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("PRAGMA table_info({})", table))?;
         let present = stmt
             .query_map([], |r| r.get::<_, String>(1))?
             .filter_map(|c| c.ok())
@@ -453,7 +445,10 @@ impl Store {
         tx.execute("DELETE FROM accounts", [])?;
         tx.execute("DELETE FROM sync_log", [])?;
         tx.execute("DELETE FROM txn_matches", [])?;
-        tx.execute("UPDATE plaid_items SET cursor = NULL, last_synced = NULL", [])?;
+        tx.execute(
+            "UPDATE plaid_items SET cursor = NULL, last_synced = NULL",
+            [],
+        )?;
         tx.commit()
     }
 
@@ -531,7 +526,10 @@ impl Store {
     }
 
     pub fn all_transactions(&self) -> rusqlite::Result<Vec<Transaction>> {
-        let sql = format!("SELECT {} FROM transactions ORDER BY posted ASC", TXN_COLUMNS);
+        let sql = format!(
+            "SELECT {} FROM transactions ORDER BY posted ASC",
+            TXN_COLUMNS
+        );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map([], row_to_txn)?;
         rows.collect()
@@ -708,11 +706,7 @@ impl Store {
     /// Set (or clear) an account's nickname. Empty/whitespace-only clears it to
     /// NULL (chip reverts to the raw name). Preserved across re-sync because
     /// `insert_account_batch` omits `nickname` from its conflict-update.
-    pub fn set_account_nickname(
-        &self,
-        id: &str,
-        nickname: Option<&str>,
-    ) -> rusqlite::Result<()> {
+    pub fn set_account_nickname(&self, id: &str, nickname: Option<&str>) -> rusqlite::Result<()> {
         let val = nickname.map(str::trim).filter(|s| !s.is_empty());
         self.conn.execute(
             "UPDATE accounts SET nickname = ?1 WHERE id = ?2",
@@ -781,7 +775,9 @@ impl Store {
 
     /// All merchant overrides, keyed by normalized merchant.
     pub fn merchant_marks(&self) -> rusqlite::Result<HashMap<String, Mark>> {
-        let mut stmt = self.conn.prepare("SELECT pattern, mark FROM merchant_overrides")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pattern, mark FROM merchant_overrides")?;
         let rows = stmt.query_map([], |r| {
             let pattern: String = r.get(0)?;
             let mark: String = r.get(1)?;
@@ -1059,10 +1055,14 @@ mod tests {
     #[test]
     fn counts_added_then_updated() {
         let s = Store::open_in_memory().unwrap();
-        let r1 = s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
+        let r1 = s
+            .upsert_transactions(&[txn("a", "acct1", 100, -500, false)])
+            .unwrap();
         assert_eq!(r1.added, 1);
         assert_eq!(r1.updated, 0);
-        let r2 = s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
+        let r2 = s
+            .upsert_transactions(&[txn("a", "acct1", 100, -500, false)])
+            .unwrap();
         assert_eq!(r2.added, 0);
         assert_eq!(r2.updated, 1);
         assert_eq!(s.count_transactions().unwrap(), 1);
@@ -1086,8 +1086,10 @@ mod tests {
     #[test]
     fn reset_data_clears_txns_and_accounts_but_keeps_rules() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
-        s.add_rule(MatchType::Exact, "netflix", "Streaming").unwrap();
+        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)])
+            .unwrap();
+        s.add_rule(MatchType::Exact, "netflix", "Streaming")
+            .unwrap();
 
         s.reset_data().unwrap();
 
@@ -1119,7 +1121,10 @@ mod tests {
     #[test]
     fn migrate_stamps_schema_version() {
         let s = Store::open_in_memory().unwrap();
-        let v: i64 = s.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
     }
 
@@ -1153,7 +1158,10 @@ mod tests {
         }
 
         let s = Store::open(&path).unwrap();
-        let v: i64 = s.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         let t = s.transaction("old").unwrap().unwrap();
         assert_eq!(t.transacted_at, None);
@@ -1204,7 +1212,10 @@ mod tests {
         }
 
         let s = Store::open(&path).unwrap();
-        let v: i64 = s.conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         assert_eq!(s.transaction("t1").unwrap().unwrap().source, "simplefin");
         assert_eq!(s.accounts().unwrap()[0].source, "simplefin");
@@ -1325,20 +1336,40 @@ mod tests {
     fn matches_dedupe_and_status_flow() {
         let s = Store::open_in_memory().unwrap();
         let id = s
-            .insert_match("bank1", "card1", MatchStatus::Proposed, MatchConfidence::Medium, Some("same amount"), 100)
+            .insert_match(
+                "bank1",
+                "card1",
+                MatchStatus::Proposed,
+                MatchConfidence::Medium,
+                Some("same amount"),
+                100,
+            )
             .unwrap()
             .unwrap();
         // Re-detection of the same pair is a no-op that preserves the decision.
         assert!(s
-            .insert_match("bank1", "card1", MatchStatus::Proposed, MatchConfidence::High, None, 200)
+            .insert_match(
+                "bank1",
+                "card1",
+                MatchStatus::Proposed,
+                MatchConfidence::High,
+                None,
+                200
+            )
             .unwrap()
             .is_none());
 
         s.set_match_status(id, MatchStatus::Rejected).unwrap();
         assert!(s.matches(Some(MatchStatus::Proposed)).unwrap().is_empty());
         assert_eq!(s.matches(Some(MatchStatus::Rejected)).unwrap().len(), 1);
-        assert_eq!(s.decided_pairs().unwrap(), vec![("bank1".to_string(), "card1".to_string())]);
-        assert_eq!(s.match_by_id(id).unwrap().unwrap().status, MatchStatus::Rejected);
+        assert_eq!(
+            s.decided_pairs().unwrap(),
+            vec![("bank1".to_string(), "card1".to_string())]
+        );
+        assert_eq!(
+            s.match_by_id(id).unwrap().unwrap().status,
+            MatchStatus::Rejected
+        );
     }
 
     #[test]
@@ -1356,8 +1387,15 @@ mod tests {
             20,
         )
         .unwrap();
-        s.insert_match("b", "c", MatchStatus::Proposed, MatchConfidence::High, None, 30)
-            .unwrap();
+        s.insert_match(
+            "b",
+            "c",
+            MatchStatus::Proposed,
+            MatchConfidence::High,
+            None,
+            30,
+        )
+        .unwrap();
 
         s.reset_data().unwrap();
 
@@ -1393,11 +1431,16 @@ mod tests {
     #[test]
     fn flag_survives_repull() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
+        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)])
+            .unwrap();
         s.set_flag("a", TxnFlag::CardPayment, false).unwrap();
         // A re-pull of the same id must not reset the manual flag to Spending.
-        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)]).unwrap();
-        assert_eq!(s.transaction("a").unwrap().unwrap().flag, TxnFlag::CardPayment);
+        s.upsert_transactions(&[txn("a", "acct1", 100, -500, false)])
+            .unwrap();
+        assert_eq!(
+            s.transaction("a").unwrap().unwrap().flag,
+            TxnFlag::CardPayment
+        );
     }
 
     #[test]
@@ -1418,7 +1461,10 @@ mod tests {
         s.set_account_nickname("acct1", Some("Sapphire")).unwrap();
         // A re-pull carries no nickname (binds NULL) but must not wipe it.
         s.upsert_accounts(&[a]).unwrap();
-        assert_eq!(s.accounts().unwrap()[0].nickname.as_deref(), Some("Sapphire"));
+        assert_eq!(
+            s.accounts().unwrap()[0].nickname.as_deref(),
+            Some("Sapphire")
+        );
         // Empty/whitespace clears back to NULL.
         s.set_account_nickname("acct1", Some("  ")).unwrap();
         assert_eq!(s.accounts().unwrap()[0].nickname, None);
@@ -1427,14 +1473,20 @@ mod tests {
     #[test]
     fn merchant_marks_round_trip_and_clear() {
         let s = Store::open_in_memory().unwrap();
-        s.set_merchant_mark("chase mortgage", Mark::Committed).unwrap();
-        s.set_merchant_mark("random pop up", Mark::Dismissed).unwrap();
+        s.set_merchant_mark("chase mortgage", Mark::Committed)
+            .unwrap();
+        s.set_merchant_mark("random pop up", Mark::Dismissed)
+            .unwrap();
         let marks = s.merchant_marks().unwrap();
         assert_eq!(marks.get("chase mortgage"), Some(&Mark::Committed));
         assert_eq!(marks.get("random pop up"), Some(&Mark::Dismissed));
         // Re-marking replaces.
-        s.set_merchant_mark("chase mortgage", Mark::Dismissed).unwrap();
-        assert_eq!(s.merchant_marks().unwrap().get("chase mortgage"), Some(&Mark::Dismissed));
+        s.set_merchant_mark("chase mortgage", Mark::Dismissed)
+            .unwrap();
+        assert_eq!(
+            s.merchant_marks().unwrap().get("chase mortgage"),
+            Some(&Mark::Dismissed)
+        );
         s.clear_merchant_mark("chase mortgage").unwrap();
         assert!(s.merchant_marks().unwrap().get("chase mortgage").is_none());
     }
@@ -1454,8 +1506,10 @@ mod tests {
         let occ = s.stream_occurrences("blue bottle", None).unwrap();
         assert_eq!(occ.len(), 2);
         assert_eq!(occ[0].id, "b"); // newest first
-        // Window bound drops the older one.
-        let recent = s.stream_occurrences("blue bottle", Some(1_500_000)).unwrap();
+                                    // Window bound drops the older one.
+        let recent = s
+            .stream_occurrences("blue bottle", Some(1_500_000))
+            .unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].id, "b");
     }
@@ -1506,10 +1560,14 @@ mod categorize_tests {
     #[test]
     fn categorize_pass_applies_rules_and_counts() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_transactions(&[t("1", "Netflix"), t("2", "Whole Foods")]).unwrap();
-        s.add_rule(MatchType::Exact, "netflix", "Streaming").unwrap();
+        s.upsert_transactions(&[t("1", "Netflix"), t("2", "Whole Foods")])
+            .unwrap();
+        s.add_rule(MatchType::Exact, "netflix", "Streaming")
+            .unwrap();
 
-        let n = s.categorize_uncategorized(&s.ruleset().unwrap(), CategorySource::Rule).unwrap();
+        let n = s
+            .categorize_uncategorized(&s.ruleset().unwrap(), CategorySource::Rule)
+            .unwrap();
         assert_eq!(n, 1);
 
         let all = s.all_transactions().unwrap();
@@ -1532,7 +1590,9 @@ mod categorize_tests {
         let rule_id = s.set_manual_category("1", "Coffee", true).unwrap();
         assert!(rule_id.is_some());
 
-        let n = s.categorize_uncategorized(&s.ruleset().unwrap(), CategorySource::Rule).unwrap();
+        let n = s
+            .categorize_uncategorized(&s.ruleset().unwrap(), CategorySource::Rule)
+            .unwrap();
         assert_eq!(n, 1);
 
         let sibling = s.transaction("2").unwrap().unwrap();

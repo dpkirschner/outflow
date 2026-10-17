@@ -118,7 +118,10 @@ mod tests {
             rule(1, MatchType::Contains, "coffee", "Coffee"),
             rule(2, MatchType::Exact, "blue bottle coffee", "Treats"),
         ]);
-        assert_eq!(rs.categorize(&txn("Blue Bottle Coffee")).as_deref(), Some("Treats"));
+        assert_eq!(
+            rs.categorize(&txn("Blue Bottle Coffee")).as_deref(),
+            Some("Treats")
+        );
     }
 
     #[test]
@@ -127,14 +130,23 @@ mod tests {
             rule(1, MatchType::Contains, "uber", "Transport"),
             rule(2, MatchType::Contains, "uber eats", "Dining"),
         ]);
-        assert_eq!(rs.categorize(&txn("UBER EATS 88")).as_deref(), Some("Dining"));
-        assert_eq!(rs.categorize(&txn("UBER TRIP")).as_deref(), Some("Transport"));
+        assert_eq!(
+            rs.categorize(&txn("UBER EATS 88")).as_deref(),
+            Some("Dining")
+        );
+        assert_eq!(
+            rs.categorize(&txn("UBER TRIP")).as_deref(),
+            Some("Transport")
+        );
     }
 
     #[test]
     fn matches_through_processor_noise() {
         let rs = RuleSet::new(vec![rule(1, MatchType::Exact, "blue bottle", "Coffee")]);
-        assert_eq!(rs.categorize(&txn("SQ *BLUE BOTTLE 4471")).as_deref(), Some("Coffee"));
+        assert_eq!(
+            rs.categorize(&txn("SQ *BLUE BOTTLE 4471")).as_deref(),
+            Some("Coffee")
+        );
     }
 
     #[test]

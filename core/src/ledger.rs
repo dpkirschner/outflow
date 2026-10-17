@@ -175,14 +175,18 @@ fn line_item(t: &Transaction, accounts: &HashMap<String, Account>) -> LineItem {
         date: t.effective_date(),
         amount_cents: t.amount.cents().abs(),
         category: t.category.clone(),
-        source: Source { label, kind, pct: 100 },
+        source: Source {
+            label,
+            kind,
+            pct: 100,
+        },
     }
 }
 
 fn is_committed(category: &Option<String>, mark: Option<Mark>) -> bool {
     match mark {
         Some(Mark::Committed) => true,
-        Some(Mark::Kept) => false, // force into the main streams list
+        Some(Mark::Kept) => false,      // force into the main streams list
         Some(Mark::Dismissed) => false, // handled earlier (dropped from streams)
         None => match category {
             Some(c) => {
@@ -280,7 +284,11 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
             accounted.insert(key.clone());
             let category = dominant_category(&items);
             let sources = stream_sources(&items, &accounts);
-            streams.push(Stream { rhythm, sources, category });
+            streams.push(Stream {
+                rhythm,
+                sources,
+                category,
+            });
         }
     }
 
@@ -320,19 +328,27 @@ pub fn ledger(store: &Store, since: Option<i64>, now: i64) -> rusqlite::Result<L
     }
     let mut transfers: Vec<TransferGroup> = xfer
         .into_iter()
-        .map(|((merchant, _), (flag, total_cents, count))| TransferGroup {
-            merchant,
-            flag,
-            total_cents,
-            count,
-        })
+        .map(
+            |((merchant, _), (flag, total_cents, count))| TransferGroup {
+                merchant,
+                flag,
+                total_cents,
+                count,
+            },
+        )
         .collect();
     transfers.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
 
     let stats = LedgerStats {
-        recurring_monthly_cents: streams.iter().map(|s| s.rhythm.monthly_estimate_cents).sum(),
+        recurring_monthly_cents: streams
+            .iter()
+            .map(|s| s.rhythm.monthly_estimate_cents)
+            .sum(),
         stream_count: streams.len(),
-        committed_monthly_cents: committed.iter().map(|s| s.rhythm.monthly_estimate_cents).sum(),
+        committed_monthly_cents: committed
+            .iter()
+            .map(|s| s.rhythm.monthly_estimate_cents)
+            .sum(),
         noise_total_cents: noise_total,
         noise_count,
     };
@@ -374,15 +390,17 @@ pub fn stream_preview(
                 && since.map_or(true, |s| t.effective_date() >= s)
         })
         .collect();
-    Ok(rhythm_for_items(merchant_key.to_string(), &items, now).map(|rhythm| {
-        let category = dominant_category(&items);
-        let sources = stream_sources(&items, &accounts);
-        Stream {
-            rhythm,
-            sources,
-            category,
-        }
-    }))
+    Ok(
+        rhythm_for_items(merchant_key.to_string(), &items, now).map(|rhythm| {
+            let category = dominant_category(&items);
+            let sources = stream_sources(&items, &accounts);
+            Stream {
+                rhythm,
+                sources,
+                category,
+            }
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -435,7 +453,13 @@ mod tests {
         let mut txns = Vec::new();
         // A daily stream (grocery), 20 days.
         for d in 0..20 {
-            txns.push(tx(&format!("g{d}"), "chk", d, -(2000 + d * 10), "Grocery Store"));
+            txns.push(tx(
+                &format!("g{d}"),
+                "chk",
+                d,
+                -(2000 + d * 10),
+                "Grocery Store",
+            ));
         }
         // A big one-off ($900) → Notable.
         txns.push(tx("big", "chk", 5, -90000, "Tree Removal Co"));
@@ -460,7 +484,8 @@ mod tests {
     #[test]
     fn committed_by_category_and_mark_leaves_the_streams_list() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         // Two monthly streams.
         let mut txns = Vec::new();
         for (i, d) in [0i64, 31, 59, 90].iter().enumerate() {
@@ -471,7 +496,8 @@ mod tests {
         // Mortgage → Committed by category.
         for t in s.all_transactions().unwrap() {
             if t.merchant() == "Chase Mortgage" {
-                s.set_category(&t.id, "Rent", crate::model::CategorySource::Manual).unwrap();
+                s.set_category(&t.id, "Rent", crate::model::CategorySource::Manual)
+                    .unwrap();
             }
         }
         let v = ledger(&s, None, NOW).unwrap();
@@ -481,7 +507,8 @@ mod tests {
         assert_eq!(v.streams[0].rhythm.merchant, "planet fitness");
 
         // Manually mark Planet Fitness Committed too.
-        s.set_merchant_mark("planet fitness", Mark::Committed).unwrap();
+        s.set_merchant_mark("planet fitness", Mark::Committed)
+            .unwrap();
         let v2 = ledger(&s, None, NOW).unwrap();
         assert_eq!(v2.streams.len(), 0);
         assert_eq!(v2.committed.len(), 2);
@@ -490,14 +517,21 @@ mod tests {
         // back into the main streams list, overriding its Rent category.
         s.set_merchant_mark("chase mortgage", Mark::Kept).unwrap();
         let v3 = ledger(&s, None, NOW).unwrap();
-        assert!(v3.streams.iter().any(|s| s.rhythm.merchant == "chase mortgage"));
-        assert!(v3.committed.iter().all(|s| s.rhythm.merchant != "chase mortgage"));
+        assert!(v3
+            .streams
+            .iter()
+            .any(|s| s.rhythm.merchant == "chase mortgage"));
+        assert!(v3
+            .committed
+            .iter()
+            .all(|s| s.rhythm.merchant != "chase mortgage"));
     }
 
     #[test]
     fn dismissed_stream_falls_to_noise_or_notable() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         let mut txns = Vec::new();
         for d in 0..20 {
             txns.push(tx(&format!("c{d}"), "chk", d, -500, "Blue Bottle"));
@@ -521,7 +555,8 @@ mod tests {
         // The TS `Stream` interface expects the RhythmEntry fields flattened
         // alongside `sources`/`category`. Guard the serde(flatten) boundary.
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         let txns: Vec<_> = (0..20)
             .map(|d| tx(&format!("c{d}"), "chk", d, -500, "Blue Bottle"))
             .collect();
@@ -541,7 +576,10 @@ mod tests {
             "sources",
             "category",
         ] {
-            assert!(obj.contains_key(key), "Stream JSON missing top-level `{key}`");
+            assert!(
+                obj.contains_key(key),
+                "Stream JSON missing top-level `{key}`"
+            );
         }
         assert_eq!(obj["cadence"], serde_json::json!("Daily"));
     }
@@ -549,7 +587,8 @@ mod tests {
     #[test]
     fn coverage_distinguishes_window_from_available_data() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         // Data spans day 0 to day 100.
         s.upsert_transactions(&[
             tx("a", "chk", 0, -1000, "Old Shop"),
@@ -566,7 +605,10 @@ mod tests {
         // A `since` after the earliest txn → the window is clipping.
         let since = BASE + 50 * DAY;
         let clipped = ledger(&s, Some(since), NOW).unwrap();
-        assert!(!clipped.coverage.covers_all, "window starts after earliest data");
+        assert!(
+            !clipped.coverage.covers_all,
+            "window starts after earliest data"
+        );
         assert_eq!(clipped.coverage.window_txn_count, 1);
         // earliest still reports the true start of the archive, not the window.
         assert_eq!(clipped.coverage.earliest, Some(BASE));
@@ -575,12 +617,14 @@ mod tests {
     #[test]
     fn transfers_are_grouped_and_excluded() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         let mut a = tx("t1", "chk", 1, -50000, "Move to Savings");
         a.flag = TxnFlag::Transfer;
         let mut b = tx("t2", "chk", 2, -30000, "Move to Savings");
         b.flag = TxnFlag::Transfer;
-        s.upsert_transactions(&[a, b, tx("s1", "chk", 3, -2000, "Coffee")]).unwrap();
+        s.upsert_transactions(&[a, b, tx("s1", "chk", 3, -2000, "Coffee")])
+            .unwrap();
         let v = ledger(&s, None, NOW).unwrap();
         assert_eq!(v.transfers.len(), 1);
         assert_eq!(v.transfers[0].total_cents, 80000);
@@ -592,8 +636,10 @@ mod tests {
     #[test]
     fn line_item_carries_normalized_merchant_key() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
-        s.upsert_transactions(&[tx("n1", "chk", 2, -1200, "SQ *RANDOM CAFE 991")]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
+        s.upsert_transactions(&[tx("n1", "chk", 2, -1200, "SQ *RANDOM CAFE 991")])
+            .unwrap();
         let v = ledger(&s, None, NOW).unwrap();
         assert_eq!(v.noise_items.len(), 1);
         assert_eq!(v.noise_items[0].merchant, "SQ *RANDOM CAFE 991"); // raw, for display
@@ -603,7 +649,8 @@ mod tests {
     #[test]
     fn kept_promotes_an_undetected_merchant_out_of_noise() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         // Erratic spacing: the detector never makes this a stream.
         let txns = vec![
             tx("c1", "chk", 0, -1200, "Corner Store"),
@@ -620,7 +667,10 @@ mod tests {
         let after = ledger(&s, None, NOW).unwrap();
         assert_eq!(after.streams.len(), 1);
         assert_eq!(after.streams[0].rhythm.merchant, "corner store");
-        assert_eq!(after.streams[0].rhythm.cadence, crate::StreamCadence::Irregular);
+        assert_eq!(
+            after.streams[0].rhythm.cadence,
+            crate::StreamCadence::Irregular
+        );
         // Its rows are pulled out of noise — no double-count.
         assert_eq!(after.stats.noise_count, 0);
         assert!(after.noise_items.is_empty());
@@ -630,7 +680,8 @@ mod tests {
     fn dismissed_then_kept_round_trips_a_real_rhythm() {
         // Uber-shaped: a genuine FewPerMonth rhythm, dismissed to noise, then promoted back.
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         let days = [0i64, 17, 30, 47, 60, 77];
         let txns: Vec<_> = days
             .iter()
@@ -638,7 +689,11 @@ mod tests {
             .map(|(i, d)| tx(&format!("u{i}"), "chk", *d, -600, "Uber"))
             .collect();
         s.upsert_transactions(&txns).unwrap();
-        assert_eq!(ledger(&s, None, NOW).unwrap().streams.len(), 1, "detected as a stream");
+        assert_eq!(
+            ledger(&s, None, NOW).unwrap().streams.len(),
+            1,
+            "detected as a stream"
+        );
 
         s.set_merchant_mark("uber", Mark::Dismissed).unwrap();
         let dismissed = ledger(&s, None, NOW).unwrap();
@@ -650,14 +705,18 @@ mod tests {
         assert_eq!(promoted.streams.len(), 1);
         assert_eq!(promoted.streams[0].rhythm.merchant, "uber");
         // Regular spacing → the real cadence survives, not Irregular.
-        assert_eq!(promoted.streams[0].rhythm.cadence, crate::StreamCadence::FewPerMonth);
+        assert_eq!(
+            promoted.streams[0].rhythm.cadence,
+            crate::StreamCadence::FewPerMonth
+        );
         assert_eq!(promoted.stats.noise_count, 0);
     }
 
     #[test]
     fn stream_preview_matches_what_promotion_produces() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
         let txns = vec![
             tx("c1", "chk", 0, -1200, "Corner Store"),
             tx("c2", "chk", 3, -4500, "Corner Store"),
@@ -665,7 +724,9 @@ mod tests {
         ];
         s.upsert_transactions(&txns).unwrap();
 
-        let preview = stream_preview(&s, "corner store", None, NOW).unwrap().unwrap();
+        let preview = stream_preview(&s, "corner store", None, NOW)
+            .unwrap()
+            .unwrap();
         assert_eq!(preview.rhythm.merchant, "corner store");
         assert_eq!(preview.rhythm.occurrence_count, 3);
         assert_eq!(preview.rhythm.cadence, crate::StreamCadence::Irregular);
@@ -678,14 +739,21 @@ mod tests {
         let real = &ledger(&s, None, NOW).unwrap().streams[0].rhythm;
         assert_eq!(real.cadence, preview.rhythm.cadence);
         assert_eq!(real.occurrence_count, preview.rhythm.occurrence_count);
-        assert_eq!(real.monthly_estimate_cents, preview.rhythm.monthly_estimate_cents);
+        assert_eq!(
+            real.monthly_estimate_cents,
+            preview.rhythm.monthly_estimate_cents
+        );
     }
 
     #[test]
     fn stream_preview_none_for_unknown_merchant() {
         let s = Store::open_in_memory().unwrap();
-        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)]).unwrap();
-        s.upsert_transactions(&[tx("c1", "chk", 0, -1200, "Corner Store")]).unwrap();
-        assert!(stream_preview(&s, "nonexistent", None, NOW).unwrap().is_none());
+        s.upsert_accounts(&[acct("chk", "Checking", AccountKind::Checking)])
+            .unwrap();
+        s.upsert_transactions(&[tx("c1", "chk", 0, -1200, "Corner Store")])
+            .unwrap();
+        assert!(stream_preview(&s, "nonexistent", None, NOW)
+            .unwrap()
+            .is_none());
     }
 }

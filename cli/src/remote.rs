@@ -142,6 +142,15 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         ),
         Cmd::Accounts => remote.get("/accounts"),
         Cmd::Status { limit } => remote.get(&format!("/sync_log?limit={limit}")),
+        // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
+        Cmd::Perks {
+            lookback,
+            expiring_days,
+            ..
+        } => remote.get(&format!(
+            "/perks?lookback={}&expiring_days={expiring_days}",
+            enc(lookback)
+        )),
         Cmd::Txns(a) => {
             let mut q = Vec::new();
             let mut push = |k: &str, v: String| q.push(format!("{k}={v}"));

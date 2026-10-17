@@ -1,7 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    detect, monthly_flow, parse_fixture, search_transactions, spend_by_category, top_merchants,
-    CategorySource, MatchStatus, Money, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    detect, evaluate_perks, load_offers, monthly_flow, parse_fixture, search_transactions,
+    spend_by_category, top_merchants, Cap, CategorySource, FindingKind, MatchStatus, Money, Offer,
+    PerkOptions, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -65,6 +66,21 @@ pub(crate) enum Cmd {
     Matches {
         #[command(subcommand)]
         action: MatchCmd,
+    },
+    /// Card offers worth acting on: available offers at merchants you already
+    /// pay, added offers charged to the wrong card, and added offers expiring
+    /// unused. Reads an offers TOML (see examples/amex-offers-1006.toml).
+    Perks {
+        /// Offers file, or a directory of them (local mode only; with --server
+        /// the server reads its own OUTFLOW_PERKS).
+        #[arg(long, env = "OUTFLOW_PERKS")]
+        file: Option<String>,
+        /// How far back to look for spending at an offer's merchant.
+        #[arg(long, default_value = "12mo", value_parser = ["3mo", "6mo", "12mo", "all"])]
+        lookback: String,
+        /// Warn about added offers expiring within this many days.
+        #[arg(long, default_value_t = 14)]
+        expiring_days: i64,
     },
     /// Recent sync runs.
     Status {
@@ -467,6 +483,126 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Same windows as the server's `window_since` (~30.5-day months).
+fn lookback_since(window: &str, now: i64) -> Option<i64> {
+    const MONTH_SECS: i64 = 2_635_200;
+    match window {
+        "all" => None,
+        "3mo" => Some(now - 3 * MONTH_SECS),
+        "6mo" => Some(now - 6 * MONTH_SECS),
+        _ => Some(now - 12 * MONTH_SECS),
+    }
+}
+
+fn reward_label(o: &Offer) -> String {
+    let mut s = match o.reward {
+        Reward::Back(m) => format!("{} back", dollars(m.cents())),
+        Reward::Pct(p) => format!("{p}% back"),
+        Reward::Pts(n) => format!("{n} pts"),
+        Reward::PtsPerDollar(n) => format!("+{n} pts/$"),
+    };
+    if let Some(m) = o.min {
+        s.push_str(&format!(" on {}+", dollars(m.cents())));
+    }
+    if o.single {
+        s.push_str(", single purchase");
+    }
+    if let Some(u) = o.uses {
+        s.push_str(&format!(", {u} use{}", if u == 1 { "" } else { "s" }));
+    }
+    match o.cap {
+        Cap::Cash(m) => s.push_str(&format!(", max {}", dollars(m.cents()))),
+        Cap::Points(p) => s.push_str(&format!(", max {p} pts")),
+        Cap::None => {}
+    }
+    if o.per_year {
+        s.push_str("/yr");
+    }
+    s
+}
+
+fn cmd_perks(
+    store: &Store,
+    file: Option<String>,
+    lookback: &str,
+    expiring_days: i64,
+    json: bool,
+) -> Result<(), String> {
+    let path = file.ok_or("no offers file: pass --file or set OUTFLOW_PERKS")?;
+    let cards = load_offers(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
+    let txns = store.all_transactions().map_err(|e| format!("{e}"))?;
+    let now = now_secs();
+    let opts = PerkOptions {
+        since: lookback_since(lookback, now),
+        expiring_days: expiring_days.max(0),
+    };
+    let report = evaluate_perks(&cards, &accounts, &txns, now, &opts);
+    if json {
+        return json_out(&report);
+    }
+
+    for c in &report.cards {
+        let acct = c.account_id.as_deref().unwrap_or("?");
+        println!(
+            "card {} ({}): {} offers, {} added, {} expired, account {acct}",
+            c.mask, c.issuer, c.offers, c.added, c.expired
+        );
+        if let Some(p) = &c.problem {
+            println!("  ! {p}; only add-offer suggestions are possible");
+        }
+    }
+    let sections = [
+        (FindingKind::WrongCard, "CHARGED TO THE WRONG CARD"),
+        (FindingKind::Expiring, "ADDED, EXPIRING UNUSED"),
+        (FindingKind::AddOffer, "ADD THESE OFFERS"),
+    ];
+    if report.findings.is_empty() {
+        println!("\nnothing to act on");
+    }
+    for (kind, title) in sections {
+        let fs: Vec<_> = report.findings.iter().filter(|f| f.kind == kind).collect();
+        if fs.is_empty() {
+            continue;
+        }
+        println!("\n{title} ({})", fs.len());
+        for f in fs {
+            let value = match (f.est_cash_cents, f.est_points) {
+                (0, 0) => "-".to_string(),
+                (0, p) => format!("{p} pts"),
+                (c, 0) => dollars(c),
+                (c, p) => format!("{} + {p} pts", dollars(c)),
+            };
+            // Expiry is end-of-day local; step back to local noon so the UTC
+            // day label lands on the same calendar date.
+            let expires = date_label(f.offer.expires - 43_199);
+            let history = match (f.last_charge, f.typical_charge_cents) {
+                (Some(last), Some(typ)) => format!(
+                    "{} charge{}, typical {}, last {}",
+                    f.charges,
+                    if f.charges == 1 { "" } else { "s" },
+                    dollars(typ),
+                    date_label(last)
+                ),
+                _ => "no charges in lookback".to_string(),
+            };
+            println!(
+                "  {:<36} {:>10}  expires {expires} ({}d)  {history}",
+                f.offer.merchant, value, f.days_left
+            );
+            let mut detail = reward_label(&f.offer);
+            if !f.matched_merchants.is_empty() {
+                detail.push_str(&format!(" · matched: {}", f.matched_merchants.join(", ")));
+            }
+            if let Some(n) = &f.offer.note {
+                detail.push_str(&format!(" · {n}"));
+            }
+            println!("      {detail}");
+        }
+    }
+    Ok(())
+}
+
 fn date_label(secs: i64) -> String {
     // Coarse UTC day label; fine for a terminal listing.
     let days = secs / 86_400;
@@ -654,6 +790,11 @@ fn run() -> Result<(), String> {
         Cmd::Accounts => cmd_accounts(&store, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
         Cmd::Status { limit } => cmd_status(&store, limit, cli.json),
+        Cmd::Perks {
+            file,
+            lookback,
+            expiring_days,
+        } => cmd_perks(&store, file, &lookback, expiring_days, cli.json),
     }
 }
 

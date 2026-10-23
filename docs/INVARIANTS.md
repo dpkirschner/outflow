@@ -98,8 +98,10 @@ data integrity or the domain contract — treat them as load-bearing.
     plus a `holding_snapshots` row per position. Nothing updates or deletes a
     snapshot (`reset_data` keeps them). A failed holdings fetch never fails
     the item or flips its status — last-known positions stay current and the
-    leg reports a `warning`. Share quantities and unit prices stay exact
-    decimal text; only `value`/`cost_basis` are `Money`. (`store`,
+    leg reports a `warning`; each position's `synced_at` (v8+) records the
+    sync that last refreshed it, so staleness is visible. Snapshots carry
+    `price` from v8 on (NULL before). Share quantities and unit prices stay
+    exact decimal text; only `value`/`cost_basis` are `Money`. (`store`,
     `server/src/sync.rs::snapshot_item`)
 
 16. **One cash rule: `balances::account_cash`.** Checking/savings are all cash;

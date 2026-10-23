@@ -46,8 +46,10 @@ server's job), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`,
 `subs`, `fix <id> <category> [--no-learn]`, `txns [--search --category
 --account --source --flag --sort --asc --limit --offset --since --until
---posted-only --show-excluded]`, `accounts`, `matches list|accept <id>|reject
-<id>`, `status [--limit]`.
+--posted-only --show-excluded]`, `accounts`, `balances [--history]`,
+`holdings [--account A --ticker T --history --since D]`, `perks [--file F
+--lookback 3mo|6mo|12mo|all --expiring-days N]`, `matches list|accept
+<id>|reject <id>`, `status [--limit]`.
 
 Global: `--db`/`OUTFLOW_DB`, `--json` (machine-readable; same serde shapes as
 the HTTP API), `--server URL`/`OUTFLOW_SERVER` (needs `--features client`;

@@ -1,9 +1,9 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
     account_display_label, balance_history, detect, evaluate_perks, load_offers, monthly_flow,
-    parse_fixture, search_transactions, spend_by_category, summarize_balances, top_merchants, Cap,
-    CategorySource, FindingKind, MatchStatus, Money, Offer, PerkOptions, Reward, SortKey, Store,
-    TxnFilter, TxnFlag, TxnQuery,
+    parse_fixture, position_history, positions, search_transactions, spend_by_category,
+    summarize_balances, top_merchants, Cap, CategorySource, FindingKind, MatchStatus, Money, Offer,
+    PerkOptions, PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -24,6 +24,22 @@ struct Cli {
     json: bool,
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+#[derive(Args)]
+pub(crate) struct HoldingsArgs {
+    /// Account id, or part of its name/nickname (case-insensitive).
+    #[arg(long)]
+    account: Option<String>,
+    /// Ticker or security id (case-insensitive).
+    #[arg(long)]
+    ticker: Option<String>,
+    /// Per-sync position history instead of current positions.
+    #[arg(long)]
+    history: bool,
+    /// With --history: only snapshots on/after this date (YYYY-MM-DD).
+    #[arg(long, requires = "history")]
+    since: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -61,7 +77,8 @@ pub(crate) enum Cmd {
     },
     /// Search/sort/filter the transaction list.
     Txns(TxnsArgs),
-    /// List ingested accounts.
+    /// List ingested accounts (one balance each; see `holdings` for the
+    /// positions inside investment accounts).
     Accounts {
         /// Include hidden accounts (marked `hidden`).
         #[arg(long)]
@@ -74,6 +91,10 @@ pub(crate) enum Cmd {
         #[arg(long)]
         history: bool,
     },
+    /// Every investment position, one row each: quantity, institution price
+    /// (+ as-of date), Plaid close price, value, cost basis, unit cost, gain.
+    /// `--history` prints per-sync snapshots instead.
+    Holdings(HoldingsArgs),
     /// Card-payment match review (list / accept / reject).
     Matches {
         #[command(subcommand)]
@@ -685,7 +706,9 @@ fn cmd_accounts(store: &Store, all: bool, json: bool) -> Result<(), String> {
 }
 
 fn pct(bp: i64) -> String {
-    format!("{}.{}%", bp / 100, (bp % 100) / 10)
+    let sign = if bp < 0 { "-" } else { "" };
+    let bp = bp.abs();
+    format!("{sign}{}.{}%", bp / 100, (bp % 100) / 10)
 }
 
 fn cmd_balances(store: &Store, history: bool, json: bool) -> Result<(), String> {
@@ -757,6 +780,69 @@ fn cmd_balances(store: &Store, history: bool, json: bool) -> Result<(), String> 
                 );
             }
         }
+    }
+    Ok(())
+}
+
+fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), String> {
+    let filter = PositionFilter {
+        account: a.account.clone(),
+        ticker: a.ticker.clone(),
+    };
+    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
+    let securities = store.securities().map_err(|e| format!("{e}"))?;
+    if a.history {
+        let since = match &a.since {
+            Some(s) => Some(parse_date(s).ok_or_else(|| format!("bad --since date: {s}"))?),
+            None => None,
+        };
+        let snaps = store.holding_snapshots(since).map_err(|e| format!("{e}"))?;
+        let points = position_history(&snaps, &accounts, &securities, &filter);
+        if json {
+            return json_out(&points);
+        }
+        println!(
+            "{:<10} {:<12} {:<28} {:>12} {:>11} {:>14} {:>14}",
+            "day", "holding", "account", "qty", "price", "value", "gain"
+        );
+        for p in &points {
+            println!(
+                "{:<10} {:<12} {:<28} {:>12} {:>11} {:>14} {:>14}",
+                p.day,
+                truncate(&p.label, 12),
+                truncate(&p.account, 28),
+                p.quantity,
+                p.price.as_deref().unwrap_or("-"),
+                dollars(p.value.cents()),
+                p.gain.map(|g| dollars(g.cents())).unwrap_or_default()
+            );
+        }
+        return Ok(());
+    }
+    let holdings = store
+        .current_holdings_synced()
+        .map_err(|e| format!("{e}"))?;
+    let rows = positions(&accounts, &securities, &holdings, &filter);
+    if json {
+        return json_out(&rows);
+    }
+    println!(
+        "{:<12} {:<28} {:>12} {:>11} {:<10} {:>14} {:>14} {:>11} {:>8}",
+        "holding", "account", "qty", "price", "as of", "value", "basis", "unit cost", "gain"
+    );
+    for r in &rows {
+        println!(
+            "{:<12} {:<28} {:>12} {:>11} {:<10} {:>14} {:>14} {:>11} {:>8}",
+            truncate(&r.label, 12),
+            truncate(&r.account, 28),
+            r.quantity,
+            r.price,
+            r.price_as_of.as_deref().unwrap_or("-"),
+            dollars(r.value.cents()),
+            r.cost_basis.map(|b| dollars(b.cents())).unwrap_or_default(),
+            r.unit_cost.as_deref().unwrap_or(""),
+            r.gain_bp.map(pct).unwrap_or_default()
+        );
     }
     Ok(())
 }
@@ -907,6 +993,7 @@ fn run() -> Result<(), String> {
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history } => cmd_balances(&store, history, cli.json),
+        Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
         Cmd::Status { limit } => cmd_status(&store, limit, cli.json),
         Cmd::Perks {

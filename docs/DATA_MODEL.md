@@ -75,10 +75,10 @@ string round-tripping in SQLite.
 | `merchant_overrides` | per-merchant ledger marks | `Committed` / `Dismissed` / `Kept` |
 | `sync_log` | sync history | one row per source leg per run |
 | `plaid_items` | linked Plaid connections | item_id PK, institution, **cursor**, status (`ok`/`login_required`/`error`), created, last_synced, investments_consent (refreshed from `/accounts/get`'s `item` each sync) — no secrets |
-| `securities` | instruments seen in holdings | security_id PK; ticker, name, type, is_cash |
-| `holdings` | **current** positions | PK(account_id, security_id); replaced per item each sync (sold positions drop); quantity/price as decimal text |
+| `securities` | instruments seen in holdings | security_id PK; ticker, name, type, is_cash, cusip, isin, close_price (decimal text) + close_price_as_of |
+| `holdings` | **current** positions | PK(account_id, security_id); replaced per item each sync (sold positions drop); quantity/price as decimal text, price_as_of, currency, synced_at (the sync that last wrote the row) |
 | `balance_snapshots` | **append-only** history | PK(taken_at, account_id); every account, every successful item sync; `cash_cents` from `balances::account_cash` |
-| `holding_snapshots` | **append-only** history | PK(taken_at, account_id, security_id); one row per position per sync |
+| `holding_snapshots` | **append-only** history | PK(taken_at, account_id, security_id); one row per position per sync; quantity, value, cost basis, price (NULL before v8) |
 | `txn_matches` | card-payment pair decisions | UNIQUE(bank_txn_id, card_txn_id); status proposed/accepted/rejected; decided pairs are never re-proposed |
 
 Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
@@ -87,7 +87,9 @@ Schema changes run through the `PRAGMA user_version` migration runner
 (`store::migrate`): v1 `transacted_at`+`flag`, v2 `merchant_overrides`, v3
 `source` on accounts+transactions (+ new tables), v4 `accounts.nickname`, v5
 `accounts.hidden`, v6 `plaid_items.investments_consent`, v7 `securities` +
-`holdings` + `balance_snapshots` + `holding_snapshots` (new tables). Column lists are positional
+`holdings` + `balance_snapshots` + `holding_snapshots` (new tables), v8 holdings detail
+(securities cusip/isin/close_price/close_price_as_of, holdings
+price_as_of/currency/synced_at, holding_snapshots.price). Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)

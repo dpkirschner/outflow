@@ -7,9 +7,10 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    balance_history, detect, monthly_flow, parse_fixture, spend_by_category, summarize_balances,
-    top_merchants, Account, AccountKind, BalancesView, CategorySource, CategorySpend, DayTotals,
-    LedgerView, Mark, MerchantSpend, MonthlyFlow, Subscription, SyncEntry, Transaction, TxnFilter,
+    balance_history, detect, monthly_flow, parse_fixture, position_history, positions,
+    spend_by_category, summarize_balances, top_merchants, Account, AccountKind, BalancesView,
+    CategorySource, CategorySpend, DayTotals, LedgerView, Mark, MerchantSpend, MonthlyFlow,
+    PositionFilter, PositionPoint, PositionRow, Subscription, SyncEntry, Transaction, TxnFilter,
     TxnFlag,
 };
 use serde::{Deserialize, Serialize};
@@ -102,6 +103,61 @@ async fn balances(State(state): State<AppState>) -> ApiResult<BalancesView> {
 struct HistoryParams {
     /// Epoch seconds; omit for the full history.
     since: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct HoldingsParams {
+    /// Account id or (substring of) its display label.
+    account: Option<String>,
+    /// Ticker or security id.
+    ticker: Option<String>,
+    /// Epoch seconds; `/holdings/history` only.
+    since: Option<i64>,
+}
+
+impl HoldingsParams {
+    fn filter(&self) -> PositionFilter {
+        PositionFilter {
+            account: self.account.clone().filter(|s| !s.is_empty()),
+            ticker: self.ticker.clone().filter(|s| !s.is_empty()),
+        }
+    }
+}
+
+/// Every current position on visible accounts, flattened with security
+/// detail (prices + as-of dates, cost basis, unit cost, gain), largest first.
+async fn holdings(
+    State(state): State<AppState>,
+    Query(p): Query<HoldingsParams>,
+) -> ApiResult<Vec<PositionRow>> {
+    with_store(&state, move |s| {
+        let accounts = s.accounts().map_err(|e| e.to_string())?;
+        let securities = s.securities().map_err(|e| e.to_string())?;
+        let holdings = s.current_holdings_synced().map_err(|e| e.to_string())?;
+        Ok(positions(&accounts, &securities, &holdings, &p.filter()))
+    })
+    .await
+    .map(Json)
+}
+
+/// Per-sync position history from `holding_snapshots`, oldest first.
+async fn holdings_history(
+    State(state): State<AppState>,
+    Query(p): Query<HoldingsParams>,
+) -> ApiResult<Vec<PositionPoint>> {
+    with_store(&state, move |s| {
+        let accounts = s.accounts().map_err(|e| e.to_string())?;
+        let securities = s.securities().map_err(|e| e.to_string())?;
+        let snaps = s.holding_snapshots(p.since).map_err(|e| e.to_string())?;
+        Ok(position_history(
+            &snaps,
+            &accounts,
+            &securities,
+            &p.filter(),
+        ))
+    })
+    .await
+    .map(Json)
 }
 
 /// Daily net worth / cash / invested / credit from the per-sync snapshots.
@@ -597,6 +653,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/accounts", get(accounts))
         .route("/balances", get(balances))
         .route("/balances/history", get(balances_history))
+        .route("/holdings", get(holdings))
+        .route("/holdings/history", get(holdings_history))
         .route("/transactions", get(transactions))
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
@@ -798,6 +856,10 @@ mod tests {
                 name: "Money Market".into(),
                 sec_type: "mutual fund".into(),
                 is_cash: true,
+                cusip: None,
+                isin: None,
+                close_price: None,
+                close_price_as_of: None,
             },
             Security {
                 security_id: "vti".into(),
@@ -805,6 +867,10 @@ mod tests {
                 name: "Total Market".into(),
                 sec_type: "etf".into(),
                 is_cash: false,
+                cusip: Some("922908769".into()),
+                isin: None,
+                close_price: Some("301.25".into()),
+                close_price_as_of: Some("2026-10-21".into()),
             },
         ];
         let pos = |sec: &str, cents: i64| Holding {
@@ -814,8 +880,17 @@ mod tests {
             price: "1".into(),
             value: Money::from_cents(cents),
             cost_basis: None,
+            price_as_of: None,
+            currency: None,
         };
-        let holds = [pos("vmfxx", 100_00), pos("vti", 9_900_00)];
+        let vti = Holding {
+            quantity: "33".into(),
+            price: "300".into(),
+            price_as_of: Some("2026-10-21".into()),
+            cost_basis: Some(Money::from_cents(6_600_00)),
+            ..pos("vti", 9_900_00)
+        };
+        let holds = [pos("vmfxx", 100_00), vti];
         store
             .record_item_snapshot(&accounts, Some((&secs, &holds)), 1_000)
             .unwrap();
@@ -850,11 +925,41 @@ mod tests {
         assert_eq!(by_id("brk")["holdings"][0]["label"], "VTI");
         assert_eq!(by_id("brk")["holdings"][1]["is_cash"], true);
 
-        let (status, h) = get_json(app, "/balances/history").await;
+        let (status, h) = get_json(app.clone(), "/balances/history").await;
         assert_eq!(status, StatusCode::OK);
         let days = h.as_array().unwrap();
         assert_eq!(days.len(), 3); // two sync days + the carried-forward gap
         assert_eq!(days[2]["net_worth"], 16_178_25);
+
+        // /holdings: flat, largest first, with price dates and unit cost.
+        let (status, h) = get_json(app.clone(), "/holdings").await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = h.as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        let vti = &rows[0];
+        assert_eq!(vti["label"], "VTI");
+        assert_eq!(vti["account_id"], "brk");
+        assert_eq!(vti["quantity"], "33");
+        assert_eq!(vti["price_as_of"], "2026-10-21");
+        assert_eq!(vti["close_price"], "301.25");
+        assert_eq!(vti["cusip"], "922908769");
+        assert_eq!(vti["cost_basis"], 6_600_00);
+        assert_eq!(vti["unit_cost"], "200.0000");
+        assert_eq!(vti["gain"], 3_300_00);
+        assert_eq!(vti["gain_bp"], 5_000);
+        assert_eq!(vti["synced_at"], 1_000);
+        let (_, h) = get_json(app.clone(), "/holdings?ticker=vmfxx").await;
+        assert_eq!(h.as_array().unwrap().len(), 1);
+        let (_, h) = get_json(app.clone(), "/holdings?account=hsa").await;
+        assert!(h.as_array().unwrap().is_empty());
+
+        // /holdings/history: one point per position per holdings sync.
+        let (status, h) = get_json(app, "/holdings/history?ticker=VTI").await;
+        assert_eq!(status, StatusCode::OK);
+        let pts = h.as_array().unwrap();
+        assert_eq!(pts.len(), 1);
+        assert_eq!(pts[0]["price"], "300");
+        assert_eq!(pts[0]["value"], 9_900_00);
     }
 
     #[tokio::test]

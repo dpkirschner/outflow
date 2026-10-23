@@ -234,6 +234,22 @@ pub fn item_has_investments_consent(json: &str) -> Result<bool, SourceError> {
     Ok(false)
 }
 
+/// An optional `YYYY-MM-DD` field: absent/null → None, anything else must be
+/// a real calendar date (kept as that text).
+fn opt_date(v: &serde_json::Value, key: &str) -> Result<Option<String>, SourceError> {
+    match v.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(d) => {
+            let s = d
+                .as_str()
+                .ok_or_else(|| SourceError::Json(format!("{key}: expected a date, got {d}")))?;
+            NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                .map_err(|e| SourceError::Json(format!("{key}: bad date {s:?}: {e}")))?;
+            Ok(Some(s.to_string()))
+        }
+    }
+}
+
 /// A Plaid decimal kept as exact text (share quantities, unit prices). Same
 /// no-f64 rule as money: `Number::to_string` is the shortest round-trip form,
 /// and it must look like a plain decimal (no exponent).
@@ -280,12 +296,20 @@ pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), S
             .and_then(|b| b.as_bool())
             .unwrap_or(false)
             || sec_type == "cash";
+        let close_price = match s.get("close_price") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(p) => Some(parse_decimal_text(p, "security close_price")?),
+        };
         securities.push(Security {
             security_id,
             ticker,
             name,
             sec_type,
             is_cash,
+            cusip: str_field(s, "cusip").map(str::to_string),
+            isin: str_field(s, "isin").map(str::to_string),
+            close_price,
+            close_price_as_of: opt_date(s, "close_price_as_of")?,
         });
     }
 
@@ -323,6 +347,10 @@ pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), S
                 }
             },
         };
+        let price_as_of = opt_date(h, "institution_price_as_of")?;
+        let currency = str_field(h, "iso_currency_code")
+            .or_else(|| str_field(h, "unofficial_currency_code"))
+            .map(str::to_string);
         holdings.push(Holding {
             account_id,
             security_id,
@@ -330,6 +358,8 @@ pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), S
             price,
             value,
             cost_basis,
+            price_as_of,
+            currency,
         });
     }
     Ok((securities, holdings))
@@ -629,7 +659,8 @@ mod tests {
         {"security_id":"s_wts","ticker_symbol":null,"name":"Gamestop Corp Wts Exp 10/30/26",
          "type":"derivative","is_cash_equivalent":null},
         {"security_id":"s_vwo","ticker_symbol":"VWO","name":"Vanguard FTSE EM ETF",
-         "type":"etf","is_cash_equivalent":false},
+         "type":"etf","is_cash_equivalent":false,"cusip":"922042858","isin":"US9220428588",
+         "close_price":58.12,"close_price_as_of":"2026-10-21"},
         {"security_id":"s_usd","ticker_symbol":"CUR:USD","name":"US Dollar","type":"cash"}
       ],
       "holdings": [
@@ -638,7 +669,8 @@ mod tests {
         {"account_id":"brk","security_id":"s_wts","quantity":7,
          "institution_price":1.65,"institution_value":11.55,"cost_basis":null},
         {"account_id":"brk","security_id":"s_vwo","quantity":326.5299,
-         "institution_price":58.0312,"institution_value":18948.53,"cost_basis":13058.07}
+         "institution_price":58.0312,"institution_value":18948.53,"cost_basis":13058.07,
+         "institution_price_as_of":"2026-10-21","iso_currency_code":"USD"}
       ]
     }"#;
 
@@ -659,8 +691,19 @@ mod tests {
         assert_eq!(vwo.price, "58.0312");
         assert_eq!(vwo.value.cents(), 18_948_53);
         assert_eq!(vwo.cost_basis.map(|m| m.cents()), Some(13_058_07));
+        assert_eq!(vwo.price_as_of.as_deref(), Some("2026-10-21"));
+        assert_eq!(vwo.currency.as_deref(), Some("USD"));
+        assert_eq!(sec("s_vwo").cusip.as_deref(), Some("922042858"));
+        assert_eq!(sec("s_vwo").isin.as_deref(), Some("US9220428588"));
+        assert_eq!(sec("s_vwo").close_price.as_deref(), Some("58.12"));
+        assert_eq!(
+            sec("s_vwo").close_price_as_of.as_deref(),
+            Some("2026-10-21")
+        );
         let wts = holds.iter().find(|h| h.security_id == "s_wts").unwrap();
         assert_eq!(wts.cost_basis, None);
+        assert_eq!(wts.price_as_of, None);
+        assert_eq!(sec("s_wts").close_price, None);
         assert_eq!(wts.quantity, "7");
     }
 
@@ -677,6 +720,13 @@ mod tests {
             {"account_id":"a","security_id":"x","quantity":1,"institution_price":1}]}"#;
         assert!(parse_holdings_get(no_value).is_err());
         assert!(parse_holdings_get(r#"{"holdings":[]}"#).is_err()); // no securities
+        let bad_as_of = r#"{"securities":[{"security_id":"x","type":"etf"}],"holdings":[
+            {"account_id":"a","security_id":"x","quantity":1,"institution_price":1,
+             "institution_value":1,"institution_price_as_of":"10/21/2026"}]}"#;
+        assert!(parse_holdings_get(bad_as_of).is_err());
+        let bad_close = r#"{"securities":[{"security_id":"x","type":"etf","close_price":"n/a"}],
+            "holdings":[]}"#;
+        assert!(parse_holdings_get(bad_close).is_err());
     }
 
     #[test]

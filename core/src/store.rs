@@ -106,8 +106,11 @@ const VISIBLE: &str = "account_id NOT IN (SELECT id FROM accounts WHERE hidden =
 /// Account upsert loop shared by `upsert_accounts` and `apply_plaid_batch`;
 /// runs inside the caller's transaction.
 fn query_securities(conn: &Connection) -> rusqlite::Result<Vec<Security>> {
-    let mut stmt =
-        conn.prepare("SELECT security_id, ticker, name, type, is_cash FROM securities")?;
+    let mut stmt = conn.prepare(
+        "SELECT security_id, ticker, name, type, is_cash, cusip, isin, close_price,
+                close_price_as_of
+         FROM securities",
+    )?;
     let rows = stmt.query_map([], |r| {
         Ok(Security {
             security_id: r.get(0)?,
@@ -115,25 +118,40 @@ fn query_securities(conn: &Connection) -> rusqlite::Result<Vec<Security>> {
             name: r.get(2)?,
             sec_type: r.get(3)?,
             is_cash: r.get(4)?,
+            cusip: r.get(5)?,
+            isin: r.get(6)?,
+            close_price: r.get(7)?,
+            close_price_as_of: r.get(8)?,
         })
     })?;
     rows.collect()
 }
 
-fn query_holdings(conn: &Connection, filter: &str) -> rusqlite::Result<Vec<Holding>> {
+/// Current positions, each with the `synced_at` of the sync that last wrote
+/// it (None for rows written before v8).
+fn query_holdings(
+    conn: &Connection,
+    filter: &str,
+) -> rusqlite::Result<Vec<(Holding, Option<i64>)>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT account_id, security_id, quantity, price, value_cents, cost_basis_cents
+        "SELECT account_id, security_id, quantity, price, value_cents, cost_basis_cents,
+                price_as_of, currency, synced_at
          FROM holdings {filter}"
     ))?;
     let rows = stmt.query_map([], |r| {
-        Ok(Holding {
-            account_id: r.get(0)?,
-            security_id: r.get(1)?,
-            quantity: r.get(2)?,
-            price: r.get(3)?,
-            value: Money::from_cents(r.get(4)?),
-            cost_basis: r.get::<_, Option<i64>>(5)?.map(Money::from_cents),
-        })
+        Ok((
+            Holding {
+                account_id: r.get(0)?,
+                security_id: r.get(1)?,
+                quantity: r.get(2)?,
+                price: r.get(3)?,
+                value: Money::from_cents(r.get(4)?),
+                cost_basis: r.get::<_, Option<i64>>(5)?.map(Money::from_cents),
+                price_as_of: r.get(6)?,
+                currency: r.get(7)?,
+            },
+            r.get(8)?,
+        ))
     })?;
     rows.collect()
 }
@@ -345,7 +363,11 @@ CREATE TABLE IF NOT EXISTS securities (
     name TEXT NOT NULL,
     type TEXT NOT NULL,
     is_cash INTEGER NOT NULL,
-    updated INTEGER NOT NULL
+    updated INTEGER NOT NULL,
+    cusip TEXT,
+    isin TEXT,
+    close_price TEXT,
+    close_price_as_of TEXT
 );
 CREATE TABLE IF NOT EXISTS holdings (
     account_id TEXT NOT NULL,
@@ -354,6 +376,9 @@ CREATE TABLE IF NOT EXISTS holdings (
     price TEXT NOT NULL,
     value_cents INTEGER NOT NULL,
     cost_basis_cents INTEGER,
+    price_as_of TEXT,
+    currency TEXT,
+    synced_at INTEGER,
     PRIMARY KEY (account_id, security_id)
 );
 CREATE TABLE IF NOT EXISTS balance_snapshots (
@@ -370,6 +395,7 @@ CREATE TABLE IF NOT EXISTS holding_snapshots (
     quantity TEXT NOT NULL,
     value_cents INTEGER NOT NULL,
     cost_basis_cents INTEGER,
+    price TEXT,
     PRIMARY KEY (taken_at, account_id, security_id)
 );
 ";
@@ -382,7 +408,9 @@ CREATE TABLE IF NOT EXISTS holding_snapshots (
 /// v3: accounts.source + transactions.source (+ plaid_items, txn_matches tables).
 /// v4: accounts.nickname. v5: accounts.hidden. v6: plaid_items.investments_consent.
 /// v7: securities, holdings, balance_snapshots, holding_snapshots (new tables).
-const SCHEMA_VERSION: i64 = 7;
+/// v8: securities.cusip/isin/close_price/close_price_as_of,
+/// holdings.price_as_of/currency/synced_at, holding_snapshots.price.
+const SCHEMA_VERSION: i64 = 8;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -457,6 +485,22 @@ impl Store {
                 "investments_consent",
                 "INTEGER NOT NULL DEFAULT 0",
             )?;
+        }
+        if version < 8 {
+            // v8: more Plaid holdings detail. All nullable; existing rows fill
+            // in on the next holdings sync (old snapshots keep a NULL price).
+            for (table, column, decl) in [
+                ("securities", "cusip", "TEXT"),
+                ("securities", "isin", "TEXT"),
+                ("securities", "close_price", "TEXT"),
+                ("securities", "close_price_as_of", "TEXT"),
+                ("holdings", "price_as_of", "TEXT"),
+                ("holdings", "currency", "TEXT"),
+                ("holdings", "synced_at", "INTEGER"),
+                ("holding_snapshots", "price", "TEXT"),
+            ] {
+                self.add_column_if_missing(table, column, decl)?;
+            }
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -877,18 +921,25 @@ impl Store {
         if let Some((secs, holds)) = holdings {
             for s in secs {
                 tx.execute(
-                    "INSERT INTO securities (security_id, ticker, name, type, is_cash, updated)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                    "INSERT INTO securities (security_id, ticker, name, type, is_cash, updated,
+                        cusip, isin, close_price, close_price_as_of)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                      ON CONFLICT(security_id) DO UPDATE SET ticker=excluded.ticker,
                         name=excluded.name, type=excluded.type, is_cash=excluded.is_cash,
-                        updated=excluded.updated",
+                        updated=excluded.updated, cusip=excluded.cusip, isin=excluded.isin,
+                        close_price=excluded.close_price,
+                        close_price_as_of=excluded.close_price_as_of",
                     params![
                         s.security_id,
                         s.ticker,
                         s.name,
                         s.sec_type,
                         s.is_cash,
-                        taken_at
+                        taken_at,
+                        s.cusip,
+                        s.isin,
+                        s.close_price,
+                        s.close_price_as_of
                     ],
                 )?;
             }
@@ -902,28 +953,34 @@ impl Store {
                 let basis = h.cost_basis.map(|m| m.cents());
                 tx.execute(
                     "INSERT OR REPLACE INTO holdings
-                        (account_id, security_id, quantity, price, value_cents, cost_basis_cents)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        (account_id, security_id, quantity, price, value_cents, cost_basis_cents,
+                         price_as_of, currency, synced_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         h.account_id,
                         h.security_id,
                         h.quantity,
                         h.price,
                         h.value.cents(),
-                        basis
+                        basis,
+                        h.price_as_of,
+                        h.currency,
+                        taken_at
                     ],
                 )?;
                 tx.execute(
                     "INSERT OR REPLACE INTO holding_snapshots
-                        (taken_at, account_id, security_id, quantity, value_cents, cost_basis_cents)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        (taken_at, account_id, security_id, quantity, value_cents, cost_basis_cents,
+                         price)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![
                         taken_at,
                         h.account_id,
                         h.security_id,
                         h.quantity,
                         h.value.cents(),
-                        basis
+                        basis,
+                        h.price
                     ],
                 )?;
             }
@@ -934,7 +991,11 @@ impl Store {
             secs.iter().map(|s| (s.security_id.as_str(), s)).collect();
         let current = query_holdings(&tx, "")?;
         for a in accounts {
-            let held: Vec<&Holding> = current.iter().filter(|h| h.account_id == a.id).collect();
+            let held: Vec<&Holding> = current
+                .iter()
+                .map(|(h, _)| h)
+                .filter(|h| h.account_id == a.id)
+                .collect();
             let cash = crate::balances::account_cash(a.kind, a.balance, &held, &sec_map);
             tx.execute(
                 "INSERT OR REPLACE INTO balance_snapshots (taken_at, account_id, balance_cents, cash_cents)
@@ -947,7 +1008,40 @@ impl Store {
 
     /// Current positions on visible accounts.
     pub fn current_holdings(&self) -> rusqlite::Result<Vec<Holding>> {
+        Ok(self
+            .current_holdings_synced()?
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect())
+    }
+
+    /// Current positions on visible accounts, each paired with the epoch
+    /// seconds of the sync that last refreshed it (None before v8). A failed
+    /// holdings fetch keeps last-known positions, so this is how stale they are.
+    pub fn current_holdings_synced(&self) -> rusqlite::Result<Vec<(Holding, Option<i64>)>> {
         query_holdings(&self.conn, &format!("WHERE {VISIBLE}"))
+    }
+
+    /// Per-sync position history on visible accounts, oldest first.
+    pub fn holding_snapshots(&self, since: Option<i64>) -> rusqlite::Result<Vec<HoldingSnapshot>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT taken_at, account_id, security_id, quantity, price, value_cents,
+                    cost_basis_cents
+             FROM holding_snapshots
+             WHERE {VISIBLE} AND taken_at >= ?1 ORDER BY taken_at, account_id, security_id"
+        ))?;
+        let rows = stmt.query_map(params![since.unwrap_or(i64::MIN)], |r| {
+            Ok(HoldingSnapshot {
+                taken_at: r.get(0)?,
+                account_id: r.get(1)?,
+                security_id: r.get(2)?,
+                quantity: r.get(3)?,
+                price: r.get(4)?,
+                value: Money::from_cents(r.get(5)?),
+                cost_basis: r.get::<_, Option<i64>>(6)?.map(Money::from_cents),
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn securities(&self) -> rusqlite::Result<Vec<Security>> {
@@ -1834,6 +1928,10 @@ mod tests {
             name: id.into(),
             sec_type: "etf".into(),
             is_cash,
+            cusip: None,
+            isin: None,
+            close_price: None,
+            close_price_as_of: None,
         }
     }
 
@@ -1845,6 +1943,8 @@ mod tests {
             price: "2.0001".into(),
             value: Money::from_cents(cents),
             cost_basis: None,
+            price_as_of: None,
+            currency: None,
         }
     }
 
@@ -1896,6 +1996,83 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM holding_snapshots", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 5);
+
+        // Each position remembers the sync that last refreshed it; the
+        // holdings-less sync at 300 didn't touch them.
+        let synced = s.current_holdings_synced().unwrap();
+        assert!(synced.iter().all(|(_, at)| *at == Some(200)));
+        let hist = s.holding_snapshots(None).unwrap();
+        assert_eq!(hist.len(), 5);
+        assert_eq!(hist[0].taken_at, 100);
+        assert_eq!(hist[0].price.as_deref(), Some("2.0001"));
+        assert_eq!(s.holding_snapshots(Some(150)).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn holding_detail_fields_round_trip() {
+        let s = Store::open_in_memory().unwrap();
+        let brk = [invest("brk", 1_000_00)];
+        s.upsert_accounts(&brk).unwrap();
+        let secs = [Security {
+            cusip: Some("922908769".into()),
+            isin: Some("US9229087690".into()),
+            close_price: Some("301.25".into()),
+            close_price_as_of: Some("2026-10-21".into()),
+            ..security("vti", false)
+        }];
+        let holds = [Holding {
+            price_as_of: Some("2026-10-21".into()),
+            currency: Some("USD".into()),
+            cost_basis: Some(Money::from_cents(700_00)),
+            ..position("brk", "vti", 900_00)
+        }];
+        s.record_item_snapshot(&brk, Some((&secs, &holds)), 100)
+            .unwrap();
+        assert_eq!(s.securities().unwrap(), secs);
+        assert_eq!(s.current_holdings().unwrap(), holds);
+    }
+
+    #[test]
+    fn v7_db_gains_holding_detail_columns() {
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-v7-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+        {
+            // The v7 holdings tables, with one pre-v8 position and snapshot.
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE securities (security_id TEXT PRIMARY KEY, ticker TEXT,
+                    name TEXT NOT NULL, type TEXT NOT NULL, is_cash INTEGER NOT NULL,
+                    updated INTEGER NOT NULL);
+                 CREATE TABLE holdings (account_id TEXT NOT NULL, security_id TEXT NOT NULL,
+                    quantity TEXT NOT NULL, price TEXT NOT NULL, value_cents INTEGER NOT NULL,
+                    cost_basis_cents INTEGER, PRIMARY KEY (account_id, security_id));
+                 CREATE TABLE holding_snapshots (taken_at INTEGER NOT NULL,
+                    account_id TEXT NOT NULL, security_id TEXT NOT NULL,
+                    quantity TEXT NOT NULL, value_cents INTEGER NOT NULL,
+                    cost_basis_cents INTEGER, PRIMARY KEY (taken_at, account_id, security_id));
+                 INSERT INTO securities VALUES ('vti', 'VTI', 'Total Market', 'etf', 0, 1);
+                 INSERT INTO holdings VALUES ('brk', 'vti', '2', '450', 90000, NULL);
+                 INSERT INTO holding_snapshots VALUES (1, 'brk', 'vti', '2', 90000, NULL);
+                 PRAGMA user_version = 7;",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        let v: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        assert_eq!(s.securities().unwrap()[0].close_price, None);
+        let held = s.current_holdings_synced().unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].0.price_as_of, None);
+        assert_eq!(held[0].1, None);
+        assert_eq!(s.holding_snapshots(None).unwrap()[0].price, None);
+        drop(s);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1937,7 +2114,7 @@ mod tests {
             .conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, SCHEMA_VERSION);
         assert!(s.current_holdings().unwrap().is_empty());
         assert!(s.balance_snapshots(None).unwrap().is_empty());
         drop(s);

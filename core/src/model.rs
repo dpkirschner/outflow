@@ -78,6 +78,16 @@ pub struct Security {
     /// Counts toward cash: Plaid `is_cash_equivalent` or `type == "cash"`
     /// (money-market funds like VMFXX). See `balances::account_cash`.
     pub is_cash: bool,
+    #[serde(default)]
+    pub cusip: Option<String>,
+    #[serde(default)]
+    pub isin: Option<String>,
+    /// Plaid's own end-of-day price (exact decimal text), as of
+    /// `close_price_as_of` (`YYYY-MM-DD`). Not a live quote.
+    #[serde(default)]
+    pub close_price: Option<String>,
+    #[serde(default)]
+    pub close_price_as_of: Option<String>,
 }
 
 /// One position: current state, replaced per item each sync. `quantity` and
@@ -89,6 +99,26 @@ pub struct Holding {
     pub security_id: String,
     pub quantity: String,
     pub price: String,
+    pub value: Money,
+    pub cost_basis: Option<Money>,
+    /// Date (`YYYY-MM-DD`) the institution priced `price` at; None when the
+    /// institution doesn't say.
+    #[serde(default)]
+    pub price_as_of: Option<String>,
+    /// ISO currency code (or Plaid's unofficial code for crypto etc.).
+    #[serde(default)]
+    pub currency: Option<String>,
+}
+
+/// One position at one sync point (append-only history). `price` is None on
+/// snapshots recorded before v8.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HoldingSnapshot {
+    pub taken_at: i64,
+    pub account_id: String,
+    pub security_id: String,
+    pub quantity: String,
+    pub price: Option<String>,
     pub value: Money,
     pub cost_basis: Option<Money>,
 }

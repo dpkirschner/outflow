@@ -12,8 +12,9 @@ pub mod subscriptions;
 pub mod transfers;
 
 pub use balances::{
-    account_cash, history as balance_history, summarize as summarize_balances, AccountBalance,
-    BalancesView, DayTotals, Group, GroupBalance, HoldingRow, Totals,
+    account_cash, history as balance_history, position_history, positions,
+    summarize as summarize_balances, AccountBalance, BalancesView, DayTotals, Group, GroupBalance,
+    HoldingRow, PositionFilter, PositionPoint, PositionRow, Totals,
 };
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 pub use ledger::{
@@ -22,8 +23,9 @@ pub use ledger::{
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
-    account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding, Mark,
-    MatchConfidence, MatchStatus, PlaidItem, Security, SyncEntry, Transaction, TxnFlag, TxnMatch,
+    account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding,
+    HoldingSnapshot, Mark, MatchConfidence, MatchStatus, PlaidItem, Security, SyncEntry,
+    Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use perks::{

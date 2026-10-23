@@ -151,6 +151,32 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         Cmd::Accounts { all } => remote.get(&format!("/accounts?include_hidden={all}")),
         Cmd::Balances { history: false } => remote.get("/balances"),
         Cmd::Balances { history: true } => remote.get("/balances/history"),
+        Cmd::Holdings(a) => {
+            let mut q = Vec::new();
+            if let Some(acct) = &a.account {
+                q.push(format!("account={}", enc(acct)));
+            }
+            if let Some(t) = &a.ticker {
+                q.push(format!("ticker={}", enc(t)));
+            }
+            if let Some(s) = &a.since {
+                q.push(format!(
+                    "since={}",
+                    crate::parse_date(s).ok_or_else(|| format!("bad --since date: {s}"))?
+                ));
+            }
+            let path = if a.history {
+                "/holdings/history"
+            } else {
+                "/holdings"
+            };
+            let qs = if q.is_empty() {
+                String::new()
+            } else {
+                format!("?{}", q.join("&"))
+            };
+            remote.get(&format!("{path}{qs}"))
+        }
         Cmd::Status { limit } => remote.get(&format!("/sync_log?limit={limit}")),
         // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
         Cmd::Perks {

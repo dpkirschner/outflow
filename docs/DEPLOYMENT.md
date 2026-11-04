@@ -18,8 +18,10 @@ read-only token.
 3. Request **Production** access (Dashboard → settings). Chase/Amex/Capital
    One are OAuth institutions; approval can take days. Fill in the personal-use
    profile honestly.
-4. Products: enable **Transactions** only (Investments later for brokerage —
-   it affects billing).
+4. Products: enable **Transactions**, plus **Investments** if you want
+   brokerage/retirement holdings and investment transactions (it's billed per
+   item). Items linked before Investments was enabled need "Allow holdings"
+   (update-mode re-consent) in the Connections tab.
 5. Dashboard → Developers → API → **Allowed redirect URIs**: add exactly
    `https://<mini>.<tailnet>.ts.net/oauth-return`.
 6. Webhooks: skip (the server polls; it isn't internet-reachable).
@@ -255,8 +257,8 @@ That hop is plain HTTP but never leaves the machine. It still requires the
 token — being on the box is not authorization.
 
 (Build the CLI with `--features client`. `txns`, `report`, `subs`, `accounts`,
-`balances`, `holdings`, `perks`, `matches`, `status`, `categorize`, `pull`,
-`fix` all work in server mode and
+`balances`, `holdings`, `activity`, `perks`, `matches`, `status`,
+`categorize`, `pull`, `fix` all work in server mode and
 print the same JSON shapes as local `--json` — the reads need only the RO
 token; `categorize`, `pull`, `fix`, and `matches accept|reject` mutate and need
 the full token.)

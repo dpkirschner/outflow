@@ -6,14 +6,14 @@ One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
 core/    pure domain — money, model, store, plaid, categorize, query,
-         subscriptions, ledger, transfers, perks, balances, llm. Zero GUI/network deps by
-         default. Source of truth.
+         subscriptions, ledger, transfers, perks, balances, activity, llm. Zero
+         GUI/network deps by default. Source of truth.
 net/     networked adapters (sync ureq) — plaid (Link/exchange/sync
          transport), plaid_tokens (0600 token file), secrets (0600-file
          helpers), anthropic (Prompter impl). Depends on core.
 cli/     headless binary `outflow` — pull --from-file, categorize, report,
-         subs, fix, txns, accounts, balances, holdings, matches, status, perks; direct-DB or HTTP client
-         mode (--server) against a running server.
+         subs, fix, txns, accounts, balances, holdings, activity, matches,
+         status, perks; direct-DB or HTTP client mode (--server) against a running server.
 server/  axum + tokio HTTP server — JSON API + serves the built React SPA.
          The always-on deployment target (mac-mini behind tailscale serve).
 app/     npm project (NOT a cargo member): React + Vite + TS frontend in src/,
@@ -32,8 +32,9 @@ domain:
 - **The transaction source** — one shape: raw JSON is fetched in `net`
   (`plaid::transactions_sync_page`/`accounts_get`) and parsed pure in `core`
   (`plaid::parse_sync_page`/`parse_accounts_get`/`parse_fixture`), producing
-  domain `Account`/`Transaction` values. A future source (e.g. Plaid
-  Investments for brokerage) follows the same pattern.
+  domain `Account`/`Transaction` values. Plaid Investments follows the same
+  pattern (`investments_holdings_get` / `investments_transactions_get` →
+  `parse_holdings_get` / `parse_investment_txns_get`).
 - `categorize::Categorizer` — assigns a category to a transaction. `RuleSet`
   (deterministic) implements it. The LLM tail uses a second port,
   `llm::Prompter` (pure prompt build + response validation in core; the HTTP
@@ -55,7 +56,9 @@ money            i64-cents type, decimal parse, display
           │                evaluate() → add-offer / wrong-card / expiring findings
           ├ balances       current state + daily trend: account_cash (the one
           │                cash rule), summarize, history (per-sync snapshots),
-          │                positions / position_history (flat per-holding rows)
+          │                positions / position_history (flat per-holding rows,
+          │                plus a synthetic uninvested-cash row)
+          ├ activity       investment transactions → filtered, flat rows
           ├ categorize     RuleSet, precedence
           ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
           │                flag/category seeding from personal_finance_category)

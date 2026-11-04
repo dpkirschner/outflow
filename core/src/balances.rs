@@ -304,7 +304,7 @@ impl PositionFilter {
 }
 
 /// A plain decimal string → (digits as an integer, number of fraction digits).
-fn parse_decimal(s: &str) -> Option<(i128, u32)> {
+pub(crate) fn parse_decimal(s: &str) -> Option<(i128, u32)> {
     let (neg, digits) = match s.strip_prefix('-') {
         Some(d) => (true, d),
         None => (false, s),

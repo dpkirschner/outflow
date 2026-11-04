@@ -362,7 +362,72 @@ pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), S
             currency,
         });
     }
-    Ok((securities, holdings))
+    Ok((securities, merge_lots(holdings)?))
+}
+
+/// Collapse Plaid's per-lot rows into one position per (account, security),
+/// which is what the store keys on — without this, `INSERT OR REPLACE` keeps
+/// only the last row and the rest of the position silently vanishes.
+///
+/// Two steps, both seen in a real 401(k) provider response: (1) byte-identical
+/// rows are dropped as repeats — the 401(k) provider sent each of two lots four times,
+/// and only the distinct lots summed to the account balance; (2) the
+/// remaining lots of one security are summed: quantity exactly (decimal
+/// text), value in cents, cost basis only when every lot has one. Price,
+/// price date and currency come from the first lot. Order is first-seen.
+fn merge_lots(rows: Vec<Holding>) -> Result<Vec<Holding>, SourceError> {
+    let mut out: Vec<Holding> = Vec::new();
+    // Distinct lots per merged position, to recognize repeats.
+    let mut lots: Vec<Vec<Holding>> = Vec::new();
+    for h in rows {
+        let i = match out
+            .iter()
+            .position(|m| m.account_id == h.account_id && m.security_id == h.security_id)
+        {
+            None => {
+                lots.push(vec![h.clone()]);
+                out.push(h);
+                continue;
+            }
+            Some(i) => i,
+        };
+        if lots[i].contains(&h) {
+            continue;
+        }
+        let m = &mut out[i];
+        m.quantity = add_decimal_text(&m.quantity, &h.quantity).ok_or_else(|| {
+            SourceError::Json(format!(
+                "holding {} in {}: cannot sum quantities {} + {}",
+                h.security_id, h.account_id, m.quantity, h.quantity
+            ))
+        })?;
+        m.value = Money::from_cents(m.value.cents() + h.value.cents());
+        m.cost_basis = match (m.cost_basis, h.cost_basis) {
+            (Some(a), Some(b)) => Some(Money::from_cents(a.cents() + b.cents())),
+            _ => None,
+        };
+        lots[i].push(h);
+    }
+    Ok(out)
+}
+
+/// Exact sum of two plain decimal strings (as produced by
+/// `parse_decimal_text`), keeping the wider fraction scale.
+fn add_decimal_text(a: &str, b: &str) -> Option<String> {
+    let (x, xs) = crate::balances::parse_decimal(a)?;
+    let (y, ys) = crate::balances::parse_decimal(b)?;
+    let scale = xs.max(ys);
+    let sum = x
+        .checked_mul(10i128.checked_pow(scale - xs)?)?
+        .checked_add(y.checked_mul(10i128.checked_pow(scale - ys)?)?)?;
+    let p = 10i128.pow(scale);
+    let sign = if sum < 0 { "-" } else { "" };
+    let (int, frac) = (sum.abs() / p, sum.abs() % p);
+    Some(if scale == 0 {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac:0width$}", width = scale as usize)
+    })
 }
 
 fn parse_txn(v: &serde_json::Value) -> Result<Transaction, SourceError> {
@@ -673,6 +738,64 @@ mod tests {
          "institution_price_as_of":"2026-10-21","iso_currency_code":"USD"}
       ]
     }"#;
+
+    // Synthetic, in the shape an 401(k) provider returned: a no-ticker
+    // target-date fund whose two lots each arrive three times. Only the
+    // distinct lots (100.5 + 200.25 shares @ $10) add up to the balance.
+    #[test]
+    fn repeated_lots_dedupe_then_sum_into_one_position() {
+        let lot = |q: &str, v: &str| {
+            format!(
+                r#"{{"account_id":"k401","security_id":"s_tdf","quantity":{q},
+                 "institution_price":10,"institution_value":{v},"cost_basis":null,
+                 "institution_price_as_of":"2026-11-02"}}"#
+            )
+        };
+        let (a, b) = (lot("100.5", "1005"), lot("200.25", "2002.5"));
+        let json = format!(
+            r#"{{"accounts":[],"securities":[{{"security_id":"s_tdf","ticker_symbol":null,
+              "name":"Example 2045 Target Date Fund","type":"mutual fund"}}],
+              "holdings":[{a},{b},{a},{b},{a},{b}]}}"#
+        );
+        let (_, holds) = parse_holdings_get(&json).unwrap();
+        assert_eq!(holds.len(), 1);
+        assert_eq!(holds[0].quantity, "300.75");
+        assert_eq!(holds[0].value.cents(), 3_007_50);
+        assert_eq!(holds[0].cost_basis, None);
+        assert_eq!(holds[0].price, "10");
+    }
+
+    #[test]
+    fn distinct_lots_sum_basis_only_when_every_lot_has_one() {
+        let json = r#"{"accounts":[],"securities":[{"security_id":"s","type":"etf"}],
+          "holdings":[
+            {"account_id":"a","security_id":"s","quantity":1.5,"institution_price":2,
+             "institution_value":3,"cost_basis":2},
+            {"account_id":"a","security_id":"s","quantity":2,"institution_price":2,
+             "institution_value":4,"cost_basis":3.5},
+            {"account_id":"b","security_id":"s","quantity":1,"institution_price":2,
+             "institution_value":2,"cost_basis":1},
+            {"account_id":"b","security_id":"s","quantity":0.125,"institution_price":2,
+             "institution_value":0.25,"cost_basis":null}]}"#;
+        let (_, holds) = parse_holdings_get(json).unwrap();
+        assert_eq!(holds.len(), 2);
+        assert_eq!(holds[0].quantity, "3.5");
+        assert_eq!(holds[0].value.cents(), 7_00);
+        assert_eq!(holds[0].cost_basis.map(|m| m.cents()), Some(5_50));
+        assert_eq!(holds[1].quantity, "1.125");
+        assert_eq!(holds[1].cost_basis, None);
+    }
+
+    #[test]
+    fn add_decimal_text_is_exact() {
+        assert_eq!(
+            add_decimal_text("216.8399", "453.499216").as_deref(),
+            Some("670.339116")
+        );
+        assert_eq!(add_decimal_text("1", "2").as_deref(), Some("3"));
+        assert_eq!(add_decimal_text("-0.5", "0.25").as_deref(), Some("-0.25"));
+        assert_eq!(add_decimal_text("0.1", "0.9").as_deref(), Some("1.0"));
+    }
 
     #[test]
     fn holdings_parse_exact_and_classify_cash() {

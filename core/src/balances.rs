@@ -392,7 +392,67 @@ pub fn positions(
             })
         })
         .collect();
+    rows.extend(uninvested_cash_rows(&accts, holdings, filter));
     rows.sort_by_key(|r| std::cmp::Reverse(r.value.cents()));
+    rows
+}
+
+/// `security_id` of the synthetic row `positions` emits for an investment
+/// account's uninvested cash. Not a Plaid id; never stored.
+pub const UNINVESTED_CASH_ID: &str = "cash:uninvested";
+
+/// One synthetic position per investment account whose balance its holdings
+/// don't fully cover — the uninvested part of `account_cash`. Without it an
+/// all-cash account (an HSA with no positions) is simply absent from the flat
+/// positions list, and a reader of `holdings` can't tell it exists.
+fn uninvested_cash_rows(
+    accts: &HashMap<&str, &Account>,
+    holdings: &[(Holding, Option<i64>)],
+    filter: &PositionFilter,
+) -> Vec<PositionRow> {
+    let mut rows = Vec::new();
+    for a in accts.values() {
+        if a.kind != AccountKind::Investment {
+            continue;
+        }
+        let mine = holdings.iter().filter(|(h, _)| h.account_id == a.id);
+        let held: i64 = mine.clone().map(|(h, _)| h.value.cents()).sum();
+        let cash = a.balance.cents() - held;
+        if cash <= 0 {
+            continue;
+        }
+        let account = account_display_label(&a.name, a.nickname.as_deref());
+        if !filter.keeps(&a.id, &account, UNINVESTED_CASH_ID, None) {
+            continue;
+        }
+        let dollars = format!("{}.{:02}", cash / 100, cash % 100);
+        rows.push(PositionRow {
+            account_id: a.id.clone(),
+            account,
+            security_id: UNINVESTED_CASH_ID.into(),
+            ticker: None,
+            label: "Cash".into(),
+            name: "Uninvested cash".into(),
+            sec_type: "cash".into(),
+            is_cash: true,
+            cusip: None,
+            isin: None,
+            currency: None,
+            quantity: dollars,
+            price: "1".into(),
+            price_as_of: None,
+            close_price: None,
+            close_price_as_of: None,
+            value: Money::from_cents(cash),
+            cost_basis: None,
+            unit_cost: None,
+            gain: None,
+            gain_bp: None,
+            share_bp: share_bp(cash, a.balance.cents()),
+            // Freshness of the account's positions, when it has any.
+            synced_at: mine.filter_map(|(_, s)| *s).max(),
+        });
+    }
     rows
 }
 
@@ -773,7 +833,8 @@ mod tests {
             (hold("gone", "vti", 9_999_00, None), None), // account not visible
         ];
         let all = positions(&accounts, &secs, &holds, &PositionFilter::default());
-        assert_eq!(all.len(), 3);
+        // 3 positions + uninvested cash in brk ($150) and the IRA ($500).
+        assert_eq!(all.len(), 5);
         assert_eq!(all[0].account, "Roth (0000)"); // largest first
         let brk_vti = &all[1];
         assert_eq!(brk_vti.unit_cost.as_deref(), Some("125.0000"));
@@ -781,7 +842,7 @@ mod tests {
         assert_eq!(brk_vti.gain_bp, Some(6_000));
         assert_eq!(brk_vti.share_bp, 8_000);
         assert_eq!(brk_vti.synced_at, Some(100));
-        assert_eq!(all[2].label, "wts name"); // no ticker → name
+        assert_eq!(all[4].label, "wts name"); // no ticker → name
 
         let f = |account: Option<&str>, ticker: Option<&str>| PositionFilter {
             account: account.map(Into::into),
@@ -793,12 +854,40 @@ mod tests {
         );
         assert_eq!(
             positions(&accounts, &secs, &holds, &f(Some("roth"), None)).len(),
-            1
+            2 // its VTI + its uninvested cash
         );
         assert_eq!(
             positions(&accounts, &secs, &holds, &f(Some("BRK"), Some("wts"))).len(),
             1
         );
+    }
+
+    #[test]
+    fn uninvested_cash_becomes_a_position_row() {
+        let accounts = [
+            acct("hsa", AccountKind::Investment, 4_491_90), // no positions
+            acct("brk", AccountKind::Investment, 1_000_00), // fully invested
+            acct("chk", AccountKind::Checking, 5_000_00),   // not an investment
+        ];
+        let secs = [sec("vti", Some("VTI"), false)];
+        let holds = [(hold("brk", "vti", 1_000_00, None), Some(7))];
+        let rows = positions(&accounts, &secs, &holds, &PositionFilter::default());
+        assert_eq!(rows.len(), 2);
+        let cash = rows.iter().find(|r| r.account_id == "hsa").unwrap();
+        assert_eq!(cash.security_id, UNINVESTED_CASH_ID);
+        assert!(cash.is_cash);
+        assert_eq!(cash.label, "Cash");
+        assert_eq!(cash.quantity, "4491.90");
+        assert_eq!(cash.value.cents(), 4_491_90);
+        assert_eq!(cash.share_bp, 10_000);
+        assert_eq!(cash.synced_at, None);
+
+        // The ticker filter can still single it out by its id.
+        let only_cash = PositionFilter {
+            account: None,
+            ticker: Some(UNINVESTED_CASH_ID.into()),
+        };
+        assert_eq!(positions(&accounts, &secs, &holds, &only_cash).len(), 1);
     }
 
     #[test]

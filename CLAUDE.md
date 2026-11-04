@@ -38,8 +38,9 @@ server), `categorize [--llm]`,
 vs spending; file from `--file`/`OUTFLOW_PERKS`), `balances [--history]`
 (current state incl. holdings + idle cash; daily trend from per-sync snapshots),
 `holdings [--account A --ticker T --history --since D]` (flat per-position
-rows: qty, price + as-of, close price, basis, unit cost, gain), plus server/JSON mode (`--server
-URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
+rows: qty, price + as-of, close price, basis, unit cost, gain; an
+investment account's uninvested cash is a synthetic `cash:uninvested`
+row), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
 DB path from `--db` or `OUTFLOW_DB`.
 
 Server + web client:

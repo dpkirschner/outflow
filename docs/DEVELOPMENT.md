@@ -51,6 +51,11 @@ server's job), `categorize [--llm]`,
 --lookback 3mo|6mo|12mo|all --expiring-days N]`, `matches list|accept
 <id>|reject <id>`, `status [--limit]`.
 
+`holdings` (and `/api/holdings`) also emits one synthetic row per investment
+account whose balance its positions don't cover: `security_id`
+`cash:uninvested`, `is_cash: true`, so all-cash accounts (an HSA with no
+positions) still appear. History (`--history`) has no such row.
+
 Global: `--db`/`OUTFLOW_DB`, `--json` (machine-readable; same serde shapes as
 the HTTP API), `--server URL`/`OUTFLOW_SERVER` (needs `--features client`;
 every command becomes one API call and prints the server's JSON verbatim;

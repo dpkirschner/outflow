@@ -935,7 +935,7 @@ mod tests {
         let (status, h) = get_json(app.clone(), "/holdings").await;
         assert_eq!(status, StatusCode::OK);
         let rows = h.as_array().unwrap();
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3); // VTI, VMFXX, and the HSA's uninvested cash
         let vti = &rows[0];
         assert_eq!(vti["label"], "VTI");
         assert_eq!(vti["account_id"], "brk");
@@ -950,8 +950,13 @@ mod tests {
         assert_eq!(vti["synced_at"], 1_000);
         let (_, h) = get_json(app.clone(), "/holdings?ticker=vmfxx").await;
         assert_eq!(h.as_array().unwrap().len(), 1);
+        // An all-cash account still shows up, as one synthetic cash row.
         let (_, h) = get_json(app.clone(), "/holdings?account=hsa").await;
-        assert!(h.as_array().unwrap().is_empty());
+        let hsa = h.as_array().unwrap();
+        assert_eq!(hsa.len(), 1);
+        assert_eq!(hsa[0]["security_id"], "cash:uninvested");
+        assert_eq!(hsa[0]["is_cash"], true);
+        assert_eq!(hsa[0]["value"], 3_210_00);
 
         // /holdings/history: one point per position per holdings sync.
         let (status, h) = get_json(app, "/holdings/history?ticker=VTI").await;

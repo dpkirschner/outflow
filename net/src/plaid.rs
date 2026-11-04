@@ -169,6 +169,29 @@ pub fn investments_holdings_get(cfg: &PlaidConfig, access_token: &str) -> Result
     )
 }
 
+/// One page of raw `/investments/transactions/get` JSON for `start..=end`
+/// (`YYYY-MM-DD`); parse with `core::plaid::parse_investment_txns_get` and
+/// advance `offset` until `total_investment_transactions` rows are read.
+/// Plaid serves up to 24 months back; needs Investments consent.
+pub fn investments_transactions_get(
+    cfg: &PlaidConfig,
+    access_token: &str,
+    start: &str,
+    end: &str,
+    offset: usize,
+) -> Result<String, String> {
+    post(
+        cfg,
+        "/investments/transactions/get",
+        serde_json::json!({
+            "access_token": access_token,
+            "start_date": start,
+            "end_date": end,
+            "options": { "count": 500, "offset": offset },
+        }),
+    )
+}
+
 /// One `/transactions/sync` page (raw JSON); parse with
 /// `core::plaid::parse_sync_page` and loop while `has_more`. On
 /// `TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION` the caller restarts from the

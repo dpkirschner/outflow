@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod balances;
 pub mod categorize;
 pub mod ledger;
@@ -11,6 +12,7 @@ pub mod store;
 pub mod subscriptions;
 pub mod transfers;
 
+pub use activity::{activity, ActivityFilter, ActivityRow};
 pub use balances::{
     account_cash, history as balance_history, position_history, positions,
     summarize as summarize_balances, AccountBalance, BalancesView, DayTotals, Group, GroupBalance,
@@ -24,8 +26,8 @@ pub use ledger::{
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
     account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding,
-    HoldingSnapshot, Mark, MatchConfidence, MatchStatus, PlaidItem, Security, SyncEntry,
-    Transaction, TxnFlag, TxnMatch,
+    HoldingSnapshot, InvestmentTxn, Mark, MatchConfidence, MatchStatus, PlaidItem, Security,
+    SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use perks::{
@@ -34,7 +36,7 @@ pub use perks::{
 };
 pub use plaid::{
     item_has_investments_consent, parse_accounts_get, parse_fixture, parse_holdings_get,
-    parse_sync_page, Fixture, SourceError, SyncPage,
+    parse_investment_txns_get, parse_sync_page, Fixture, InvestmentTxnPage, SourceError, SyncPage,
 };
 pub use query::{
     monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,

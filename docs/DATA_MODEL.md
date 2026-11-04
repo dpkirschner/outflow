@@ -79,6 +79,7 @@ string round-tripping in SQLite.
 | `holdings` | **current** positions | PK(account_id, security_id); replaced per item each sync (sold positions drop); quantity/price as decimal text, price_as_of, currency, synced_at (the sync that last wrote the row) |
 | `balance_snapshots` | **append-only** history | PK(taken_at, account_id); every account, every successful item sync; `cash_cents` from `balances::account_cash` |
 | `holding_snapshots` | **append-only** history | PK(taken_at, account_id, security_id); one row per position per sync; quantity, value, cost basis, price (NULL before v8) |
+| `investment_transactions` | **archive** of investment activity | id PK (Plaid `investment_transaction_id`); account_id, security_id (nullable), date (`YYYY-MM-DD`), name, type, subtype, quantity/price (decimal text), amount_cents (cash effect, domain sign: out < 0), fees_cents, currency, cancel_txn_id, synced_at. Upserted by id each sync; never deleted (`reset_data` keeps it) |
 | `txn_matches` | card-payment pair decisions | UNIQUE(bank_txn_id, card_txn_id); status proposed/accepted/rejected; decided pairs are never re-proposed |
 
 Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
@@ -89,7 +90,8 @@ Schema changes run through the `PRAGMA user_version` migration runner
 `accounts.hidden`, v6 `plaid_items.investments_consent`, v7 `securities` +
 `holdings` + `balance_snapshots` + `holding_snapshots` (new tables), v8 holdings detail
 (securities cusip/isin/close_price/close_price_as_of, holdings
-price_as_of/currency/synced_at, holding_snapshots.price). Column lists are positional
+price_as_of/currency/synced_at, holding_snapshots.price), v9
+`investment_transactions` (new table). Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)

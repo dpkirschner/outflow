@@ -7,11 +7,11 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    balance_history, detect, monthly_flow, parse_fixture, position_history, positions,
-    spend_by_category, summarize_balances, top_merchants, Account, AccountKind, BalancesView,
-    CategorySource, CategorySpend, DayTotals, LedgerView, Mark, MerchantSpend, MonthlyFlow,
-    PositionFilter, PositionPoint, PositionRow, Subscription, SyncEntry, Transaction, TxnFilter,
-    TxnFlag,
+    activity, balance_history, detect, monthly_flow, parse_fixture, position_history, positions,
+    spend_by_category, summarize_balances, top_merchants, Account, AccountKind, ActivityFilter,
+    ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, LedgerView, Mark,
+    MerchantSpend, MonthlyFlow, PositionFilter, PositionPoint, PositionRow, Subscription,
+    SyncEntry, Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +135,41 @@ async fn holdings(
         let securities = s.securities().map_err(|e| e.to_string())?;
         let holdings = s.current_holdings_synced().map_err(|e| e.to_string())?;
         Ok(positions(&accounts, &securities, &holdings, &p.filter()))
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct ActivityParams {
+    account: Option<String>,
+    ticker: Option<String>,
+    /// Plaid type or subtype (buy, sell, dividend, contribution, fee, ...).
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    /// Inclusive `YYYY-MM-DD` bounds.
+    since: Option<String>,
+    until: Option<String>,
+}
+
+/// Archived investment transactions on visible accounts, newest first.
+async fn investment_activity(
+    State(state): State<AppState>,
+    Query(p): Query<ActivityParams>,
+) -> ApiResult<Vec<ActivityRow>> {
+    let nonempty = |o: Option<String>| o.filter(|s| !s.is_empty());
+    let f = ActivityFilter {
+        account: nonempty(p.account),
+        ticker: nonempty(p.ticker),
+        kind: nonempty(p.kind),
+        since: nonempty(p.since),
+        until: nonempty(p.until),
+    };
+    with_store(&state, move |s| {
+        let accounts = s.accounts().map_err(|e| e.to_string())?;
+        let securities = s.securities().map_err(|e| e.to_string())?;
+        let txns = s.investment_txns().map_err(|e| e.to_string())?;
+        Ok(activity(&txns, &accounts, &securities, &f))
     })
     .await
     .map(Json)
@@ -655,6 +690,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/balances/history", get(balances_history))
         .route("/holdings", get(holdings))
         .route("/holdings/history", get(holdings_history))
+        .route("/activity", get(investment_activity))
         .route("/transactions", get(transactions))
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
@@ -826,6 +862,76 @@ mod tests {
     /// /balances groups accounts, counts a money-market holding and an
     /// all-cash HSA as cash, flags idle cash; /balances/history has one point
     /// per day of snapshots.
+    #[tokio::test]
+    async fn activity_lists_and_filters_investment_txns() {
+        use outflow_core::{AccountKind, InvestmentTxn, Security};
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_accounts(&[Account {
+                id: "brk".into(),
+                org: "Broker".into(),
+                name: "Brokerage (0000)".into(),
+                kind: AccountKind::Investment,
+                balance: Money::from_cents(0),
+                currency: "USD".into(),
+                last_synced: 0,
+                source: "plaid".into(),
+                nickname: None,
+                hidden: false,
+            }])
+            .unwrap();
+        let sec = Security {
+            security_id: "vti".into(),
+            ticker: Some("VTI".into()),
+            name: "Total Market".into(),
+            sec_type: "etf".into(),
+            is_cash: false,
+            cusip: None,
+            isin: None,
+            close_price: None,
+            close_price_as_of: None,
+        };
+        let t = |id: &str, date: &str, ty: &str, sub: &str, cents: i64| InvestmentTxn {
+            id: id.into(),
+            account_id: "brk".into(),
+            security_id: Some("vti".into()),
+            date: date.into(),
+            name: sub.to_uppercase(),
+            txn_type: ty.into(),
+            subtype: sub.into(),
+            quantity: "1".into(),
+            price: "300".into(),
+            amount: Money::from_cents(cents),
+            fees: None,
+            currency: Some("USD".into()),
+            cancel_txn_id: None,
+        };
+        store
+            .upsert_investment_txns(
+                &[sec],
+                &[
+                    t("i1", "2026-09-01", "buy", "buy", -300_00),
+                    t("i2", "2026-10-01", "cash", "dividend", 4_20),
+                ],
+                1,
+            )
+            .unwrap();
+        let app = app_with_store(store);
+
+        let (status, v) = get_json(app.clone(), "/activity").await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = v.as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], "i2"); // newest first
+        assert_eq!(rows[0]["type"], "cash");
+        assert_eq!(rows[0]["amount"], 4_20);
+        assert_eq!(rows[1]["label"], "VTI");
+        let (_, v) = get_json(app.clone(), "/activity?type=dividend").await;
+        assert_eq!(v.as_array().unwrap().len(), 1);
+        let (_, v) = get_json(app, "/activity?since=2026-09-02&until=").await;
+        assert_eq!(v.as_array().unwrap().len(), 1);
+    }
+
     #[tokio::test]
     async fn balances_report_cash_holdings_and_history() {
         use outflow_core::{AccountKind, Holding, Security};

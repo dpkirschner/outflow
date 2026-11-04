@@ -105,6 +105,34 @@ const VISIBLE: &str = "account_id NOT IN (SELECT id FROM accounts WHERE hidden =
 
 /// Account upsert loop shared by `upsert_accounts` and `apply_plaid_batch`;
 /// runs inside the caller's transaction.
+/// Insert or refresh one security (shared by holdings and investment
+/// transactions; both responses carry the securities they reference).
+fn upsert_security(conn: &Connection, s: &Security, at: i64) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO securities (security_id, ticker, name, type, is_cash, updated,
+            cusip, isin, close_price, close_price_as_of)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(security_id) DO UPDATE SET ticker=excluded.ticker,
+            name=excluded.name, type=excluded.type, is_cash=excluded.is_cash,
+            updated=excluded.updated, cusip=excluded.cusip, isin=excluded.isin,
+            close_price=excluded.close_price,
+            close_price_as_of=excluded.close_price_as_of",
+        params![
+            s.security_id,
+            s.ticker,
+            s.name,
+            s.sec_type,
+            s.is_cash,
+            at,
+            s.cusip,
+            s.isin,
+            s.close_price,
+            s.close_price_as_of
+        ],
+    )?;
+    Ok(())
+}
+
 fn query_securities(conn: &Connection) -> rusqlite::Result<Vec<Security>> {
     let mut stmt = conn.prepare(
         "SELECT security_id, ticker, name, type, is_cash, cusip, isin, close_price,
@@ -398,6 +426,24 @@ CREATE TABLE IF NOT EXISTS holding_snapshots (
     price TEXT,
     PRIMARY KEY (taken_at, account_id, security_id)
 );
+CREATE TABLE IF NOT EXISTS investment_transactions (
+    id TEXT PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    security_id TEXT,
+    date TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    subtype TEXT NOT NULL,
+    quantity TEXT NOT NULL,
+    price TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    fees_cents INTEGER,
+    currency TEXT,
+    cancel_txn_id TEXT,
+    synced_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS investment_transactions_account_date
+    ON investment_transactions (account_id, date);
 ";
 
 /// Current schema version, tracked via `PRAGMA user_version`. Bump this and add a
@@ -410,7 +456,8 @@ CREATE TABLE IF NOT EXISTS holding_snapshots (
 /// v7: securities, holdings, balance_snapshots, holding_snapshots (new tables).
 /// v8: securities.cusip/isin/close_price/close_price_as_of,
 /// holdings.price_as_of/currency/synced_at, holding_snapshots.price.
-const SCHEMA_VERSION: i64 = 8;
+/// v9: investment_transactions (new table).
+const SCHEMA_VERSION: i64 = 9;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -578,7 +625,9 @@ impl Store {
         tx.execute("DELETE FROM txn_matches", [])?;
         // Current positions are re-fetched on the next sync. Balance/holding
         // snapshots are kept on purpose: that history can't be re-pulled, and
-        // it reattaches when the same account ids sync again.
+        // it reattaches when the same account ids sync again. Investment
+        // transactions are kept for the same reason (Plaid only re-serves 24
+        // months).
         tx.execute("DELETE FROM holdings", [])?;
         tx.execute("DELETE FROM securities", [])?;
         tx.execute(
@@ -920,28 +969,7 @@ impl Store {
         let ids: HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
         if let Some((secs, holds)) = holdings {
             for s in secs {
-                tx.execute(
-                    "INSERT INTO securities (security_id, ticker, name, type, is_cash, updated,
-                        cusip, isin, close_price, close_price_as_of)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                     ON CONFLICT(security_id) DO UPDATE SET ticker=excluded.ticker,
-                        name=excluded.name, type=excluded.type, is_cash=excluded.is_cash,
-                        updated=excluded.updated, cusip=excluded.cusip, isin=excluded.isin,
-                        close_price=excluded.close_price,
-                        close_price_as_of=excluded.close_price_as_of",
-                    params![
-                        s.security_id,
-                        s.ticker,
-                        s.name,
-                        s.sec_type,
-                        s.is_cash,
-                        taken_at,
-                        s.cusip,
-                        s.isin,
-                        s.close_price,
-                        s.close_price_as_of
-                    ],
-                )?;
+                upsert_security(&tx, s, taken_at)?;
             }
             for a in accounts
                 .iter()
@@ -1039,6 +1067,111 @@ impl Store {
                 price: r.get(4)?,
                 value: Money::from_cents(r.get(5)?),
                 cost_basis: r.get::<_, Option<i64>>(6)?.map(Money::from_cents),
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Upsert investment transactions (and the securities they reference) in
+    /// one SQLite transaction. Rows are keyed by Plaid's id and refreshed on
+    /// conflict; nothing is ever deleted, so the archive outlives Plaid's
+    /// 24-month window. Returns how many ids were new.
+    pub fn upsert_investment_txns(
+        &self,
+        secs: &[Security],
+        txns: &[InvestmentTxn],
+        synced_at: i64,
+    ) -> rusqlite::Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        for s in secs {
+            upsert_security(&tx, s, synced_at)?;
+        }
+        let mut added = 0;
+        for t in txns {
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM investment_transactions WHERE id = ?1)",
+                params![t.id],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                added += 1;
+            }
+            tx.execute(
+                "INSERT INTO investment_transactions (id, account_id, security_id, date, name,
+                    type, subtype, quantity, price, amount_cents, fees_cents, currency,
+                    cancel_txn_id, synced_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                 ON CONFLICT(id) DO UPDATE SET account_id=excluded.account_id,
+                    security_id=excluded.security_id, date=excluded.date, name=excluded.name,
+                    type=excluded.type, subtype=excluded.subtype, quantity=excluded.quantity,
+                    price=excluded.price, amount_cents=excluded.amount_cents,
+                    fees_cents=excluded.fees_cents, currency=excluded.currency,
+                    cancel_txn_id=excluded.cancel_txn_id, synced_at=excluded.synced_at",
+                params![
+                    t.id,
+                    t.account_id,
+                    t.security_id,
+                    t.date,
+                    t.name,
+                    t.txn_type,
+                    t.subtype,
+                    t.quantity,
+                    t.price,
+                    t.amount.cents(),
+                    t.fees.map(|f| f.cents()),
+                    t.currency,
+                    t.cancel_txn_id,
+                    synced_at
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(added)
+    }
+
+    /// Latest stored investment-transaction date (`YYYY-MM-DD`) across these
+    /// accounts, hidden or not — the sync uses it to pick its fetch window.
+    pub fn latest_investment_txn_date(
+        &self,
+        account_ids: &[&str],
+    ) -> rusqlite::Result<Option<String>> {
+        let mut latest: Option<String> = None;
+        for id in account_ids {
+            let d: Option<String> = self.conn.query_row(
+                "SELECT MAX(date) FROM investment_transactions WHERE account_id = ?1",
+                params![id],
+                |r| r.get(0),
+            )?;
+            if d > latest {
+                latest = d;
+            }
+        }
+        Ok(latest)
+    }
+
+    /// Investment transactions on visible accounts, newest first.
+    pub fn investment_txns(&self) -> rusqlite::Result<Vec<InvestmentTxn>> {
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT id, account_id, security_id, date, name, type, subtype, quantity, price,
+                    amount_cents, fees_cents, currency, cancel_txn_id
+             FROM investment_transactions WHERE {VISIBLE}
+             ORDER BY date DESC, id"
+        ))?;
+        let rows = stmt.query_map([], |r| {
+            Ok(InvestmentTxn {
+                id: r.get(0)?,
+                account_id: r.get(1)?,
+                security_id: r.get(2)?,
+                date: r.get(3)?,
+                name: r.get(4)?,
+                txn_type: r.get(5)?,
+                subtype: r.get(6)?,
+                quantity: r.get(7)?,
+                price: r.get(8)?,
+                amount: Money::from_cents(r.get(9)?),
+                fees: r.get::<_, Option<i64>>(10)?.map(Money::from_cents),
+                currency: r.get(11)?,
+                cancel_txn_id: r.get(12)?,
             })
         })?;
         rows.collect()
@@ -1946,6 +2079,63 @@ mod tests {
             price_as_of: None,
             currency: None,
         }
+    }
+
+    fn itxn(id: &str, acct: &str, date: &str, cents: i64) -> InvestmentTxn {
+        InvestmentTxn {
+            id: id.into(),
+            account_id: acct.into(),
+            security_id: Some("vti".into()),
+            date: date.into(),
+            name: "BUY".into(),
+            txn_type: "buy".into(),
+            subtype: "buy".into(),
+            quantity: "1".into(),
+            price: "10".into(),
+            amount: Money::from_cents(cents),
+            fees: None,
+            currency: Some("USD".into()),
+            cancel_txn_id: None,
+        }
+    }
+
+    #[test]
+    fn investment_txns_upsert_by_id_and_hide_with_account() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[invest("a", 0), invest("b", 0)])
+            .unwrap();
+        let secs = [security("vti", false)];
+        let first = [
+            itxn("t1", "a", "2026-09-01", -10_00),
+            itxn("t2", "b", "2026-10-01", -20_00),
+        ];
+        assert_eq!(s.upsert_investment_txns(&secs, &first, 1).unwrap(), 2);
+        // Re-sync of an overlapping window: t2 refreshed, t3 new.
+        let mut t2 = itxn("t2", "b", "2026-10-01", -21_00);
+        t2.name = "BUY (corrected)".into();
+        let again = [t2, itxn("t3", "a", "2026-10-05", -5_00)];
+        assert_eq!(s.upsert_investment_txns(&secs, &again, 2).unwrap(), 1);
+
+        let all = s.investment_txns().unwrap();
+        assert_eq!(
+            all.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["t3", "t2", "t1"] // newest first
+        );
+        assert_eq!(all[1].amount.cents(), -21_00);
+        assert_eq!(all[1].name, "BUY (corrected)");
+        assert_eq!(
+            s.latest_investment_txn_date(&["a"]).unwrap().as_deref(),
+            Some("2026-10-05")
+        );
+        assert_eq!(s.latest_investment_txn_date(&["zzz"]).unwrap(), None);
+
+        s.set_account_hidden("b", true).unwrap();
+        assert_eq!(s.investment_txns().unwrap().len(), 2);
+        // Hidden accounts still count for the sync window.
+        assert_eq!(
+            s.latest_investment_txn_date(&["b"]).unwrap().as_deref(),
+            Some("2026-10-01")
+        );
     }
 
     #[test]

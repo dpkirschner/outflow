@@ -177,6 +177,25 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
             };
             remote.get(&format!("{path}{qs}"))
         }
+        Cmd::Activity(a) => {
+            let f = a.filter()?;
+            let q: Vec<String> = [
+                ("account", f.account),
+                ("ticker", f.ticker),
+                ("type", f.kind),
+                ("since", f.since),
+                ("until", f.until),
+            ]
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|v| format!("{k}={}", enc(&v))))
+            .collect();
+            let qs = if q.is_empty() {
+                String::new()
+            } else {
+                format!("?{}", q.join("&"))
+            };
+            remote.get(&format!("/activity{qs}"))
+        }
         Cmd::Status { limit } => remote.get(&format!("/sync_log?limit={limit}")),
         // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
         Cmd::Perks {

@@ -5,7 +5,9 @@
 //! amounts owed — both are negated here to match the domain (outflow < 0,
 //! credit balance < 0).
 
-use crate::model::{Account, AccountKind, CategorySource, Holding, Security, Transaction, TxnFlag};
+use crate::model::{
+    Account, AccountKind, CategorySource, Holding, InvestmentTxn, Security, Transaction, TxnFlag,
+};
 use crate::money::Money;
 use chrono::{Local, NaiveDate, TimeZone};
 
@@ -269,21 +271,12 @@ fn parse_decimal_text(v: &serde_json::Value, what: &str) -> Result<String, Sourc
     Ok(s)
 }
 
-/// Parse `/investments/holdings/get` into securities + current positions.
-/// Strict at the boundary: every holding must reference a security in the
-/// same response, and quantity/price/value must be numbers. `cost_basis` may
-/// be null (cash sweeps, some warrants); `is_cash_equivalent` null = false.
-pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), SourceError> {
-    let v: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
-    let array = |key: &str| {
-        v.get(key)
-            .and_then(|a| a.as_array())
-            .ok_or_else(|| SourceError::Json(format!("missing {key} array")))
-    };
-
+/// The `securities` array shared by `/investments/holdings/get` and
+/// `/investments/transactions/get`. `is_cash_equivalent` null = false;
+/// `type: cash` also counts as cash.
+fn parse_securities(items: &[serde_json::Value]) -> Result<Vec<Security>, SourceError> {
     let mut securities = Vec::new();
-    for s in array("securities")? {
+    for s in items {
         let security_id = require_str(s, "security_id")?;
         let sec_type = str_field(s, "type").unwrap_or("unknown").to_string();
         let ticker = str_field(s, "ticker_symbol").map(str::to_string);
@@ -312,6 +305,23 @@ pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), S
             close_price_as_of: opt_date(s, "close_price_as_of")?,
         });
     }
+    Ok(securities)
+}
+
+/// Parse `/investments/holdings/get` into securities + current positions.
+/// Strict at the boundary: every holding must reference a security in the
+/// same response, and quantity/price/value must be numbers. `cost_basis` may
+/// be null (cash sweeps, some warrants); `is_cash_equivalent` null = false.
+pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), SourceError> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
+    let array = |key: &str| {
+        v.get(key)
+            .and_then(|a| a.as_array())
+            .ok_or_else(|| SourceError::Json(format!("missing {key} array")))
+    };
+
+    let securities = parse_securities(array("securities")?)?;
 
     let mut holdings = Vec::new();
     for h in array("holdings")? {
@@ -427,6 +437,97 @@ fn add_decimal_text(a: &str, b: &str) -> Option<String> {
         format!("{sign}{int}")
     } else {
         format!("{sign}{int}.{frac:0width$}", width = scale as usize)
+    })
+}
+
+/// One page of `/investments/transactions/get`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvestmentTxnPage {
+    pub securities: Vec<Security>,
+    pub txns: Vec<InvestmentTxn>,
+    /// `total_investment_transactions` for the requested window: page with
+    /// `offset` until this many have been read.
+    pub total: usize,
+}
+
+/// Parse one `/investments/transactions/get` page. Strict like holdings: a
+/// transaction naming a security must find it in the same response, numbers
+/// must be plain decimals. `amount` and `fees` are negated (Plaid positive =
+/// cash out of the account; domain outflow < 0).
+pub fn parse_investment_txns_get(json: &str) -> Result<InvestmentTxnPage, SourceError> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
+    let array = |key: &str| {
+        v.get(key)
+            .and_then(|a| a.as_array())
+            .ok_or_else(|| SourceError::Json(format!("missing {key} array")))
+    };
+    let securities = parse_securities(array("securities")?)?;
+    let total = v
+        .get("total_investment_transactions")
+        .and_then(|t| t.as_u64())
+        .ok_or_else(|| SourceError::Json("missing total_investment_transactions".into()))?
+        as usize;
+
+    let mut txns = Vec::new();
+    for t in array("investment_transactions")? {
+        let id = require_str(t, "investment_transaction_id")?;
+        let account_id = require_str(t, "account_id")?;
+        let security_id = str_field(t, "security_id").map(str::to_string);
+        if let Some(sid) = &security_id {
+            if !securities.iter().any(|s| &s.security_id == sid) {
+                return Err(SourceError::Json(format!(
+                    "investment txn {id} references unknown security {sid}"
+                )));
+            }
+        }
+        let number = |key: &'static str| {
+            t.get(key)
+                .and_then(|n| n.as_number())
+                .ok_or_else(|| SourceError::Json(format!("investment txn {id}: missing {key}")))
+        };
+        let amount = parse_amount(number("amount")?, &account_id, "amount")?;
+        let fees = match t.get("fees") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(f) => match f.as_number() {
+                Some(n) => Some(parse_amount(n, &account_id, "fees")?),
+                None => {
+                    return Err(SourceError::Json(format!(
+                        "investment txn {id}: fees is not a number"
+                    )))
+                }
+            },
+        };
+        let date = opt_date(t, "date")?
+            .ok_or_else(|| SourceError::Json(format!("investment txn {id}: missing date")))?;
+        txns.push(InvestmentTxn {
+            account_id: account_id.clone(),
+            security_id,
+            date,
+            name: str_field(t, "name").unwrap_or("").to_string(),
+            txn_type: require_str(t, "type")?,
+            subtype: str_field(t, "subtype").unwrap_or("").to_string(),
+            quantity: parse_decimal_text(
+                t.get("quantity").unwrap_or(&serde_json::Value::Null),
+                "investment txn quantity",
+            )?,
+            price: parse_decimal_text(
+                t.get("price").unwrap_or(&serde_json::Value::Null),
+                "investment txn price",
+            )?,
+            amount: Money::from_cents(-amount.cents()),
+            fees: fees.map(|f| Money::from_cents(-f.cents())),
+            currency: str_field(t, "iso_currency_code")
+                .or_else(|| str_field(t, "unofficial_currency_code"))
+                .map(str::to_string),
+            cancel_txn_id: str_field(t, "cancel_transaction_id").map(str::to_string),
+            id,
+        });
+    }
+    Ok(InvestmentTxnPage {
+        securities,
+        txns,
+        total,
     })
 }
 
@@ -795,6 +896,50 @@ mod tests {
         assert_eq!(add_decimal_text("1", "2").as_deref(), Some("3"));
         assert_eq!(add_decimal_text("-0.5", "0.25").as_deref(), Some("-0.25"));
         assert_eq!(add_decimal_text("0.1", "0.9").as_deref(), Some("1.0"));
+    }
+
+    // Synthetic, in Plaid's documented shape: a buy, a dividend with no
+    // quantity, and a fee-bearing sale.
+    #[test]
+    fn investment_txns_parse_and_flip_signs() {
+        let json = r#"{
+          "accounts": [],
+          "securities": [{"security_id":"s_vti","ticker_symbol":"VTI","name":"Vanguard Total",
+                          "type":"etf","is_cash_equivalent":false}],
+          "investment_transactions": [
+            {"investment_transaction_id":"it1","account_id":"brk","security_id":"s_vti",
+             "date":"2026-10-01","name":"BUY VTI","quantity":2.5,"price":300,"amount":750,
+             "fees":0,"type":"buy","subtype":"buy","iso_currency_code":"USD",
+             "cancel_transaction_id":null},
+            {"investment_transaction_id":"it2","account_id":"brk","security_id":"s_vti",
+             "date":"2026-10-15","name":"DIVIDEND","quantity":0,"price":0,"amount":-12.34,
+             "fees":null,"type":"cash","subtype":"dividend","iso_currency_code":"USD"},
+            {"investment_transaction_id":"it3","account_id":"brk","security_id":null,
+             "date":"2026-10-20","name":"FEE","quantity":0,"price":0,"amount":1.5,
+             "type":"fee","subtype":"account fee"}
+          ],
+          "total_investment_transactions": 3
+        }"#;
+        let page = parse_investment_txns_get(json).unwrap();
+        assert_eq!(page.total, 3);
+        assert_eq!(page.securities.len(), 1);
+        let t = |id: &str| page.txns.iter().find(|t| t.id == id).unwrap();
+        assert_eq!(t("it1").amount.cents(), -750_00); // buy: cash leaves
+        assert_eq!(t("it1").quantity, "2.5");
+        assert_eq!(t("it1").fees.map(|f| f.cents()), Some(0));
+        assert_eq!(t("it2").amount.cents(), 12_34); // dividend: cash arrives
+        assert_eq!(t("it2").subtype, "dividend");
+        assert_eq!(t("it3").security_id, None);
+        assert_eq!(t("it3").amount.cents(), -1_50);
+    }
+
+    #[test]
+    fn investment_txn_with_unknown_security_is_rejected() {
+        let json = r#"{"securities":[],"total_investment_transactions":1,
+          "investment_transactions":[{"investment_transaction_id":"x","account_id":"a",
+            "security_id":"ghost","date":"2026-10-01","quantity":1,"price":1,"amount":1,
+            "type":"buy","subtype":"buy"}]}"#;
+        assert!(parse_investment_txns_get(json).is_err());
     }
 
     #[test]

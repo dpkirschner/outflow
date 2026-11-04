@@ -151,11 +151,10 @@ unconditionally.
 
 ## Deferred / roadmap (not bugs)
 
-- **Brokerage accounts (Vanguard/one custodian)** — Plaid Investments product. The
-  seam is ready: enable the product in the Plaid dashboard, add
-  `investments/holdings/get` + `investments/transactions/get` to `net::plaid`,
-  a `parse_investments` in `core::plaid`, and map `investment/*` account types
-  to a new `AccountKind`. Nothing else changes.
+- **Investment lot dates before Plaid's window** — Plaid returns no
+  `tax_lots` and at most 24 months of investment transactions (often less), so
+  purchase dates for older positions would have to come from a brokerage
+  cost-basis export (e.g. a CSV import). Not built.
 - **Plaid webhooks** — skipped on purpose (server isn't internet-reachable);
   periodic polling covers a personal archive. Tailscale Funnel could expose a
   webhook path later.

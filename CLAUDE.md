@@ -40,7 +40,9 @@ vs spending; file from `--file`/`OUTFLOW_PERKS`), `balances [--history]`
 `holdings [--account A --ticker T --history --since D]` (flat per-position
 rows: qty, price + as-of, close price, basis, unit cost, gain; an
 investment account's uninvested cash is a synthetic `cash:uninvested`
-row), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
+row), `activity [--account --ticker --type --since --until]` (investment
+transactions: buys, sells, dividends, contributions; amount = cash effect),
+plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
 DB path from `--db` or `OUTFLOW_DB`.
 
 Server + web client:

@@ -11,8 +11,8 @@
 use axum::http::StatusCode;
 use outflow_core::store::PlaidBatch;
 use outflow_core::{
-    item_has_investments_consent, parse_accounts_get, parse_holdings_get, parse_sync_page,
-    PlaidItem, Store,
+    item_has_investments_consent, parse_accounts_get, parse_holdings_get,
+    parse_investment_txns_get, parse_sync_page, PlaidItem, Store,
 };
 use outflow_net::{plaid, plaid_tokens, PlaidConfig};
 use serde::Serialize;
@@ -302,7 +302,15 @@ pub fn run_plaid_item(
             s.apply_plaid_batch(&batch, synced_at)
                 .map_err(|e| e.to_string())
         })?;
-        let warning = snapshot_item(store, pcfg, &token, item, consent, &accounts, synced_at);
+        let mut warning = snapshot_item(store, pcfg, &token, item, consent, &accounts, synced_at);
+        if let Some(w) =
+            sync_investment_txns(store, pcfg, &token, item, consent, &accounts, synced_at)
+        {
+            warning = Some(match warning {
+                Some(prev) => format!("{prev}; {w}"),
+                None => w,
+            });
+        }
         return Ok((result, warning));
     }
 }
@@ -361,4 +369,111 @@ fn snapshot_item(
         warning = Some(format!("snapshot not recorded: {e}"));
     }
     warning
+}
+
+/// Days re-fetched before the newest stored investment transaction, so late
+/// postings and corrections inside that window are picked up (rows upsert by
+/// id, so the overlap is harmless).
+const INVEST_TXN_OVERLAP_DAYS: u64 = 30;
+/// Plaid serves investment transactions up to 24 months back.
+const INVEST_TXN_MAX_DAYS: u64 = 730;
+/// Stop paging past this many rows in one sync (a guard, not a real limit).
+const INVEST_TXN_MAX_ROWS: usize = 50_000;
+
+/// The `start_date` for an item's fetch: 24 months back on the first sync,
+/// else the newest stored date minus the overlap (never earlier than 24
+/// months).
+fn invest_txn_window_start(today: chrono::NaiveDate, latest: Option<&str>) -> chrono::NaiveDate {
+    let floor = today - chrono::Days::new(INVEST_TXN_MAX_DAYS);
+    latest
+        .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .map(|d| (d - chrono::Days::new(INVEST_TXN_OVERLAP_DAYS)).max(floor))
+        .unwrap_or(floor)
+}
+
+/// Fetch and archive investment transactions for an item with Investments
+/// consent and an investment account. Like holdings it never fails the item:
+/// transactions are already committed, so a problem comes back as a warning.
+fn sync_investment_txns(
+    store: &Arc<Mutex<Store>>,
+    pcfg: &PlaidConfig,
+    token: &str,
+    item: &PlaidItem,
+    consent: bool,
+    accounts: &[outflow_core::Account],
+    synced_at: i64,
+) -> Option<String> {
+    let invest: Vec<&str> = accounts
+        .iter()
+        .filter(|a| a.kind == outflow_core::AccountKind::Investment)
+        .map(|a| a.id.as_str())
+        .collect();
+    if !consent || invest.is_empty() {
+        return None;
+    }
+    let result = (|| -> Result<usize, String> {
+        let latest = lock(store, |s| {
+            s.latest_investment_txn_date(&invest)
+                .map_err(|e| e.to_string())
+        })?;
+        let today = chrono::Local::now().date_naive();
+        let start = invest_txn_window_start(today, latest.as_deref())
+            .format("%Y-%m-%d")
+            .to_string();
+        let end = today.format("%Y-%m-%d").to_string();
+        let (mut secs, mut txns) = (Vec::new(), Vec::new());
+        loop {
+            let json = plaid::investments_transactions_get(pcfg, token, &start, &end, txns.len())?;
+            let page = parse_investment_txns_get(&json)
+                .map_err(|e| format!("parse investment transactions: {e:?}"))?;
+            let got = page.txns.len();
+            secs.extend(page.securities);
+            txns.extend(page.txns);
+            if got == 0 || txns.len() >= page.total || txns.len() >= INVEST_TXN_MAX_ROWS {
+                break;
+            }
+        }
+        lock(store, |s| {
+            s.upsert_investment_txns(&secs, &txns, synced_at)
+                .map_err(|e| e.to_string())
+        })
+    })();
+    match result {
+        Ok(added) => {
+            if added > 0 {
+                tracing::info!(item_id = %item.item_id, added, "investment transactions synced");
+            }
+            None
+        }
+        Err(e) => {
+            tracing::warn!(item_id = %item.item_id, error = %e, "investment transactions not synced");
+            Some(format!("investment transactions not synced: {e}"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod invest_window_tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn window_is_24_months_first_then_overlaps_the_newest_row() {
+        let today = d("2026-11-04");
+        assert_eq!(invest_txn_window_start(today, None), d("2024-11-04"));
+        assert_eq!(
+            invest_txn_window_start(today, Some("2026-10-30")),
+            d("2026-09-30")
+        );
+        // Never earlier than Plaid's 24-month floor, and junk falls back to it.
+        assert_eq!(
+            invest_txn_window_start(today, Some("2020-01-01")),
+            d("2024-11-04")
+        );
+        assert_eq!(invest_txn_window_start(today, Some("bad")), d("2024-11-04"));
+    }
 }

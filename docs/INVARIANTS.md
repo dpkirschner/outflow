@@ -104,6 +104,14 @@ data integrity or the domain contract — treat them as load-bearing.
     exact decimal text; only `value`/`cost_basis` are `Money`. (`store`,
     `server/src/sync.rs::snapshot_item`)
 
+    Plaid can return several rows for one security in one account (repeated
+    lots); `plaid::merge_lots` drops byte-identical repeats and sums the rest
+    so the `(account_id, security_id)` key never silently keeps just one.
+    Investment transactions follow the same never-fail-the-item rule
+    (`sync.rs::sync_investment_txns`): fetched for items with Investments
+    consent, window = 24 months on first sync, else newest stored date minus
+    30 days, upserted by id; failures become a leg `warning`.
+
 16. **One cash rule: `balances::account_cash`.** Checking/savings are all cash;
     an investment account's cash is its cash-equivalent holdings (Plaid
     `is_cash_equivalent` or `type: cash`, e.g. VMFXX) plus any balance the

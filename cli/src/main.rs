@@ -1,9 +1,10 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    account_display_label, balance_history, detect, evaluate_perks, load_offers, monthly_flow,
-    parse_fixture, position_history, positions, search_transactions, spend_by_category,
-    summarize_balances, top_merchants, Cap, CategorySource, FindingKind, MatchStatus, Money, Offer,
-    PerkOptions, PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    account_display_label, activity, balance_history, detect, evaluate_perks, load_offers,
+    monthly_flow, parse_fixture, position_history, positions, search_transactions,
+    spend_by_category, summarize_balances, top_merchants, ActivityFilter, Cap, CategorySource,
+    FindingKind, MatchStatus, Money, Offer, PerkOptions, PositionFilter, Reward, SortKey, Store,
+    TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -40,6 +41,54 @@ pub(crate) struct HoldingsArgs {
     /// With --history: only snapshots on/after this date (YYYY-MM-DD).
     #[arg(long, requires = "history")]
     since: Option<String>,
+}
+
+#[derive(Args)]
+pub(crate) struct ActivityArgs {
+    /// Account id, or part of its name/nickname (case-insensitive).
+    #[arg(long)]
+    account: Option<String>,
+    /// Ticker or security id (case-insensitive).
+    #[arg(long)]
+    ticker: Option<String>,
+    /// Plaid type or subtype: buy, sell, dividend, contribution, fee, ...
+    #[arg(long = "type")]
+    kind: Option<String>,
+    /// Only on/after this date (YYYY-MM-DD).
+    #[arg(long)]
+    since: Option<String>,
+    /// Only on/before this date (YYYY-MM-DD).
+    #[arg(long)]
+    until: Option<String>,
+}
+
+impl ActivityArgs {
+    /// Dates normalized to zero-padded `YYYY-MM-DD` (they compare as text).
+    pub(crate) fn filter(&self) -> Result<ActivityFilter, String> {
+        let date = |o: &Option<String>, flag: &str| -> Result<Option<String>, String> {
+            o.as_deref()
+                .map(|s| iso_date(s).ok_or_else(|| format!("bad --{flag} date: {s}")))
+                .transpose()
+        };
+        Ok(ActivityFilter {
+            account: self.account.clone(),
+            ticker: self.ticker.clone(),
+            kind: self.kind.clone(),
+            since: date(&self.since, "since")?,
+            until: date(&self.until, "until")?,
+        })
+    }
+}
+
+/// `Y-M-D` → zero-padded `YYYY-MM-DD`, or None if it isn't a date shape.
+fn iso_date(s: &str) -> Option<String> {
+    parse_date(s)?;
+    let mut it = s.split('-').map(|p| p.parse::<u32>());
+    let (y, m, d) = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some(format!("{y:04}-{m:02}-{d:02}"))
 }
 
 #[derive(Subcommand)]
@@ -95,6 +144,10 @@ pub(crate) enum Cmd {
     /// (+ as-of date), Plaid close price, value, cost basis, unit cost, gain.
     /// `--history` prints per-sync snapshots instead.
     Holdings(HoldingsArgs),
+    /// Investment transactions (buys, sells, dividends, contributions, fees)
+    /// archived from Plaid, newest first. Amount is the cash effect on the
+    /// account: negative = cash out (a buy), positive = cash in.
+    Activity(ActivityArgs),
     /// Card-payment match review (list / accept / reject).
     Matches {
         #[command(subcommand)]
@@ -847,6 +900,34 @@ fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), Strin
     Ok(())
 }
 
+fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> Result<(), String> {
+    let filter = a.filter()?;
+    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
+    let securities = store.securities().map_err(|e| format!("{e}"))?;
+    let txns = store.investment_txns().map_err(|e| format!("{e}"))?;
+    let rows = activity(&txns, &accounts, &securities, &filter);
+    if json {
+        return json_out(&rows);
+    }
+    println!(
+        "{:<10} {:<12} {:<28} {:<18} {:>12} {:>11} {:>14}",
+        "date", "holding", "account", "type", "qty", "price", "amount"
+    );
+    for r in &rows {
+        println!(
+            "{:<10} {:<12} {:<28} {:<18} {:>12} {:>11} {:>14}",
+            r.date,
+            truncate(&r.label, 12),
+            truncate(&r.account, 28),
+            truncate(&format!("{}/{}", r.txn_type, r.subtype), 18),
+            r.quantity,
+            r.price,
+            dollars(r.amount.cents())
+        );
+    }
+    Ok(())
+}
+
 fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
     let log = store.sync_log(limit).map_err(|e| format!("{e}"))?;
     if json {
@@ -994,6 +1075,7 @@ fn run() -> Result<(), String> {
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history } => cmd_balances(&store, history, cli.json),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
+        Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
         Cmd::Status { limit } => cmd_status(&store, limit, cli.json),
         Cmd::Perks {

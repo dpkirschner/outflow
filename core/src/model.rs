@@ -110,6 +110,37 @@ pub struct Holding {
     pub currency: Option<String>,
 }
 
+/// One investment-account transaction from `/investments/transactions/get`:
+/// buys, sells, dividends, contributions, fees, transfers. Keyed by Plaid's
+/// `investment_transaction_id`; the archive keeps every row it has seen, so
+/// history grows past Plaid's 24-month window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InvestmentTxn {
+    pub id: String,
+    pub account_id: String,
+    /// None for pure cash movements (deposits, fees with no security).
+    pub security_id: Option<String>,
+    /// Trade/settle date as Plaid reports it, `YYYY-MM-DD`.
+    pub date: String,
+    pub name: String,
+    /// Plaid `type`: buy, sell, cash, fee, transfer, cancel.
+    pub txn_type: String,
+    /// Plaid `subtype`, e.g. dividend, contribution, buy, sell, deposit.
+    pub subtype: String,
+    /// Exact decimal text; Plaid's sign (sells are negative).
+    pub quantity: String,
+    /// Exact decimal text.
+    pub price: String,
+    /// Cash effect on the account in the domain convention: money leaving
+    /// the account's cash (a buy) is negative, money arriving (a sale, a
+    /// dividend) positive. Plaid's sign is flipped at the boundary.
+    pub amount: Money,
+    pub fees: Option<Money>,
+    pub currency: Option<String>,
+    /// The transaction this one cancels, when Plaid says so.
+    pub cancel_txn_id: Option<String>,
+}
+
 /// One position at one sync point (append-only history). `price` is None on
 /// snapshots recorded before v8.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

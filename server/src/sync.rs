@@ -11,7 +11,7 @@
 use axum::http::StatusCode;
 use outflow_core::store::PlaidBatch;
 use outflow_core::{
-    item_has_investments_consent, parse_accounts_get, parse_holdings_get,
+    item_has_investments_consent, item_is_investments_only, parse_accounts_get, parse_holdings_get,
     parse_investment_txns_get, parse_sync_page, PlaidItem, Store,
 };
 use outflow_net::{plaid, plaid_tokens, PlaidConfig};
@@ -260,6 +260,25 @@ pub fn run_plaid_item(
         }
     };
 
+    // An investments-only item has no Transactions product: /transactions/sync
+    // would fail and take the holdings with it. Commit just its accounts (an
+    // empty cursor leaves the stored one alone). Unreadable → normal path.
+    if item_is_investments_only(&accounts_json).unwrap_or(false) {
+        let batch = PlaidBatch {
+            item_id: item.item_id.clone(),
+            accounts: accounts.clone(),
+            upserts: Vec::new(),
+            removed_ids: Vec::new(),
+            next_cursor: String::new(),
+        };
+        let result = lock(store, |s| {
+            s.apply_plaid_batch(&batch, synced_at)
+                .map_err(|e| e.to_string())
+        })?;
+        let warning = after_commit(store, pcfg, &token, item, consent, &accounts, synced_at);
+        return Ok((result, warning));
+    }
+
     const MAX_RESTARTS: usize = 3;
     let mut restarts = 0;
     'restart: loop {
@@ -302,16 +321,27 @@ pub fn run_plaid_item(
             s.apply_plaid_batch(&batch, synced_at)
                 .map_err(|e| e.to_string())
         })?;
-        let mut warning = snapshot_item(store, pcfg, &token, item, consent, &accounts, synced_at);
-        if let Some(w) =
-            sync_investment_txns(store, pcfg, &token, item, consent, &accounts, synced_at)
-        {
-            warning = Some(match warning {
-                Some(prev) => format!("{prev}; {w}"),
-                None => w,
-            });
-        }
+        let warning = after_commit(store, pcfg, &token, item, consent, &accounts, synced_at);
         return Ok((result, warning));
+    }
+}
+
+/// The post-commit steps every item gets: the holdings/balance snapshot,
+/// then investment transactions. Both are non-fatal; their warnings join.
+fn after_commit(
+    store: &Arc<Mutex<Store>>,
+    pcfg: &PlaidConfig,
+    token: &str,
+    item: &PlaidItem,
+    consent: bool,
+    accounts: &[outflow_core::Account],
+    synced_at: i64,
+) -> Option<String> {
+    let snap = snapshot_item(store, pcfg, token, item, consent, accounts, synced_at);
+    let itx = sync_investment_txns(store, pcfg, token, item, consent, accounts, synced_at);
+    match (snap, itx) {
+        (Some(a), Some(b)) => Some(format!("{a}; {b}")),
+        (a, b) => a.or(b),
     }
 }
 

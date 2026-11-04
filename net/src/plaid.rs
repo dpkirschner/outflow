@@ -83,8 +83,14 @@ pub fn link_token_create(
     redirect_uri: Option<&str>,
     access_token: Option<&str>,
     consent_investments: bool,
+    investments_only: bool,
 ) -> Result<String, String> {
-    let body = link_token_body(redirect_uri, access_token, consent_investments);
+    let body = link_token_body(
+        redirect_uri,
+        access_token,
+        consent_investments,
+        investments_only,
+    );
     post(cfg, "/link/token/create", body)
 }
 
@@ -94,10 +100,16 @@ pub fn link_token_create(
 /// a holdings endpoint is called. Existing items linked before that need
 /// update mode with `consent_investments` to grant it — calling
 /// `/investments/*` on them returns ADDITIONAL_CONSENT_REQUIRED.
+///
+/// `investments_only` (new links only) makes Investments the required
+/// product instead of Transactions, for brokerage/retirement/HSA institutions
+/// that don't support Transactions — Link would otherwise refuse them. The
+/// sync skips `/transactions/sync` for such items.
 fn link_token_body(
     redirect_uri: Option<&str>,
     access_token: Option<&str>,
     consent_investments: bool,
+    investments_only: bool,
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "client_name": "outflow",
@@ -111,6 +123,9 @@ fn link_token_body(
             if consent_investments {
                 body["additional_consented_products"] = serde_json::json!(["investments"]);
             }
+        }
+        None if investments_only => {
+            body["products"] = serde_json::json!(["investments"]);
         }
         None => {
             body["products"] = serde_json::json!(["transactions"]);
@@ -224,7 +239,7 @@ mod tests {
 
     #[test]
     fn new_link_asks_for_transactions_and_investments_consent() {
-        let b = link_token_body(Some("https://x/oauth-return"), None, false);
+        let b = link_token_body(Some("https://x/oauth-return"), None, false, false);
         assert_eq!(b["products"], serde_json::json!(["transactions"]));
         assert_eq!(
             b["additional_consented_products"],
@@ -238,16 +253,26 @@ mod tests {
     /// the extra consent when requested.
     #[test]
     fn update_mode_omits_products_and_adds_consent_only_on_request() {
-        let plain = link_token_body(None, Some("access-tok"), false);
+        let plain = link_token_body(None, Some("access-tok"), false, false);
         assert_eq!(plain["access_token"], "access-tok");
         assert!(plain.get("products").is_none());
         assert!(plain.get("additional_consented_products").is_none());
 
-        let consent = link_token_body(None, Some("access-tok"), true);
+        let consent = link_token_body(None, Some("access-tok"), true, false);
         assert!(consent.get("products").is_none());
         assert_eq!(
             consent["additional_consented_products"],
             serde_json::json!(["investments"])
         );
+    }
+
+    #[test]
+    fn investments_only_link_requires_investments_not_transactions() {
+        let b = link_token_body(None, None, false, true);
+        assert_eq!(b["products"], serde_json::json!(["investments"]));
+        assert!(b.get("additional_consented_products").is_none());
+        // Ignored in update mode, which must never send products.
+        let upd = link_token_body(None, Some("access-tok"), false, true);
+        assert!(upd.get("products").is_none());
     }
 }

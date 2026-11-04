@@ -91,7 +91,8 @@ Schema changes run through the `PRAGMA user_version` migration runner
 `holdings` + `balance_snapshots` + `holding_snapshots` (new tables), v8 holdings detail
 (securities cusip/isin/close_price/close_price_as_of, holdings
 price_as_of/currency/synced_at, holding_snapshots.price), v9
-`investment_transactions` (new table). Column lists are positional
+`investment_transactions` (new table), v10 data-only: loan payments still
+`spending` re-flagged to `transfer` once (`reflag_loan_payments`). Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)
@@ -113,7 +114,8 @@ price_as_of/currency/synced_at, holding_snapshots.price), v9
    malformed data returns `SourceError`, never leaks defaults. Plaid signs flip
    here (amounts negate; credit balances negate). Plaid
    `personal_finance_category` seeds `flag` (LOAN_PAYMENTS_CREDIT_CARD_PAYMENT →
-   CardPayment, TRANSFER_IN/OUT → Transfer) and a conservative category
+   CardPayment, TRANSFER_IN/OUT and other LOAN_PAYMENTS → Transfer, since
+   paying down a loan counts as saving) and a conservative category
    (`CategorySource::Plaid`) at parse time — seed-only, since the upsert never
    overwrites `flag` on conflict.
 

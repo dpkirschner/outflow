@@ -104,12 +104,16 @@ fn require_str(v: &serde_json::Value, key: &str) -> Result<String, SourceError> 
 
 /// Seed the suppression flag from Plaid's classification. Seed-time only: the
 /// upsert never overwrites `flag` on conflict, so user overrides always win.
-fn flag_from_pfc(primary: Option<&str>, detailed: Option<&str>) -> TxnFlag {
+///
+/// Loan payments (mortgage, student, auto, personal) are transfers, not
+/// spending: paying down principal is saving — the user's call, 2026-11. Plaid
+/// doesn't split principal from interest, so the interest rides along.
+pub(crate) fn flag_from_pfc(primary: Option<&str>, detailed: Option<&str>) -> TxnFlag {
     if detailed == Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT") {
         return TxnFlag::CardPayment;
     }
     match primary {
-        Some("TRANSFER_IN") | Some("TRANSFER_OUT") => TxnFlag::Transfer,
+        Some("TRANSFER_IN") | Some("TRANSFER_OUT") | Some("LOAN_PAYMENTS") => TxnFlag::Transfer,
         _ => TxnFlag::Spending,
     }
 }
@@ -211,6 +215,25 @@ pub fn parse_accounts_get(
 /// `products`/`billed_products` (already initialized). A missing `item` or
 /// list means no; a list that isn't an array of strings is malformed.
 pub fn item_has_investments_consent(json: &str) -> Result<bool, SourceError> {
+    item_has_product(json, "investments")
+}
+
+/// An investments-only item (linked with Investments as the required
+/// product): the response has an `item` block and it lists no Transactions
+/// anywhere. `/transactions/sync` would fail for it, so the sync skips that
+/// step. A missing `item` block is NOT investments-only (keep the normal path).
+pub fn item_is_investments_only(json: &str) -> Result<bool, SourceError> {
+    let v: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
+    if v.get("item").is_none() {
+        return Ok(false);
+    }
+    Ok(!item_has_product(json, "transactions")?)
+}
+
+/// Whether an `/accounts/get` response's `item` lists `product` in
+/// `consented_products`, `products` or `billed_products`.
+pub fn item_has_product(json: &str, product: &str) -> Result<bool, SourceError> {
     let v: serde_json::Value =
         serde_json::from_str(json).map_err(|e| SourceError::Json(e.to_string()))?;
     let Some(item) = v.get("item") else {
@@ -223,7 +246,7 @@ pub fn item_has_investments_consent(json: &str) -> Result<bool, SourceError> {
             .ok_or_else(|| SourceError::Json(format!("item.{key} is not an array")))?;
         for p in arr {
             match p.as_str() {
-                Some("investments") => return Ok(true),
+                Some(p) if p == product => return Ok(true),
                 Some(_) => {}
                 None => {
                     return Err(SourceError::Json(format!(
@@ -900,6 +923,42 @@ mod tests {
 
     // Synthetic, in Plaid's documented shape: a buy, a dividend with no
     // quantity, and a fee-bearing sale.
+    #[test]
+    fn loan_payments_seed_as_transfers_but_card_payments_stay_card_payments() {
+        let f = |p, d| flag_from_pfc(Some(p), Some(d));
+        assert_eq!(
+            f("LOAN_PAYMENTS", "LOAN_PAYMENTS_MORTGAGE_PAYMENT"),
+            TxnFlag::Transfer
+        );
+        assert_eq!(
+            f("LOAN_PAYMENTS", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT"),
+            TxnFlag::Transfer
+        );
+        assert_eq!(
+            f("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"),
+            TxnFlag::CardPayment
+        );
+        assert_eq!(
+            f("FOOD_AND_DRINK", "FOOD_AND_DRINK_COFFEE"),
+            TxnFlag::Spending
+        );
+    }
+
+    #[test]
+    fn item_products_tell_an_investments_only_item_apart() {
+        let inv_only = r#"{"accounts":[],"item":{"products":["investments"],
+            "billed_products":["investments"],"consented_products":["investments"]}}"#;
+        assert!(!item_has_product(inv_only, "transactions").unwrap());
+        assert!(item_has_product(inv_only, "investments").unwrap());
+        let bank = r#"{"accounts":[],"item":{"products":["transactions"],
+            "consented_products":["transactions","investments"]}}"#;
+        assert!(item_has_product(bank, "transactions").unwrap());
+        assert!(!item_has_product(r#"{"accounts":[]}"#, "transactions").unwrap());
+        assert!(item_is_investments_only(inv_only).unwrap());
+        assert!(!item_is_investments_only(bank).unwrap());
+        assert!(!item_is_investments_only(r#"{"accounts":[]}"#).unwrap());
+    }
+
     #[test]
     fn investment_txns_parse_and_flip_signs() {
         let json = r#"{

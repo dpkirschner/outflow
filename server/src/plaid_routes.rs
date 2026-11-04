@@ -167,9 +167,56 @@ async fn remove_item(State(state): State<AppState>, Path(item_id): Path<String>)
     Ok(Json(()))
 }
 
+/// An error Plaid Link reported in the browser (an `ERROR` event, or `onExit`
+/// with an error). These never reach the server otherwise — Link talks to
+/// Plaid directly — so the SPA forwards them here purely to be logged. Every
+/// field is optional and client-supplied; none of them is a secret (Plaid's
+/// public error code/message, institution name, session/request ids).
+#[derive(Deserialize, Default)]
+struct LinkEventBody {
+    /// "event" (Link's onEvent ERROR) or "exit" (onExit with an error).
+    stage: Option<String>,
+    error_type: Option<String>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    display_message: Option<String>,
+    institution: Option<String>,
+    institution_id: Option<String>,
+    link_session_id: Option<String>,
+    request_id: Option<String>,
+}
+
+/// Bound a client-supplied string before it goes into the log: cap the length
+/// and drop control characters so a field can't forge extra log lines.
+fn clamp(s: &Option<String>) -> String {
+    s.as_deref()
+        .unwrap_or("-")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(300)
+        .collect()
+}
+
+async fn link_event(Json(b): Json<LinkEventBody>) -> ApiResult<()> {
+    tracing::warn!(
+        stage = %clamp(&b.stage),
+        institution = %clamp(&b.institution),
+        institution_id = %clamp(&b.institution_id),
+        error_type = %clamp(&b.error_type),
+        error_code = %clamp(&b.error_code),
+        error_message = ?clamp(&b.error_message),
+        display_message = ?clamp(&b.display_message),
+        link_session_id = %clamp(&b.link_session_id),
+        request_id = %clamp(&b.request_id),
+        "plaid link error"
+    );
+    Ok(Json(()))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/plaid/link_token", post(link_token))
+        .route("/plaid/link_event", post(link_event))
         .route("/plaid/exchange", post(exchange))
         .route("/plaid/items", get(items))
         .route("/plaid/items/{item_id}", delete(remove_item))
@@ -179,6 +226,13 @@ pub fn router() -> Router<AppState> {
 mod tests {
     use super::*;
     use crate::sync::LegReport;
+
+    #[test]
+    fn clamp_strips_control_chars_and_caps_length() {
+        assert_eq!(clamp(&None), "-");
+        assert_eq!(clamp(&Some("a\nb\r\x1b[31mc".into())), "ab[31mc");
+        assert_eq!(clamp(&Some("x".repeat(1000))).len(), 300);
+    }
 
     fn leg(error: Option<&str>) -> LegReport {
         LegReport {

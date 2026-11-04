@@ -6,7 +6,7 @@
 // URL (receivedRedirectUri) to resume the session.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
-import { api } from "../api";
+import { api, type LinkErrorReport } from "../api";
 import type { Account, PlaidItem, SyncEntry } from "../types";
 import { accountDisplayLabel, accountSource, agoLabel } from "./ledger/labels";
 import { SourceChip } from "./ledger/Streams";
@@ -14,6 +14,15 @@ import type { ToastMsg } from "./Toast";
 
 const LINK_TOKEN_KEY = "outflow_plaid_link_token";
 const LINK_ITEM_KEY = "outflow_plaid_link_item";
+
+// Best-effort: a failed report must never mask the Link error itself.
+async function reportLinkError(r: LinkErrorReport) {
+  try {
+    await api.plaidLinkEvent(r);
+  } catch (e) {
+    console.warn("could not forward Plaid Link error to the server", e);
+  }
+}
 
 function isOauthReturn(): boolean {
   return window.location.pathname === "/oauth-return";
@@ -28,14 +37,49 @@ function LinkSession({
 }: {
   token: string;
   receivedRedirectUri?: string;
-  onDone: (publicToken: string | null, institution: string | null) => void;
+  onDone: (
+    publicToken: string | null,
+    institution: string | null,
+    linkError?: LinkErrorReport,
+  ) => void;
 }) {
   const { open, ready } = usePlaidLink({
     token,
     receivedRedirectUri,
     onSuccess: (publicToken, metadata) =>
       onDone(publicToken, metadata.institution?.name ?? null),
-    onExit: () => onDone(null, null),
+    // Errors inside Link never reach the server on their own, so forward each
+    // one to the server log. ERROR events catch failures the user recovers
+    // from (e.g. picks another bank); onExit's error is the one that ended it.
+    onEvent: (eventName, md) => {
+      if (eventName !== "ERROR") return;
+      void reportLinkError({
+        stage: "event",
+        error_type: md.error_type,
+        error_code: md.error_code,
+        error_message: md.error_message,
+        institution: md.institution_name,
+        institution_id: md.institution_id,
+        link_session_id: md.link_session_id,
+        request_id: md.request_id,
+      });
+    },
+    onExit: (err, md) => {
+      if (!err) return onDone(null, null); // user closed Link
+      const report: LinkErrorReport = {
+        stage: "exit",
+        error_type: err.error_type,
+        error_code: err.error_code,
+        error_message: err.error_message,
+        display_message: err.display_message,
+        institution: md.institution?.name,
+        institution_id: md.institution?.institution_id,
+        link_session_id: md.link_session_id,
+        request_id: md.request_id,
+      };
+      void reportLinkError(report);
+      onDone(null, null, report);
+    },
   });
   useEffect(() => {
     if (ready) open();
@@ -111,12 +155,25 @@ export function Connections({
     }
   };
 
-  const onLinkDone = async (publicToken: string | null, institution: string | null) => {
+  const onLinkDone = async (
+    publicToken: string | null,
+    institution: string | null,
+    linkError?: LinkErrorReport,
+  ) => {
     const relinkItem = localStorage.getItem(LINK_ITEM_KEY);
     localStorage.removeItem(LINK_TOKEN_KEY);
     localStorage.removeItem(LINK_ITEM_KEY);
     setSession(null);
     if (isOauthReturn()) window.history.replaceState(null, "", "/");
+    if (linkError) {
+      const where = linkError.institution ? `${linkError.institution}: ` : "";
+      const msg = linkError.display_message || linkError.error_message || "";
+      notify({
+        kind: "err",
+        text: `Plaid Link failed — ${where}${linkError.error_code ?? "unknown error"}${msg ? ` (${msg})` : ""}`,
+      });
+      return;
+    }
     if (!publicToken) return; // user closed Link
     setBusy(true);
     try {

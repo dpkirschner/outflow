@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    activity, balance_history, detect, monthly_flow, parse_fixture, position_history, positions,
+    activity, balance_history, detect, monthly_flow, position_history, positions,
     spend_by_category, summarize_balances, top_merchants, Account, AccountKind, ActivityFilter,
     ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, LedgerView, Mark,
     MerchantSpend, MonthlyFlow, PositionFilter, PositionPoint, PositionRow, Subscription,
@@ -57,14 +57,6 @@ impl FilterParams {
 pub struct CategorizeResult {
     rule: usize,
     remaining: usize,
-}
-
-#[derive(Serialize)]
-pub struct PullResult {
-    pub added: usize,
-    pub updated: usize,
-    pub accounts: usize,
-    pub warnings: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -583,47 +575,6 @@ async fn sync_log(
     .map(Json)
 }
 
-#[derive(Deserialize)]
-struct PullFromFileBody {
-    path: String,
-}
-
-/// Dev/offline pull: ingest a Plaid fixture envelope from a local file (the
-/// `--from-file` path) — accounts + one sync page, no credentials needed.
-async fn pull_from_file(
-    State(state): State<AppState>,
-    Json(body): Json<PullFromFileBody>,
-) -> ApiResult<PullResult> {
-    let json = std::fs::read_to_string(&body.path)
-        .map_err(|err| ApiError::bad_request(format!("read {}: {err}", body.path)))?;
-    let started = now_secs();
-    let fixture = parse_fixture(&json, started)
-        .map_err(|err| ApiError::bad_request(format!("parse: {err:?}")))?;
-    with_store(&state, move |s| {
-        let log_id = s
-            .log_sync_start("plaid:file", started)
-            .map_err(|e| e.to_string())?;
-        s.upsert_accounts(&fixture.accounts)
-            .map_err(|e| e.to_string())?;
-        let mut txns = fixture.sync.added;
-        txns.extend(fixture.sync.modified);
-        let r = s.upsert_transactions(&txns).map_err(|e| e.to_string())?;
-        let mut removed = fixture.sync.removed_ids;
-        removed.extend(fixture.sync.pending_superseded);
-        s.delete_transactions(&removed).map_err(|e| e.to_string())?;
-        s.log_sync_finish(log_id, now_secs(), r.added, r.updated, None)
-            .map_err(|e| e.to_string())?;
-        Ok(PullResult {
-            added: r.added,
-            updated: r.updated,
-            accounts: fixture.accounts.len(),
-            warnings: Vec::new(),
-        })
-    })
-    .await
-    .map(Json)
-}
-
 /// Manual "pull now": SimpleFIN (if configured) — Plaid items join in the sync
 /// engine (Phase 5 wiring lives in `sync.rs`; this route delegates there).
 async fn pull(State(state): State<AppState>) -> ApiResult<crate::sync::SyncReport> {
@@ -712,7 +663,6 @@ pub fn api_router() -> Router<AppState> {
         .route("/mark_stream", post(mark_stream))
         .route("/clear_stream_mark", post(clear_stream_mark))
         .route("/pull", post(pull))
-        .route("/pull_from_file", post(pull_from_file))
         .route("/reset_data", post(reset_data))
 }
 

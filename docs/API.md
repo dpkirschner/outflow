@@ -114,7 +114,6 @@ An RO token gets **403** on all of these.
 | `POST /mark_stream` | `{ merchant, mark }` | ledger mark (`Committed`\|`Dismissed`\|`Kept`) |
 | `POST /clear_stream_mark` | `{ merchant }` | clear a ledger mark |
 | `POST /pull` | — | trigger a live Plaid sync now → `SyncReport` (a pull with no linked items returns a clean empty report without touching credentials) |
-| `POST /pull_from_file` | `{ path }` | ingest a local Plaid fixture (offline/dev) → `PullResult { added, updated, accounts, warnings }` |
 | `POST /reset_data` | — | clear transactions/accounts/sync_log/matches and reset Plaid cursors — **destructive**, back up the DB first (cannot recover rows older than Plaid's window) |
 
 ### Plaid Link lifecycle (`server/src/plaid_routes.rs`)

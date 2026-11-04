@@ -45,13 +45,20 @@ pub struct SyncPage {
 /// Map Plaid `type`/`subtype` to a domain kind. Real typing from the API —
 /// unlike SimpleFIN, no name-substring guessing. Loans and anything unknown
 /// fall to `Other`.
+///
+/// Every HSA is an investment account, whichever type the provider reports
+/// (one custodian says `investment`, another custodian says `depository`): it's money meant to
+/// be invested, so its uninvested balance should read as idle cash in
+/// Investments, not as spendable cash beside checking. Its bank transactions
+/// still sync as usual.
 fn plaid_kind(kind: &str, subtype: Option<&str>) -> AccountKind {
     match kind {
         "credit" => AccountKind::Credit,
         "investment" => AccountKind::Investment,
         "depository" => match subtype.unwrap_or("") {
             "checking" | "cash management" | "paypal" | "prepaid" => AccountKind::Checking,
-            "savings" | "cd" | "money market" | "hsa" | "ebt" => AccountKind::Savings,
+            "hsa" => AccountKind::Investment,
+            "savings" | "cd" | "money market" | "ebt" => AccountKind::Savings,
             _ => AccountKind::Checking,
         },
         _ => AccountKind::Other,
@@ -723,6 +730,22 @@ mod tests {
             parse_fixture(r#"{"accounts":{"accounts":[]}}"#, 0),
             Err(SourceError::Json(_))
         ));
+    }
+
+    #[test]
+    fn every_hsa_is_an_investment_account() {
+        assert_eq!(
+            plaid_kind("depository", Some("hsa")),
+            AccountKind::Investment
+        );
+        assert_eq!(
+            plaid_kind("investment", Some("hsa")),
+            AccountKind::Investment
+        );
+        assert_eq!(
+            plaid_kind("depository", Some("savings")),
+            AccountKind::Savings
+        );
     }
 
     #[test]

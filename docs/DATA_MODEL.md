@@ -19,8 +19,9 @@ Account { id, org, name, kind: AccountKind, balance: Money, currency,
 AccountKind = Checking | Savings | Credit | Investment | Other
 // Real Plaid type/subtype mapping — credit/* → Credit (balance negated: Plaid
 // reports positive-owed), depository/checking → Checking,
-// depository/savings|cd|money market|hsa → Savings, investment/* → Investment
-// (IRA, 401k, brokerage, investment HSA). Loans and unknowns → Other.
+// depository/savings|cd|money market → Savings, investment/* → Investment
+// (IRA, 401k, brokerage), and every HSA (depository or investment) →
+// Investment so its cash reads as idle. Loans and unknowns → Other.
 
 Security { security_id, ticker: Option<String>, name, sec_type,
            is_cash }   // is_cash = Plaid is_cash_equivalent || type "cash"

@@ -140,10 +140,14 @@ export function Connections({
     }
   }, [notify]);
 
-  const startLink = async (itemId?: string, consentInvestments = false) => {
+  const startLink = async (
+    itemId?: string,
+    consentInvestments = false,
+    investmentsOnly = false,
+  ) => {
     setBusy(true);
     try {
-      const r = await api.plaidLinkToken(itemId, consentInvestments);
+      const r = await api.plaidLinkToken(itemId, consentInvestments, investmentsOnly);
       localStorage.setItem(LINK_TOKEN_KEY, r.link_token);
       if (itemId) localStorage.setItem(LINK_ITEM_KEY, itemId);
       else localStorage.removeItem(LINK_ITEM_KEY);
@@ -295,6 +299,14 @@ export function Connections({
         <div className="cx-actions">
           <button className="lg-pill" disabled={busy} onClick={() => void startLink()}>
             Connect a bank
+          </button>
+          <button
+            className="lg-pill"
+            disabled={busy}
+            title="For brokerage, retirement or HSA providers that Connect a bank can't find"
+            onClick={() => void startLink(undefined, false, true)}
+          >
+            Connect investments only
           </button>
           <button className="lg-pill" disabled={busy} onClick={() => void onPull()}>
             Sync now

@@ -19,6 +19,10 @@ struct LinkTokenBody {
     /// access on an item linked before outflow requested it.
     #[serde(default)]
     consent_investments: bool,
+    /// New links only: require Investments instead of Transactions, for
+    /// institutions that only hold investment/HSA accounts.
+    #[serde(default)]
+    investments_only: bool,
 }
 
 /// Create a Link token. Passes the configured OAuth redirect URI when set —
@@ -40,6 +44,7 @@ async fn link_token(
             cfg.oauth_redirect.as_deref(),
             access_token.as_deref(),
             body.consent_investments,
+            body.investments_only,
         )
     })
     .await

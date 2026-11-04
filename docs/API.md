@@ -121,7 +121,7 @@ An RO token gets **403** on all of these.
 
 | Method · Path | Body | Returns |
 |---|---|---|
-| `POST /plaid/link_token` | `{ item_id?, consent_investments? }` (`item_id` present = update/reconnect mode; `consent_investments` also asks for Investments access) | Plaid `link_token` payload |
+| `POST /plaid/link_token` | `{ item_id?, consent_investments?, investments_only? }` (`item_id` present = update/reconnect mode; `consent_investments` also asks for Investments access; `investments_only`, new links only, makes Investments the required product instead of Transactions — for brokerage/retirement/HSA providers Link won't offer otherwise, whose items then skip `/transactions/sync`) | Plaid `link_token` payload |
 | `POST /plaid/exchange` | `{ public_token }` | exchanges + persists the access token (0600 file) → `{ item_id, institution, ... }` |
 | `POST /plaid/link_event` | `{ stage: "event"\|"exit", error_type?, error_code?, error_message?, display_message?, institution?, institution_id?, link_session_id?, request_id? }` | `null` — the SPA forwards Plaid Link errors here so they reach the server log (`plaid link error` warning); fields are length-capped and stripped of control characters |
 | `GET /plaid/items` | — | `PlaidItem[]` — linked connections + health (status, cursor, last_synced; no secrets) |

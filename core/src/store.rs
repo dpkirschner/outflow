@@ -457,7 +457,9 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// v8: securities.cusip/isin/close_price/close_price_as_of,
 /// holdings.price_as_of/currency/synced_at, holding_snapshots.price.
 /// v9: investment_transactions (new table).
-const SCHEMA_VERSION: i64 = 9;
+/// v10: data-only — loan payments still flagged `spending` from before they
+/// seeded as `transfer` are re-flagged once (see `reflag_loan_payments`).
+const SCHEMA_VERSION: i64 = 10;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -549,9 +551,47 @@ impl Store {
                 self.add_column_if_missing(table, column, decl)?;
             }
         }
+        if version < 10 {
+            self.reflag_loan_payments()?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
+    }
+
+    /// One-time v10 backfill: Plaid rows whose stored raw JSON says
+    /// `LOAN_PAYMENTS` (not a card payment) and that are still `spending` get
+    /// the `transfer` flag new rows now seed with. Rows a user already moved
+    /// off `spending` are untouched. Done in Rust, not `json_extract`, so it
+    /// doesn't depend on the SQLite build having JSON1.
+    fn reflag_loan_payments(&self) -> rusqlite::Result<usize> {
+        let rows: Vec<(String, String)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, raw FROM transactions WHERE flag = 'spending' AND source = 'plaid'",
+            )?;
+            let it = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            it.collect::<rusqlite::Result<_>>()?
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        for (id, raw) in rows {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                continue;
+            };
+            let pfc = v.get("personal_finance_category");
+            let field = |k: &str| pfc.and_then(|p| p.get(k)).and_then(|x| x.as_str());
+            if crate::plaid::flag_from_pfc(field("primary"), field("detailed")) == TxnFlag::Transfer
+                && field("primary") == Some("LOAN_PAYMENTS")
+            {
+                tx.execute(
+                    "UPDATE transactions SET flag = 'transfer' WHERE id = ?1",
+                    params![id],
+                )?;
+                n += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
     }
 
     fn add_column_if_missing(&self, table: &str, column: &str, decl: &str) -> rusqlite::Result<()> {
@@ -2220,6 +2260,59 @@ mod tests {
             .unwrap();
         assert_eq!(s.securities().unwrap(), secs);
         assert_eq!(s.current_holdings().unwrap(), holds);
+    }
+
+    #[test]
+    fn v10_backfill_reflags_only_untouched_loan_payments() {
+        let s = Store::open_in_memory().unwrap();
+        let raw = |primary: &str, detailed: &str| {
+            format!(
+                r#"{{"personal_finance_category":{{"primary":"{primary}","detailed":"{detailed}"}}}}"#
+            )
+        };
+        let ins = |id: &str, flag: &str, raw: &str| {
+            s.conn
+                .execute(
+                    "INSERT INTO transactions (id, account_id, posted, amount_cents, description,
+                        pending, raw, flag, source)
+                     VALUES (?1, 'chk', 0, -100, 'x', 0, ?2, ?3, 'plaid')",
+                    params![id, raw, flag],
+                )
+                .unwrap();
+        };
+        ins(
+            "mortgage",
+            "spending",
+            &raw("LOAN_PAYMENTS", "LOAN_PAYMENTS_MORTGAGE_PAYMENT"),
+        );
+        ins(
+            "card",
+            "spending",
+            &raw("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"),
+        );
+        ins(
+            "coffee",
+            "spending",
+            &raw("FOOD_AND_DRINK", "FOOD_AND_DRINK_COFFEE"),
+        );
+        ins(
+            "chosen",
+            "card_payment",
+            &raw("LOAN_PAYMENTS", "LOAN_PAYMENTS_CAR_PAYMENT"),
+        );
+        ins("junk", "spending", "not json");
+        s.conn.pragma_update(None, "user_version", 9).unwrap();
+        s.run_migrations().unwrap();
+        let flag = |id: &str| s.transaction(id).unwrap().unwrap().flag;
+        assert_eq!(flag("mortgage"), TxnFlag::Transfer);
+        assert_eq!(flag("card"), TxnFlag::Spending); // not a loan; left alone
+        assert_eq!(flag("coffee"), TxnFlag::Spending);
+        assert_eq!(flag("chosen"), TxnFlag::CardPayment); // user's flag survives
+        assert_eq!(flag("junk"), TxnFlag::Spending);
+        // Runs once: a later user move back to spending sticks.
+        s.set_flag("mortgage", TxnFlag::Spending, false).unwrap();
+        s.run_migrations().unwrap();
+        assert_eq!(flag("mortgage"), TxnFlag::Spending);
     }
 
     #[test]

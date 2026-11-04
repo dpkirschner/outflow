@@ -35,8 +35,9 @@ pub use perks::{
     FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
 };
 pub use plaid::{
-    item_has_investments_consent, parse_accounts_get, parse_fixture, parse_holdings_get,
-    parse_investment_txns_get, parse_sync_page, Fixture, InvestmentTxnPage, SourceError, SyncPage,
+    item_has_investments_consent, item_has_product, item_is_investments_only, parse_accounts_get,
+    parse_fixture, parse_holdings_get, parse_investment_txns_get, parse_sync_page, Fixture,
+    InvestmentTxnPage, SourceError, SyncPage,
 };
 pub use query::{
     monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,

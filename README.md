@@ -35,6 +35,11 @@ names).
   queue for review.
 - **Categorization** — a deterministic rule engine that *learns rules* from your
   inline corrections, with an optional LLM pass for merchants rules can't place.
+- **Balances & investments** — net worth across cash, investment and credit
+  accounts, with a daily trend from per-sync snapshots. With Plaid
+  Investments: every position (quantity, price, cost basis, gain), uninvested
+  and idle cash, and an archive of investment transactions (buys, sells,
+  dividends, contributions), all readable from the CLI and JSON API.
 - **Durable history** — Plaid serves a limited window per pull (up to ~24 months
   on first sync); the local database accumulates indefinitely, so trends and
   subscription detection sharpen over time.
@@ -125,6 +130,10 @@ URL with a read-only token. Full recipe (Plaid dashboard, tailscale, launchd,
   payments need a manual flag.
 - Own-account transfers auto-suppress only when Plaid classifies them; anything
   else is a manual "exclude".
+- Investment history is only as deep as Plaid serves it (often a few months
+  before linking) and Plaid sends no tax lots, so purchase dates for older
+  positions aren't available. Some 401(k) funds arrive with no ticker or cost
+  basis.
 - Annual subscriptions are only detectable once the database holds over a year
   of history.
 

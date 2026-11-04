@@ -27,6 +27,20 @@ import type {
   Window,
 } from "./types";
 
+// A Plaid Link error as forwarded to /api/plaid/link_event (see
+// server/src/plaid_routes.rs `LinkEventBody`). Snake_case, all optional.
+export interface LinkErrorReport {
+  stage: "event" | "exit";
+  error_type?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  display_message?: string | null;
+  institution?: string | null;
+  institution_id?: string | null;
+  link_session_id?: string | null;
+  request_id?: string | null;
+}
+
 const TOKEN_KEY = "outflow_token";
 
 // The server's OUTFLOW_API_TOKEN, typed in once via AuthGate and kept in
@@ -204,6 +218,9 @@ export const api = {
       "/plaid/exchange",
       { public_token: publicToken, institution },
     ),
+  // Forward a Plaid Link error to the server log (Link talks to Plaid
+  // directly, so the server never sees these otherwise).
+  plaidLinkEvent: (e: LinkErrorReport) => post<void>("/plaid/link_event", e),
   plaidItems: () => get<PlaidItem[]>("/plaid/items"),
   plaidRemoveItem: (itemId: string) =>
     req<void>("DELETE", `/plaid/items/${encodeURIComponent(itemId)}`),

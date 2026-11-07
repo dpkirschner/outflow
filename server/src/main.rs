@@ -128,6 +128,40 @@ async fn spa_index(State(state): State<AppState>) -> Response {
     }
 }
 
+/// The whole HTTP surface: /api behind the bearer layer, built assets, and
+/// the SPA shell for every other path.
+fn build_app(state: AppState) -> Router {
+    let api = routes::api_router()
+        .merge(plaid_routes::router())
+        .merge(match_routes::router())
+        .merge(perks_routes::router())
+        // Unknown /api paths must 404 as JSON — never fall through to the SPA
+        // shell (a 200 HTML page masquerading as an API response).
+        .fallback(|| async {
+            (
+                StatusCode::NOT_FOUND,
+                axum::Json(serde_json::json!({ "error": "no such API route" })),
+            )
+        })
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_bearer,
+        ));
+
+    // SPA fallback to index.html (status 200) is load-bearing: the screen
+    // routes (/ledger, /settings, ...) must survive a reload, and /oauth-return
+    // must serve the app so Plaid Link can resume after an OAuth bank redirect.
+    Router::new()
+        .nest("/api", api)
+        .nest_service(
+            "/assets",
+            ServeDir::new(format!("{}/assets", state.cfg.web_dir)),
+        )
+        .fallback(spa_index)
+        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .with_state(state)
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -172,31 +206,7 @@ async fn main() {
         });
     }
 
-    let api = routes::api_router()
-        .merge(plaid_routes::router())
-        .merge(match_routes::router())
-        .merge(perks_routes::router())
-        // Unknown /api paths must 404 as JSON — never fall through to the SPA
-        // shell (a 200 HTML page masquerading as an API response).
-        .fallback(|| async {
-            (
-                StatusCode::NOT_FOUND,
-                axum::Json(serde_json::json!({ "error": "no such API route" })),
-            )
-        })
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            require_bearer,
-        ));
-
-    // SPA fallback to index.html (status 200) is load-bearing: /oauth-return
-    // must serve the app so Plaid Link can resume after an OAuth bank redirect.
-    let app = Router::new()
-        .nest("/api", api)
-        .nest_service("/assets", ServeDir::new(format!("{}/assets", cfg.web_dir)))
-        .fallback(spa_index)
-        .layer(tower_http::trace::TraceLayer::new_for_http())
-        .with_state(state);
+    let app = build_app(state);
 
     let listener = match tokio::net::TcpListener::bind(&cfg.listen).await {
         Ok(l) => l,
@@ -227,12 +237,12 @@ mod tests {
 
     /// A stand-in for the real /api surface: one GET, one POST, one DELETE, all
     /// behind the same layer main() applies.
-    fn app(full: Option<&str>, ro: Option<&str>) -> Router {
+    fn test_state(full: Option<&str>, ro: Option<&str>, web_dir: &str) -> AppState {
         let store = Store::open_in_memory().expect("in-memory store");
         let cfg = Config {
             db_path: ":memory:".into(),
             listen: "127.0.0.1:0".into(),
-            web_dir: "app/dist".into(),
+            web_dir: web_dir.into(),
             plaid_tokens_file: "/dev/null".into(),
             oauth_redirect: None,
             api_token: full.map(Into::into),
@@ -240,11 +250,15 @@ mod tests {
             sync_interval_secs: 21_600,
             perks_path: None,
         };
-        let state = AppState {
+        AppState {
             store: Arc::new(Mutex::new(store)),
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
             cfg: Arc::new(cfg),
-        };
+        }
+    }
+
+    fn app(full: Option<&str>, ro: Option<&str>) -> Router {
+        let state = test_state(full, ro, "app/dist");
         Router::new()
             .route("/read", get(|| async { "ok" }))
             .route("/write", post(|| async { "ok" }))
@@ -348,6 +362,38 @@ mod tests {
             status(app(None, Some(RO)), Method::GET, "/read", None).await,
             StatusCode::UNAUTHORIZED
         );
+    }
+
+    // Client-side routes must load the SPA shell with a 200 so a reload keeps
+    // the screen, and /oauth-return so Plaid Link can resume. Unknown /api
+    // paths must not fall through to it.
+    #[tokio::test]
+    async fn screen_paths_serve_the_spa_shell() {
+        let dir = std::env::temp_dir().join(format!("outflow-web-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("index.html"), "<!doctype html><div id=root></div>").unwrap();
+        let app = build_app(test_state(None, None, dir.to_str().unwrap()));
+
+        for path in [
+            "/",
+            "/ledger",
+            "/settings",
+            "/oauth-return?oauth_state_id=x",
+        ] {
+            let res = app
+                .clone()
+                .oneshot(HttpRequest::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{path}");
+            let ct = res.headers()[header::CONTENT_TYPE].to_str().unwrap();
+            assert!(ct.starts_with("text/html"), "{path}: {ct}");
+        }
+        assert_eq!(
+            status(app, Method::GET, "/api/no-such-route", None).await,
+            StatusCode::NOT_FOUND
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

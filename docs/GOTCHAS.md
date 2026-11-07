@@ -31,7 +31,9 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   `ServeDir::not_found_service` serves the fallback file but keeps the 404
   status; the server uses an explicit axum `.fallback(spa_index)` instead.
   `/oauth-return` must load the app with a 200 or Plaid OAuth resumption
-  breaks.
+  breaks, and the screen routes (`/settings`, ...) must too or a reload
+  fails. `screen_paths_serve_the_spa_shell` in `server/src/main.rs` pins
+  this.
 
 ## Plaid
 

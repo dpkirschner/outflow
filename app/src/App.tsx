@@ -11,15 +11,16 @@ import { coverageText } from "./components/ledger/labels";
 import { Balances } from "./components/Balances";
 import { Outflows } from "./components/Outflows";
 import { Settings } from "./components/Settings";
-
-type Tab = "ledger" | "outflows" | "balances" | "settings";
+import { SCREENS, onLinkClick, useScreen } from "./route";
 
 export default function App() {
-  // A Plaid OAuth return must land on Settings (Connections) so Link can
-  // resume there.
-  const [tab, setTab] = useState<Tab>(
-    window.location.pathname === "/oauth-return" ? "settings" : "ledger",
-  );
+  // The screen comes from the URL (route.ts); /oauth-return maps to Settings
+  // so Plaid Link can resume in Connections.
+  const tab = useScreen();
+  useEffect(() => {
+    const label = SCREENS.find((s) => s.screen === tab)?.label;
+    document.title = label ? `outflow · ${label}` : "outflow";
+  }, [tab]);
   // Upkeep that needs a look: proposed card-payment matches + connections
   // not "ok". Shown as a badge on the Settings tab.
   const [attention, setAttention] = useState(0);
@@ -195,34 +196,25 @@ export default function App() {
       <div className="lg-top">
         <span className="lg-wm">outflow</span>
         <span className="lg-sub">where did my money go?</span>
-        <span className="lg-nav">
-          <span
-            className={tab === "ledger" ? "on" : "lg-navlink"}
-            onClick={() => setTab("ledger")}
-          >
-            Ledger
-          </span>
-          <span
-            className={tab === "outflows" ? "on" : "lg-navlink"}
-            onClick={() => setTab("outflows")}
-          >
-            Outflows
-          </span>
-          <span
-            className={tab === "balances" ? "on" : "lg-navlink"}
-            onClick={() => setTab("balances")}
-          >
-            Balances
-          </span>
-          <span
-            className={tab === "settings" ? "on" : "lg-navlink"}
-            onClick={() => setTab("settings")}
-            title={attention > 0 ? `${attention} thing(s) need a look` : undefined}
-          >
-            Settings
-            {attention > 0 && <span className="st-badge">{attention}</span>}
-          </span>
-        </span>
+        <nav className="lg-nav" aria-label="Screens">
+          {SCREENS.map(({ screen, path, label }) => {
+            const on = tab === screen;
+            const badge = screen === "settings" && attention > 0;
+            return (
+              <a
+                key={screen}
+                href={path}
+                className={on ? "on" : "lg-navlink"}
+                aria-current={on ? "page" : undefined}
+                onClick={(e) => onLinkClick(e, path)}
+                title={badge ? `${attention} thing(s) need a look` : undefined}
+              >
+                {label}
+                {badge && <span className="st-badge">{attention}</span>}
+              </a>
+            );
+          })}
+        </nav>
       </div>
 
       {tab === "settings" ? (

@@ -11,6 +11,7 @@ import type { Account, PlaidItem, SyncEntry } from "../types";
 import { accountDisplayLabel, accountSource, agoLabel } from "./ledger/labels";
 import { SourceChip } from "./ledger/Streams";
 import type { ToastMsg } from "./Toast";
+import { isOauthReturn, navigate, pathOf } from "../route";
 
 const LINK_TOKEN_KEY = "outflow_plaid_link_token";
 const LINK_ITEM_KEY = "outflow_plaid_link_item";
@@ -22,10 +23,6 @@ async function reportLinkError(r: LinkErrorReport) {
   } catch (e) {
     console.warn("could not forward Plaid Link error to the server", e);
   }
-}
-
-function isOauthReturn(): boolean {
-  return window.location.pathname === "/oauth-return";
 }
 
 // Mounted only while a link session is active; opens Link as soon as the SDK
@@ -136,7 +133,7 @@ export function Connections({
       setSession({ token, receivedRedirectUri: window.location.href });
     } else {
       notify({ kind: "err", text: "OAuth return without a saved Link session — start over." });
-      window.history.replaceState(null, "", "/");
+      navigate(pathOf("settings"), { replace: true });
     }
   }, [notify]);
 
@@ -168,7 +165,7 @@ export function Connections({
     localStorage.removeItem(LINK_TOKEN_KEY);
     localStorage.removeItem(LINK_ITEM_KEY);
     setSession(null);
-    if (isOauthReturn()) window.history.replaceState(null, "", "/");
+    if (isOauthReturn()) navigate(pathOf("settings"), { replace: true });
     if (linkError) {
       const where = linkError.institution ? `${linkError.institution}: ` : "";
       const msg = linkError.display_message || linkError.error_message || "";

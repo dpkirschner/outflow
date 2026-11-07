@@ -103,17 +103,22 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
   post-ingest passes, `sync_log` writes, and a
   `tokio::time::interval` background task (default 6h). Static serving:
   `/assets` from `app/dist`, everything else falls back to `index.html` with a
-  200 (`/oauth-return` must load the SPA for Plaid OAuth resumption).
+  200 (screen routes must survive a reload, and `/oauth-return` must load the
+  SPA for Plaid OAuth resumption).
 - **CLI** (`cli/src/main.rs`) — clap subcommands map 1:1 to core calls. The
   LLM pass (`categorize --llm`) is `#[cfg(feature="net")]`;
   `--server URL` (feature `client`, `cli/src/remote.rs`) redirects every
   subcommand to the HTTP API and prints the server's JSON verbatim — identical
   shapes to local `--json`, so agent consumers don't care which mode ran.
-- **Frontend** (`app/src/`) — four tabs in `App.tsx`: the **rhythm ledger**
-  (primary, `components/ledger/*`), **Outflows** (month bars + searchable/
-  sortable/filterable table, `components/Outflows.tsx`), **Review**
-  (card-payment matches, `components/MatchReview.tsx`), and **Connections**
-  (Plaid Link + item health + sync log, `components/Connections.tsx`).
+- **Frontend** (`app/src/`) — four screens, one URL each (`route.ts`, a
+  small hand-rolled path router): `/ledger` the **rhythm ledger**
+  (`components/ledger/*`), `/outflows` (month bars + searchable/sortable/
+  filterable table, `components/Outflows.tsx`), `/balances`
+  (`components/Balances.tsx`), and `/settings` (Connections, card-payment
+  review, categorize, reset; `components/Settings.tsx`). `/` and unknown
+  paths redirect to `/ledger`; `/oauth-return` shows Settings and is
+  rewritten to `/settings` once Plaid Link has read it. Only the screen is in
+  the URL — the period and open panels stay in app memory.
   `api.ts` is the single HTTP client; `types.ts` is generated from the serde
   DTOs (`server/src/ts_types.rs`). See
   DATA_MODEL.md for the serialization boundary.

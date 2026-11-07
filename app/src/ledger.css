@@ -50,10 +50,11 @@ body:has(.lg-app) {
   gap: 6px;
   font-size: 12px;
 }
-.lg-nav span {
+.lg-nav a {
   padding: 5px 11px;
   border-radius: 7px;
   color: var(--lg-faint);
+  text-decoration: none;
 }
 .lg-nav .on {
   background: #152233;
@@ -1592,10 +1593,10 @@ body:has(.lg-app) {
   display: inline-block;
   margin-left: 6px;
   min-width: 16px;
-  padding: 0 5px !important;
-  border-radius: 8px !important;
+  padding: 0 5px;
+  border-radius: 8px;
   background: var(--lg-amber);
-  color: var(--lg-bg) !important;
+  color: var(--lg-bg);
   font-size: 10px;
   font-weight: 700;
   line-height: 16px;

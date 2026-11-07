@@ -178,7 +178,9 @@ async fn holdings_history(
     with_store(&state, move |s| {
         let accounts = s.accounts().map_err(|e| e.to_string())?;
         let securities = s.securities().map_err(|e| e.to_string())?;
-        let snaps = s.holding_snapshots(p.since).map_err(|e| e.to_string())?;
+        let snaps = s
+            .holding_snapshots(p.since, None)
+            .map_err(|e| e.to_string())?;
         Ok(position_history(
             &snaps,
             &accounts,
@@ -202,7 +204,9 @@ async fn balances_history(
             .into_iter()
             .map(|a| (a.id, a.kind))
             .collect();
-        let snaps = s.balance_snapshots(p.since).map_err(|e| e.to_string())?;
+        let snaps = s
+            .balance_snapshots(p.since, None)
+            .map_err(|e| e.to_string())?;
         Ok(balance_history(&snaps, &kinds))
     })
     .await

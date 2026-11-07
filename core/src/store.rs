@@ -1132,24 +1132,32 @@ impl Store {
     }
 
     /// Per-sync position history on visible accounts, oldest first.
-    pub fn holding_snapshots(&self, since: Option<i64>) -> rusqlite::Result<Vec<HoldingSnapshot>> {
+    pub fn holding_snapshots(
+        &self,
+        since: Option<i64>,
+        until: Option<i64>,
+    ) -> rusqlite::Result<Vec<HoldingSnapshot>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT taken_at, account_id, security_id, quantity, price, value_cents,
                     cost_basis_cents
              FROM holding_snapshots
-             WHERE {VISIBLE} AND taken_at >= ?1 ORDER BY taken_at, account_id, security_id"
+             WHERE {VISIBLE} AND taken_at >= ?1 AND taken_at < ?2
+             ORDER BY taken_at, account_id, security_id"
         ))?;
-        let rows = stmt.query_map(params![since.unwrap_or(i64::MIN)], |r| {
-            Ok(HoldingSnapshot {
-                taken_at: r.get(0)?,
-                account_id: r.get(1)?,
-                security_id: r.get(2)?,
-                quantity: r.get(3)?,
-                price: r.get(4)?,
-                value: Money::from_cents(r.get(5)?),
-                cost_basis: r.get::<_, Option<i64>>(6)?.map(Money::from_cents),
-            })
-        })?;
+        let rows = stmt.query_map(
+            params![since.unwrap_or(i64::MIN), until.unwrap_or(i64::MAX)],
+            |r| {
+                Ok(HoldingSnapshot {
+                    taken_at: r.get(0)?,
+                    account_id: r.get(1)?,
+                    security_id: r.get(2)?,
+                    quantity: r.get(3)?,
+                    price: r.get(4)?,
+                    value: Money::from_cents(r.get(5)?),
+                    cost_basis: r.get::<_, Option<i64>>(6)?.map(Money::from_cents),
+                })
+            },
+        )?;
         rows.collect()
     }
 
@@ -1263,19 +1271,26 @@ impl Store {
     }
 
     /// Balance snapshots on visible accounts, oldest first.
-    pub fn balance_snapshots(&self, since: Option<i64>) -> rusqlite::Result<Vec<BalanceSnapshot>> {
+    pub fn balance_snapshots(
+        &self,
+        since: Option<i64>,
+        until: Option<i64>,
+    ) -> rusqlite::Result<Vec<BalanceSnapshot>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT taken_at, account_id, balance_cents, cash_cents FROM balance_snapshots
-             WHERE {VISIBLE} AND taken_at >= ?1 ORDER BY taken_at"
+             WHERE {VISIBLE} AND taken_at >= ?1 AND taken_at < ?2 ORDER BY taken_at"
         ))?;
-        let rows = stmt.query_map(params![since.unwrap_or(i64::MIN)], |r| {
-            Ok(BalanceSnapshot {
-                taken_at: r.get(0)?,
-                account_id: r.get(1)?,
-                balance: Money::from_cents(r.get(2)?),
-                cash: Money::from_cents(r.get(3)?),
-            })
-        })?;
+        let rows = stmt.query_map(
+            params![since.unwrap_or(i64::MIN), until.unwrap_or(i64::MAX)],
+            |r| {
+                Ok(BalanceSnapshot {
+                    taken_at: r.get(0)?,
+                    account_id: r.get(1)?,
+                    balance: Money::from_cents(r.get(2)?),
+                    cash: Money::from_cents(r.get(3)?),
+                })
+            },
+        )?;
         rows.collect()
     }
 
@@ -2254,17 +2269,23 @@ mod tests {
         assert_eq!(held[0].quantity, "1.5"); // exact text round-trips
         assert_eq!(held[0].price, "2.0001");
 
-        let snaps = s.balance_snapshots(None).unwrap();
+        let snaps = s.balance_snapshots(None, None).unwrap();
         assert_eq!(snaps.len(), 2);
         // 100 cash fund + (1000 - 950) uninvested on the second sync.
         assert_eq!(snaps[1].cash.cents(), 150_00);
-        assert_eq!(s.balance_snapshots(Some(150)).unwrap().len(), 1);
+        assert_eq!(s.balance_snapshots(Some(150), None).unwrap().len(), 1);
 
         // A sync with no holdings (fetch failed / no consent) keeps the
         // last-known positions and computes cash from them.
         s.record_item_snapshot(&brk, None, 300).unwrap();
         assert_eq!(s.current_holdings().unwrap().len(), 2);
-        assert_eq!(s.balance_snapshots(None).unwrap()[2].cash.cents(), 150_00);
+        assert_eq!(
+            s.balance_snapshots(None, None).unwrap()[2].cash.cents(),
+            150_00
+        );
+        // until is exclusive: the sync at 300 is left out.
+        assert_eq!(s.balance_snapshots(None, Some(300)).unwrap().len(), 2);
+        assert_eq!(s.balance_snapshots(Some(150), Some(300)).unwrap().len(), 1);
         let n: i64 = s
             .conn
             .query_row("SELECT COUNT(*) FROM holding_snapshots", [], |r| r.get(0))
@@ -2275,11 +2296,12 @@ mod tests {
         // holdings-less sync at 300 didn't touch them.
         let synced = s.current_holdings_synced().unwrap();
         assert!(synced.iter().all(|(_, at)| *at == Some(200)));
-        let hist = s.holding_snapshots(None).unwrap();
+        let hist = s.holding_snapshots(None, None).unwrap();
         assert_eq!(hist.len(), 5);
         assert_eq!(hist[0].taken_at, 100);
         assert_eq!(hist[0].price.as_deref(), Some("2.0001"));
-        assert_eq!(s.holding_snapshots(Some(150)).unwrap().len(), 2);
+        assert_eq!(s.holding_snapshots(Some(150), None).unwrap().len(), 2);
+        assert_eq!(s.holding_snapshots(None, Some(150)).unwrap().len(), 3);
     }
 
     #[test]
@@ -2472,7 +2494,7 @@ mod tests {
         assert_eq!(held.len(), 1);
         assert_eq!(held[0].0.price_as_of, None);
         assert_eq!(held[0].1, None);
-        assert_eq!(s.holding_snapshots(None).unwrap()[0].price, None);
+        assert_eq!(s.holding_snapshots(None, None).unwrap()[0].price, None);
         drop(s);
         let _ = std::fs::remove_file(&path);
     }
@@ -2495,9 +2517,9 @@ mod tests {
             .map(|h| h.account_id)
             .collect();
         assert_eq!(held, vec!["b".to_string()]);
-        assert_eq!(s.balance_snapshots(None).unwrap().len(), 1);
+        assert_eq!(s.balance_snapshots(None, None).unwrap().len(), 1);
         s.set_account_hidden("a", false).unwrap();
-        assert_eq!(s.balance_snapshots(None).unwrap().len(), 2);
+        assert_eq!(s.balance_snapshots(None, None).unwrap().len(), 2);
         assert_eq!(s.current_holdings().unwrap().len(), 2);
     }
 
@@ -2518,7 +2540,7 @@ mod tests {
             .unwrap();
         assert_eq!(v, SCHEMA_VERSION);
         assert!(s.current_holdings().unwrap().is_empty());
-        assert!(s.balance_snapshots(None).unwrap().is_empty());
+        assert!(s.balance_snapshots(None, None).unwrap().is_empty());
         drop(s);
         let _ = std::fs::remove_file(&path);
     }

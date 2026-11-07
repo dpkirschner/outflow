@@ -790,7 +790,9 @@ fn cmd_balances(store: &Store, history: bool, json: bool) -> Result<(), String> 
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     if history {
         let kinds = accounts.iter().map(|a| (a.id.clone(), a.kind)).collect();
-        let snaps = store.balance_snapshots(None).map_err(|e| format!("{e}"))?;
+        let snaps = store
+            .balance_snapshots(None, None)
+            .map_err(|e| format!("{e}"))?;
         let days = balance_history(&snaps, &kinds);
         if json {
             return json_out(&days);
@@ -871,7 +873,9 @@ fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), Strin
             Some(s) => Some(parse_date(s).ok_or_else(|| format!("bad --since date: {s}"))?),
             None => None,
         };
-        let snaps = store.holding_snapshots(since).map_err(|e| format!("{e}"))?;
+        let snaps = store
+            .holding_snapshots(since, None)
+            .map_err(|e| format!("{e}"))?;
         let points = position_history(&snaps, &accounts, &securities, &filter);
         if json {
             return json_out(&points);

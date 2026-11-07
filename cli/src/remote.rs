@@ -127,6 +127,7 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         )),
         Cmd::Report { .. }
         | Cmd::Balances { .. }
+        | Cmd::Change { .. }
         | Cmd::Holdings(_)
         | Cmd::Activity(_)
         | Cmd::Recurring { .. }
@@ -223,6 +224,10 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
         }
         // --ignored only picks which list the text printer shows; the JSON
         // view always carries both.
+        Cmd::Change { period } => {
+            let p = crate::change_period(period, today)?;
+            with_query("/net-worth/change", &[p.to_query()])
+        }
         Cmd::Recurring { period, .. } => {
             let mut q = Vec::new();
             period_q(period.resolve_at(today)?, &mut q);
@@ -306,6 +311,15 @@ mod tests {
             "/recurring?period=2026-10"
         );
         assert!(ok(&["txns", "--merchant", "streamflix com"]).contains("merchant=streamflix%20com"));
+    }
+
+    #[test]
+    fn change_defaults_to_this_month() {
+        assert_eq!(ok(&["change"]), "/net-worth/change?period=2026-11");
+        assert_eq!(
+            ok(&["change", "--period", "last-month"]),
+            "/net-worth/change?period=2026-10"
+        );
     }
 
     #[test]

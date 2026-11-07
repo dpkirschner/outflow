@@ -9,6 +9,7 @@ pub mod perks;
 pub mod plaid;
 pub mod query;
 pub mod recurring;
+pub mod stock;
 pub mod store;
 pub mod subscriptions;
 pub mod transfers;
@@ -43,6 +44,10 @@ pub use query::{
     TxnQuery,
 };
 pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
+pub use stock::{
+    net_worth_change, AccountChange, ChangeReason, ContributedPoint, ExcludedAccount, GainReason,
+    NetWorthChange,
+};
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};
 pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};

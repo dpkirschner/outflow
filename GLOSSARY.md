@@ -51,6 +51,12 @@ product direction behind these terms is in
   over a period, minus the money you put in and plus the money you took
   out. The main performance number. It answers "what did the market do
   for me?" in dollars.
+- **Markets**: the part of net worth change the market made: gain net of
+  contributions summed over the investment accounts that can be measured.
+- **Added**: net worth change minus Markets. Money saved from income minus
+  spending, plus the whole change of any investment account that can't be
+  measured (it then says so). Contributions and loan paydown move money
+  between your own accounts, so they are not part of the change.
 - **Unrealized gain**: current value minus cost basis for a position.
 - **Idle cash**: an investment account holding at least $1,000 and at
   least 5% of its value in cash.

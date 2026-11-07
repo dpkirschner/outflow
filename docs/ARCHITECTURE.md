@@ -6,13 +6,15 @@ One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
 core/    pure domain — money, model, store, plaid, categorize, query,
-         subscriptions, recurring, transfers, perks, balances, activity, llm. Zero
+         subscriptions, recurring, transfers, perks, balances, activity, stock,
+         llm. Zero
          GUI/network deps by default. Source of truth.
 net/     networked adapters (sync ureq) — plaid (Link/exchange/sync
          transport), plaid_tokens (0600 token file), secrets (0600-file
          helpers), anthropic (Prompter impl). Depends on core.
 cli/     headless binary `outflow` — pull --from-file, categorize, report,
-         recurring, fix, txns, accounts, balances, holdings, activity, matches,
+         recurring, fix, txns, accounts, balances, change, holdings, activity,
+         matches,
          status, perks; direct-DB or HTTP client mode (--server) against a running server.
 server/  axum + tokio HTTP server — JSON API + serves the built React SPA.
          The always-on deployment target (mac-mini behind tailscale serve).
@@ -61,6 +63,8 @@ money            i64-cents type, decimal parse, display
           │                positions / position_history (flat per-holding rows,
           │                plus a synthetic uninvested-cash row)
           ├ activity       investment transactions → filtered, flat rows
+          ├ stock          net worth change over a period: per-account change,
+          │                gain net of contributions, Markets + Added split
           ├ categorize     RuleSet, precedence
           ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
           │                flag/category seeding from personal_finance_category)

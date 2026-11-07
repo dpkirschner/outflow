@@ -23,6 +23,9 @@ use outflow_core::model::{
 use outflow_core::perks::{Cap, CardStatus, Finding, FindingKind, Offer, PerksReport, Reward};
 use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, MovedLane, TxnPage};
 use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
+use outflow_core::stock::{
+    AccountChange, ChangeReason, ContributedPoint, ExcludedAccount, GainReason, NetWorthChange,
+};
 use outflow_core::subscriptions::StreamCadence;
 use outflow_core::{ActivityRow, Money};
 use serde::Serialize;
@@ -291,6 +294,95 @@ fn balances_view() -> BalancesView {
     }
 }
 
+fn net_worth_change() -> NetWorthChange {
+    let start = Totals {
+        net_worth: m(380_000),
+        cash: m(240_000),
+        invested: m(150_000),
+        uninvested: m(30_000),
+        credit: m(-10_000),
+        loans: m(0),
+        other: m(0),
+    };
+    let row =
+        |id: &str, group: Group, s: i64, e: i64, gain: Option<i64>, reason: Option<GainReason>| {
+            AccountChange {
+                account_id: id.into(),
+                account: format!("Demo {id} (0000)"),
+                group,
+                start: m(s),
+                end: m(e),
+                start_at: T0,
+                end_at: T0 + 30 * DAY,
+                partial_start: false,
+                change: Some(m(e - s)),
+                change_reason: None,
+                contributions: gain.map(|_| m(2_500)),
+                gain: gain.map(m),
+                gain_reason: reason,
+            }
+        };
+    NetWorthChange {
+        start,
+        end: day_totals_breakdown(),
+        start_at: Some(T0),
+        end_at: Some(T0 + 30 * DAY),
+        partial_start: false,
+        change: Some(m(13_905)),
+        change_bp: Some(365),
+        reason: None,
+        markets: Some(m(3_750)),
+        added: Some(m(10_155)),
+        excluded: vec![ExcludedAccount {
+            account_id: "k401".into(),
+            account: "Demo k401 (0000)".into(),
+            change: m(0),
+        }],
+        added_includes_unmeasured: true,
+        accounts: vec![
+            row(
+                "brk",
+                Group::Investments,
+                150_000,
+                156_250,
+                Some(3_750),
+                None,
+            ),
+            row(
+                "k401",
+                Group::Investments,
+                0,
+                0,
+                None,
+                Some(GainReason::ContributionsUnknown),
+            ),
+            AccountChange {
+                change: None,
+                change_reason: Some(ChangeReason::OneSnapshot),
+                ..row("chk", Group::Cash, 250_000, 250_000, None, None)
+            },
+        ],
+        contributed: vec![ContributedPoint {
+            day: "2026-01-15".into(),
+            invested: m(156_250),
+            contributed: m(152_500),
+        }],
+        contributed_complete: false,
+    }
+}
+
+fn day_totals_breakdown() -> Totals {
+    Totals {
+        net_worth: m(393_905),
+        cash: m(250_000),
+        invested: m(156_250),
+        uninvested: m(31_250),
+        credit: m(-12_345),
+        loans: m(0),
+        other: m(0),
+    }
+}
+
 fn day_totals() -> DayTotals {
     DayTotals {
         day: "2026-01-15".into(),
@@ -537,6 +629,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("RecurringView", j(recurring_view())),
         ("BalancesView", j(balances_view())),
         ("DayTotals", j(day_totals())),
+        ("NetWorthChange", j(net_worth_change())),
         ("PositionRow", j(position_row())),
         ("PositionPoint", j(position_point())),
         ("ActivityRow", j(activity_row())),

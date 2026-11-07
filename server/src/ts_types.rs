@@ -119,6 +119,23 @@ fn render() -> String {
         );
     }
 
+    // --- core::stock ---
+    {
+        use outflow_core::stock::*;
+        decls!(
+            &cfg,
+            out,
+            [
+                ChangeReason,
+                GainReason,
+                AccountChange,
+                ExcludedAccount,
+                ContributedPoint,
+                NetWorthChange,
+            ]
+        );
+    }
+
     // --- core::perks ---
     {
         use outflow_core::perks::*;

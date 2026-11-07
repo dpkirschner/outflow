@@ -44,7 +44,7 @@ pub enum Group {
 }
 
 impl Group {
-    fn of(kind: AccountKind) -> Group {
+    pub(crate) fn of(kind: AccountKind) -> Group {
         match kind {
             AccountKind::Checking | AccountKind::Savings => Group::Cash,
             AccountKind::Investment => Group::Investments,
@@ -123,7 +123,7 @@ pub struct Totals {
 
 impl Totals {
     /// Add one account: `cash` is its `account_cash`.
-    fn add(&mut self, group: Group, balance: Money, cash: Money) {
+    pub(crate) fn add(&mut self, group: Group, balance: Money, cash: Money) {
         let plus = |m: &mut Money, c: i64| *m = Money::from_cents(m.cents() + c);
         let b = balance.cents();
         plus(&mut self.net_worth, b);
@@ -592,7 +592,7 @@ pub struct DayTotals {
     pub other: Money,
 }
 
-fn local_day(ts: i64) -> Option<NaiveDate> {
+pub(crate) fn local_day(ts: i64) -> Option<NaiveDate> {
     Local
         .timestamp_opt(ts, 0)
         .earliest()

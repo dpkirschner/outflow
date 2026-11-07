@@ -10,8 +10,8 @@ use outflow_core::{
     activity, balance_history, flow_lanes, position_history, positions, spend_by_category,
     summarize_balances, today_local, top_merchants, Account, AccountKind, ActivityFilter,
     ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, MerchantSpend,
-    Period, PositionFilter, PositionPoint, PositionRow, RecurringView, SyncEntry, TxnFilter,
-    TxnFlag,
+    NetWorthChange, Period, PositionFilter, PositionPoint, PositionRow, RecurringView, SyncEntry,
+    TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -291,6 +291,37 @@ async fn balances_history(
             .balance_snapshots(since, until)
             .map_err(|e| e.to_string())?;
         Ok(balance_history(&snaps, &kinds))
+    })
+    .await
+    .map(Json)
+}
+
+/// Net worth change over a period, split Markets + Added, with per-account
+/// change and gain net of contributions (`core::stock`). `period` or
+/// `since`/`until`; omit both for all of history. Visible accounts only.
+async fn net_worth_change(
+    State(state): State<AppState>,
+    Query(p): Query<HistoryParams>,
+) -> ApiResult<NetWorthChange> {
+    let (since, until) =
+        resolve_range(p.period.as_deref(), p.since.as_deref(), p.until.as_deref())?;
+    with_store(&state, move |s| {
+        let accounts = s.accounts().map_err(|e| e.to_string())?;
+        let securities = s.securities().map_err(|e| e.to_string())?;
+        let balances = s
+            .balance_snapshots(None, until)
+            .map_err(|e| e.to_string())?;
+        let holdings = s.holding_snapshots(None, None).map_err(|e| e.to_string())?;
+        let activity = s.investment_txns().map_err(|e| e.to_string())?;
+        Ok(outflow_core::net_worth_change(
+            &accounts,
+            &securities,
+            &balances,
+            &holdings,
+            &activity,
+            since,
+            until,
+        ))
     })
     .await
     .map(Json)
@@ -721,6 +752,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/accounts", get(accounts))
         .route("/balances", get(balances))
         .route("/balances/history", get(balances_history))
+        .route("/net-worth/change", get(net_worth_change))
         .route("/holdings", get(holdings))
         .route("/holdings/history", get(holdings_history))
         .route("/activity", get(investment_activity))
@@ -1072,6 +1104,29 @@ mod tests {
         let days = h.as_array().unwrap();
         assert_eq!(days.len(), 3); // two sync days + the carried-forward gap
         assert_eq!(days[2]["net_worth"], 14_910_00);
+
+        // /net-worth/change over all history: flat balances, so no change;
+        // brk measurable (positions unchanged), the HSA is cash.
+        let (status, c) = get_json(app.clone(), "/net-worth/change").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(c["change"], 0);
+        assert_eq!(c["markets"], 0);
+        assert_eq!(c["added"], 0);
+        assert_eq!(c["partial_start"], true);
+        assert_eq!(c["end"]["net_worth"], 14_910_00);
+        let row = |id: &str| {
+            c["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["account_id"] == id)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(row("brk")["gain"], 0);
+        assert_eq!(row("hsa")["gain_reason"], "cash");
+        let (status, _) = get_json(app.clone(), "/net-worth/change?period=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // /holdings: flat, largest first, with price dates and unit cost.
         let (status, h) = get_json(app.clone(), "/holdings").await;

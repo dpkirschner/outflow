@@ -241,6 +241,45 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
   `search_transactions` (exact normalized key) returns the rows behind a
   merchant.
 
+### Net worth change (`core/src/stock.rs`)
+
+`net_worth_change(accounts, securities, balance_snaps, holding_snaps,
+activity, since, until)` serves `GET /api/net-worth/change` and `outflow
+change`. Visible accounts only.
+
+- **Snapshots per account.** Start = last balance snapshot at or before the
+  period start, else the first inside it (`partial_start`, per account and
+  overall). End = last snapshot inside the period. Start == end →
+  `change: None, change_reason: one_snapshot`, but its balance still counts
+  on both ends, so a newly linked account never reads as a gain.
+  `change = end.net_worth − start.net_worth` (both are `Totals`
+  breakdowns), which equals the sum of the per-account changes.
+- **Values come from balance snapshots**, never positions (positions and
+  balance differ by ~0.1–0.3%, and one custodian's price never moves).
+- **Gain net of contributions** (investment accounts) = change −
+  contributions. No non-cash positions at start and end → `gain_reason:
+  cash` (all of its change is Added). Measurable only if every non-cash
+  position's quantity change equals the activity quantity for it, within
+  0.001 share (`QTY_TOLERANCE`; quantities are compared as 1e-8 integer
+  units, never floats); otherwise `contributions_unknown` and the account
+  is listed in `excluded`. Activity counts when dated after the start
+  snapshot's local day, through the end snapshot's day.
+- **Contributions**: cash contribution / deposit / withdrawal, a transfer
+  with cash, `buy/contribution` at its full cost, and share transfers at
+  quantity × the first recorded snapshot price on or after the transfer
+  date (no price → unknown). Dividends, reinvestment, interest and fees are
+  performance. `cancel` rows and the rows they cancel are skipped.
+- **Markets** = sum of measurable gains; **Added** = change − markets,
+  exactly. `added_includes_unmeasured` is set when `excluded` is non-empty:
+  their market move is then inside Added, and the UI must say so.
+- **Contributed series**: per day, `invested` (investment balances) and
+  `contributed` = invested on the first day + net contributions through
+  that day. `contributed_complete` is false when an account is excluded or
+  a contribution couldn't be valued.
+- **Activity lag**: Plaid can post investment activity days late, so the
+  current month can read `contributions_unknown` and later flip to
+  measurable. That's expected; nothing is estimated in between.
+
 ## Card-payment matching (`core/src/transfers.rs`)
 
 `detect_card_payments(accounts, txns, already_decided, opts)` pairs an outflow

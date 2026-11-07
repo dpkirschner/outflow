@@ -267,6 +267,97 @@
     "loans": 0,
     "other": 0
   },
+  "NetWorthChange": {
+    "start": {
+      "net_worth": 380000,
+      "cash": 240000,
+      "invested": 150000,
+      "uninvested": 30000,
+      "credit": -10000,
+      "loans": 0,
+      "other": 0
+    },
+    "end": {
+      "net_worth": 393905,
+      "cash": 250000,
+      "invested": 156250,
+      "uninvested": 31250,
+      "credit": -12345,
+      "loans": 0,
+      "other": 0
+    },
+    "start_at": 1768435200,
+    "end_at": 1771027200,
+    "partial_start": false,
+    "change": 13905,
+    "change_bp": 365,
+    "reason": null,
+    "markets": 3750,
+    "added": 10155,
+    "excluded": [
+      {
+        "account_id": "k401",
+        "account": "Demo k401 (0000)",
+        "change": 0
+      }
+    ],
+    "added_includes_unmeasured": true,
+    "accounts": [
+      {
+        "account_id": "brk",
+        "account": "Demo brk (0000)",
+        "group": "investments",
+        "start": 150000,
+        "end": 156250,
+        "start_at": 1768435200,
+        "end_at": 1771027200,
+        "partial_start": false,
+        "change": 6250,
+        "change_reason": null,
+        "contributions": 2500,
+        "gain": 3750,
+        "gain_reason": null
+      },
+      {
+        "account_id": "k401",
+        "account": "Demo k401 (0000)",
+        "group": "investments",
+        "start": 0,
+        "end": 0,
+        "start_at": 1768435200,
+        "end_at": 1771027200,
+        "partial_start": false,
+        "change": 0,
+        "change_reason": null,
+        "contributions": null,
+        "gain": null,
+        "gain_reason": "contributions_unknown"
+      },
+      {
+        "account_id": "chk",
+        "account": "Demo chk (0000)",
+        "group": "cash",
+        "start": 250000,
+        "end": 250000,
+        "start_at": 1768435200,
+        "end_at": 1771027200,
+        "partial_start": false,
+        "change": null,
+        "change_reason": "one_snapshot",
+        "contributions": null,
+        "gain": null,
+        "gain_reason": null
+      }
+    ],
+    "contributed": [
+      {
+        "day": "2026-01-15",
+        "invested": 156250,
+        "contributed": 152500
+      }
+    ],
+    "contributed_complete": false
+  },
   "PositionRow": {
     "account_id": "acct-demo-brokerage",
     "account": "Demo Brokerage (2222)",

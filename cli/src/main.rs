@@ -2,10 +2,10 @@ use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
     account_display_label, activity, balance_history, evaluate_perks, flow_lanes, load_offers,
-    parse_fixture, position_history, positions, search_transactions, spend_by_category,
-    summarize_balances, today_local, top_merchants, ActivityFilter, Cap, CategorySource, Direction,
-    FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions, PositionFilter, Reward,
-    SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    net_worth_change, parse_fixture, position_history, positions, search_transactions,
+    spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
+    CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions,
+    PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
@@ -178,6 +178,13 @@ pub(crate) enum Cmd {
         #[arg(long)]
         history: bool,
         /// With --history: the day range.
+        #[command(flatten)]
+        period: PeriodArgs,
+    },
+    /// Net worth change over a period (default this month), split into
+    /// Markets (gain net of contributions on measurable investment accounts)
+    /// + Added (everything else), with per-account change and gain.
+    Change {
         #[command(flatten)]
         period: PeriodArgs,
     },
@@ -936,6 +943,114 @@ fn breakdown_line(t: &outflow_core::Totals) -> String {
     line + &format!("  = net worth {}", dollars(t.net_worth.cents()))
 }
 
+/// `change`'s range: the one given, else this month.
+pub(crate) fn change_period(p: &PeriodArgs, today: NaiveDate) -> Result<Period, String> {
+    match p.resolve_at(today)? {
+        Some(period) => Ok(period),
+        None => Period::parse("this-month", today).map_err(|e| e.to_string()),
+    }
+}
+
+/// `+$1.00` / `-$1.00`: a change always carries its sign.
+fn signed(cents: i64) -> String {
+    let sign = if cents < 0 { '-' } else { '+' };
+    format!("{sign}{}", dollars(cents.abs()))
+}
+
+fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), String> {
+    use outflow_core::{ChangeReason, GainReason};
+    let p = change_period(period, today_local())?;
+    let (since, until) = p.bounds();
+    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
+    let securities = store.securities().map_err(|e| format!("{e}"))?;
+    let balances = store
+        .balance_snapshots(None, Some(until))
+        .map_err(|e| format!("{e}"))?;
+    let holdings = store
+        .holding_snapshots(None, None)
+        .map_err(|e| format!("{e}"))?;
+    let activity = store.investment_txns().map_err(|e| format!("{e}"))?;
+    let c = net_worth_change(
+        &accounts,
+        &securities,
+        &balances,
+        &holdings,
+        &activity,
+        Some(since),
+        Some(until),
+    );
+    if json {
+        return json_out(&c);
+    }
+    println!("{p}  ({} to {})", p.start, p.last_day());
+    let Some(change) = c.change else {
+        let why = match c.reason {
+            Some(ChangeReason::NoSnapshots) => "no snapshots in this period",
+            _ => "only one snapshot in this period",
+        };
+        println!("no change: {why}");
+        return Ok(());
+    };
+    println!(
+        "net worth {} -> {}   change {}{}{}",
+        dollars(c.start.net_worth.cents()),
+        dollars(c.end.net_worth.cents()),
+        signed(change.cents()),
+        c.change_bp
+            .map(|bp| format!(" ({}{})", if bp > 0 { "+" } else { "" }, pct(bp)))
+            .unwrap_or_default(),
+        if c.partial_start {
+            "   (partial start: some accounts begin mid-period)"
+        } else {
+            ""
+        }
+    );
+    if let (Some(m), Some(a)) = (c.markets, c.added) {
+        println!(
+            "  markets {}   added {}",
+            signed(m.cents()),
+            signed(a.cents())
+        );
+    }
+    if c.added_includes_unmeasured {
+        let names: Vec<&str> = c.excluded.iter().map(|x| x.account.as_str()).collect();
+        println!(
+            "  added includes the change in unmeasured accounts (contributions unknown): {}",
+            names.join(", ")
+        );
+    }
+    println!(
+        "\n  {:<40} {:>14} {:>14} {:>13} {:>13}",
+        "account", "start", "end", "change", "gain"
+    );
+    for a in &c.accounts {
+        let change = a
+            .change
+            .map(|m| signed(m.cents()))
+            .unwrap_or_else(|| "-".into());
+        let gain = match (a.gain, a.gain_reason) {
+            (Some(g), _) => signed(g.cents()),
+            (None, Some(GainReason::Cash)) => "cash".into(),
+            (None, Some(GainReason::ContributionsUnknown)) => "unknown".into(),
+            (None, None) => String::new(),
+        };
+        println!(
+            "  {:<40} {:>14} {:>14} {:>13} {:>13}{}",
+            truncate(&a.account, 40),
+            dollars(a.start.cents()),
+            dollars(a.end.cents()),
+            change,
+            gain,
+            if a.partial_start {
+                "  (from first snapshot)"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(())
+}
+
 fn cmd_balances(
     store: &Store,
     history: bool,
@@ -1244,6 +1359,7 @@ fn run() -> Result<(), String> {
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),
+        Cmd::Change { period } => cmd_change(&store, &period, cli.json),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),

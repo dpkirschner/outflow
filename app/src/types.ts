@@ -604,6 +604,141 @@ export type ActivityRow = {
 };
 
 /**
+ * Why a change is missing.
+ */
+export type ChangeReason = "no_snapshots" | "one_snapshot";
+
+/**
+ * Why an investment account has no gain.
+ */
+export type GainReason = "cash" | "contributions_unknown";
+
+export type AccountChange = {
+  account_id: string,
+  /**
+   * Nickname-aware display label.
+   */
+  account: string,
+  group: BalanceGroup,
+  /**
+   * Balance at the start snapshot (counted in `NetWorthChange::start`).
+   */
+  start: number,
+  /**
+   * Balance at the end snapshot (counted in `NetWorthChange::end`).
+   */
+  end: number,
+  /**
+   * Epoch seconds of the start / end snapshots.
+   */
+  start_at: number,
+  end_at: number,
+  /**
+   * Start is the first snapshot inside the period, not one before it.
+   */
+  partial_start: boolean,
+  /**
+   * `end - start`; None with `change_reason` when start is end.
+   */
+  change: number | null,
+  change_reason: ChangeReason | null,
+  /**
+   * Investment accounts: net external money in (withdrawals negative),
+   * None when a share transfer has no recorded price.
+   */
+  contributions: number | null,
+  /**
+   * Investment accounts: gain net of contributions = change -
+   * contributions. None with `gain_reason`.
+   */
+  gain: number | null,
+  gain_reason: GainReason | null,
+};
+
+/**
+ * An investment account left out of Markets; its change lands in Added.
+ */
+export type ExcludedAccount = {
+  account_id: string,
+  account: string,
+  change: number,
+};
+
+/**
+ * One day of the Invested vs contributed chart.
+ */
+export type ContributedPoint = {
+  /**
+   * Local `YYYY-MM-DD`.
+   */
+  day: string,
+  /**
+   * Investment account balances that day.
+   */
+  invested: number,
+  /**
+   * Invested on the first day plus net contributions through this day.
+   * The gap to `invested` is market gain.
+   */
+  contributed: number,
+};
+
+export type NetWorthChange = {
+  /**
+   * The breakdown at each account's start / end snapshot.
+   */
+  start: Totals,
+  end: Totals,
+  /**
+   * Earliest start snapshot / latest end snapshot, epoch seconds.
+   */
+  start_at: number | null,
+  end_at: number | null,
+  /**
+   * Some account starts at its first snapshot inside the period.
+   */
+  partial_start: boolean,
+  /**
+   * `end.net_worth - start.net_worth`; None with `reason`.
+   */
+  change: number | null,
+  /**
+   * Change as a share of the starting net worth, basis points; None when
+   * that is not positive.
+   */
+  change_bp: number | null,
+  reason: ChangeReason | null,
+  /**
+   * Sum of measurable investment accounts' gain.
+   */
+  markets: number | null,
+  /**
+   * `change - markets`, exactly: saved from income minus spending, plus
+   * every unmeasured account's change.
+   */
+  added: number | null,
+  /**
+   * Investment accounts whose gain is unknown, named.
+   */
+  excluded: Array<ExcludedAccount>,
+  /**
+   * True when `excluded` is non-empty: Added then includes their market
+   * move, and the hero must say so.
+   */
+  added_includes_unmeasured: boolean,
+  /**
+   * Accounts with at least one snapshot, in input order.
+   */
+  accounts: Array<AccountChange>,
+  contributed: Array<ContributedPoint>,
+  /**
+   * False when some contribution couldn't be valued or some account is
+   * excluded (its unrecorded contributions are missing from the line).
+   */
+  contributed_complete: boolean,
+};
+
+/**
  * What an offer pays. Cash rewards are exact cents; points are Membership
  * Rewards-style points and are never converted to dollars.
  */

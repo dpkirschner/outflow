@@ -49,6 +49,9 @@ vs spending; file from `--file`/`OUTFLOW_PERKS`),
 cash + invested − credit − loans = net worth, brokerage cash shown as
 "incl. $X uninvested"; daily trend of the same breakdown from per-sync
 snapshots),
+`change [--period P | --since D --until D]` (net worth change, default this
+month: Markets = gain net of contributions on measurable investment accounts,
+Added = the rest, unmeasured accounts named; per-account change + gain),
 `holdings [--account A --ticker T]
 [--history [--period P | --since D --until D]]` (flat per-position
 rows: qty, price + as-of, close price, basis, unit cost, gain; an

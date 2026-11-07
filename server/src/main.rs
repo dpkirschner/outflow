@@ -6,6 +6,8 @@
 //! Headless posture: all config and secrets resolve from env / 0600 files —
 //! never the keychain (locked without a GUI session) and never the DB.
 
+#[cfg(test)]
+mod contract;
 mod match_routes;
 mod perks_routes;
 mod plaid_routes;

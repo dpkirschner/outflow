@@ -116,8 +116,9 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
 - **Frontend** (`app/src/`) — four screens, one URL each (`route.ts`, a
   small hand-rolled path router): `/ledger` the **rhythm ledger**
   (`components/ledger/*`), `/flow` (month strip, earned − spent next to
-  saved, the In / Out / Moved lanes and the month's transaction table,
-  `components/Flow.tsx`), `/balances`
+  saved, the In / Out / Moved lanes and the month's transaction table;
+  each figure is a button that drills the table into its rows via the
+  core `lane` filter, `components/Flow.tsx`), `/balances`
   (`components/Balances.tsx`), and `/settings` (Connections, card-payment
   review, categorize, reset; `components/Settings.tsx`). `/` and unknown
   paths redirect to `/ledger`; `/oauth-return` shows Settings and is

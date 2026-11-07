@@ -1177,6 +1177,12 @@ body:has(.lg-app) {
 .fl-month.on .fl-mout {
   color: var(--lg-text);
 }
+.fl-msofar {
+  margin-top: -2px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lg-amber);
+}
 
 /* month title + headline pair */
 .fl-title {
@@ -1270,8 +1276,16 @@ body:has(.lg-app) {
   color: var(--lg-dim);
 }
 .fl-rows {
+  list-style: none;
   margin: 6px 0 0;
+  padding: 0;
   border-top: 1px solid var(--lg-line);
+}
+.fl-rows > li {
+  border-bottom: 1px solid #172230;
+}
+.fl-rows > li:last-child {
+  border-bottom: 0;
 }
 .fl-row {
   display: flex;
@@ -1279,24 +1293,73 @@ body:has(.lg-app) {
   align-items: baseline;
   gap: 12px;
   padding: 7px 0;
-  border-bottom: 1px solid #172230;
   font-size: 13px;
 }
-.fl-row:last-child {
-  border-bottom: 0;
-}
-.fl-row dt {
+.fl-row-label {
   min-width: 0;
   overflow-wrap: anywhere;
+  text-align: left;
 }
-.fl-row dd {
-  margin: 0;
+.fl-row-value {
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
 }
 .fl-row.quiet {
   color: var(--lg-dim);
+}
+
+/* Drill-down targets. A figure with rows behind it is a button; the
+   selected one gets a 2px ring and the selected fill (shape and fill, not
+   hue alone), plus aria-pressed. */
+.fl-pick {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  /* family only: the size and weight come from .fl-row / .fl-lane-figure */
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px transparent;
+}
+.fl-pick:hover {
+  background: #0e1620;
+  box-shadow: inset 0 0 0 1px var(--lg-line);
+}
+.fl-pick.on {
+  background: #1c2c40;
+  box-shadow: inset 0 0 0 2px var(--lg-teal);
+}
+/* Row buttons bleed into the lane's padding so the text stays aligned with
+   the plain rows while the hit area spans the full line. */
+button.fl-row {
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  padding: 7px 8px;
+}
+button.fl-lane-figure {
+  align-self: flex-start;
+  margin: 0 -8px;
+  padding: 0 8px;
+  line-height: 1.5;
+  text-align: left;
+}
+.fl-row-split {
+  align-items: center;
+  padding: 3px 0;
+}
+.fl-sides {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 0;
+  margin-right: -8px;
+}
+.fl-amt-pick {
+  padding: 4px 8px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .fl-sub {
   display: block;
@@ -1372,8 +1435,62 @@ body:has(.lg-app) {
   margin: 0;
   font-size: 12px;
   color: var(--lg-dim);
+  max-width: 75ch;
+}
+.fl-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px 3px 12px;
+  background: #1c2c40;
+  border: 1px solid #2b415c;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.fl-chip-clear {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 999px;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.fl-chip-clear:hover {
+  color: var(--lg-text);
+  border-color: var(--lg-dim);
+}
+.fl-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fl-table .fl-group th,
+.fl-table .fl-group td {
+  padding-top: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lg-text);
+  border-bottom: 1px solid var(--lg-line);
+}
+.fl-table tbody tr.fl-group:hover {
+  background: transparent;
+}
+.fl-group-count {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--lg-dim);
+}
+.fl-group-empty {
+  color: var(--lg-dim);
+  font-size: 12px;
 }
 .fl-total b {
+  white-space: nowrap;
   color: var(--lg-text);
   font-variant-numeric: tabular-nums;
 }

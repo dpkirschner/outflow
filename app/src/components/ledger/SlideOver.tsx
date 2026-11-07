@@ -35,7 +35,17 @@ export function StreamSlideOver({
   onEdited: () => void;
   notify: (m: ToastMsg) => void;
 }) {
-  const [occ, setOcc] = useState<Transaction[]>([]);
+  // Occurrences tagged with the stream + window they were fetched for. Until
+  // they match the open stream they read as empty, so a stale list from the
+  // previous stream is never shown or acted on (ho-bv6.9: "Flag as transfer"
+  // used occ[0] and could flag — and learn a rule for — the wrong merchant).
+  const [loadedOcc, setLoadedOcc] = useState<{ key: string; txns: Transaction[] }>({
+    key: "",
+    txns: [],
+  });
+  const occKey = stream ? `${stream.merchant}|${win}` : "";
+  const occLoaded = loadedOcc.key === occKey;
+  const occ = occLoaded ? loadedOcc.txns : [];
   const [learn, setLearn] = useState(true);
   const [menu, setMenu] = useState<string | null>(null); // txn id with an open ⋯ menu
   const [catFor, setCatFor] = useState<string | null>(null); // txn id in categorize mode
@@ -53,10 +63,11 @@ export function StreamSlideOver({
     setMenu(null);
     setCatFor(null);
     let live = true;
+    const key = `${stream.merchant}|${win}`;
     api
       .streamOccurrences(stream.merchant, win)
-      .then((t) => live && setOcc(t))
-      .catch((err) => notify({ kind: "err", text: String(err) }));
+      .then((t) => live && setLoadedOcc({ key, txns: t }))
+      .catch((err) => live && notify({ kind: "err", text: String(err) }));
     return () => {
       live = false;
     };
@@ -73,7 +84,12 @@ export function StreamSlideOver({
     return <div className="lg-scrim" onClick={onClose} />;
   }
 
-  const refetchOcc = () => api.streamOccurrences(stream.merchant, win).then(setOcc);
+  const refetchOcc = () => {
+    const key = occKey;
+    return api
+      .streamOccurrences(stream.merchant, win)
+      .then((t) => setLoadedOcc({ key, txns: t }));
+  };
 
   // Run an edit, refresh occurrences + the ledger behind the panel.
   const run = async (fn: () => Promise<unknown>, ok: string, close = false) => {
@@ -93,7 +109,7 @@ export function StreamSlideOver({
 
   // Stream-level: flag the whole merchant (learn always on).
   const flagStream = () => {
-    if (occ.length === 0) return;
+    if (!occLoaded || occ.length === 0) return;
     run(
       () => api.setFlag(occ[0].id, "Transfer", true).then(() => api.applyFlags()),
       `Flagged “${stream.merchant}” as a transfer`,
@@ -192,7 +208,7 @@ export function StreamSlideOver({
                 <span className="hint">hide from the hunt</span>
               </button>
             )}
-            <button className="lg-act" disabled={working} onClick={flagStream}>
+            <button className="lg-act" disabled={working || !occLoaded} onClick={flagStream}>
               <span className="ic">⇄</span>
               <span className="grow">Flag as Transfer</span>
               <span className="hint">not spending</span>

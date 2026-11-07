@@ -121,6 +121,9 @@ data integrity or the domain contract — treat them as load-bearing.
 16. **One cash rule: `balances::account_cash`.** Checking/savings are all cash;
     an investment account's cash is its cash-equivalent holdings (Plaid
     `is_cash_equivalent` or `type: cash`, e.g. VMFXX) plus any balance the
-    holdings don't cover (so a holdings-less HSA is 100% cash); credit/other
-    hold none. Snapshots, the Balances view and the CLI all call it — don't
-    compute cash anywhere else. (`core/src/balances.rs`)
+    holdings don't cover (so a holdings-less HSA is 100% cash); credit, loan
+    and other accounts hold none. Snapshots, the Balances view and the CLI all
+    call it — don't compute cash anywhere else. The breakdown (`Totals`) sums
+    to net worth exactly: `cash + invested + credit + loans + other`, with an
+    investment account's cash under `invested` (broken out as `uninvested`),
+    never under `cash`. (`core/src/balances.rs`)

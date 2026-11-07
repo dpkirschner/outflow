@@ -45,7 +45,10 @@ ending with P's last month: cadence, usual monthly cost, new / up / down >25%),
 `perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
 vs spending; file from `--file`/`OUTFLOW_PERKS`),
 `balances [--history [--period P | --since D --until D]]`
-(current state incl. holdings + idle cash; daily trend from per-sync snapshots),
+(current state incl. holdings + idle cash, led by the signed breakdown
+cash + invested − credit − loans = net worth, brokerage cash shown as
+"incl. $X uninvested"; daily trend of the same breakdown from per-sync
+snapshots),
 `holdings [--account A --ticker T]
 [--history [--period P | --since D --until D]]` (flat per-position
 rows: qty, price + as-of, close price, basis, unit cost, gain; an
@@ -166,7 +169,8 @@ Violating these breaks data integrity or the domain contract:
    types with explicit validation; malformed data returns `SourceError`, never
    leaks defaults (`plaid::parse_sync_page`, `plaid::parse_fixture`).
    Plaid sign conventions flip at this boundary: amounts negate (Plaid
-   positive = money out), credit balances negate (positive-owed → negative).
+   positive = money out), credit and loan balances negate (positive-owed →
+   negative).
 6. **Secrets never touch the DB or argv** — env or a 0600 file only (no
    keychain path; launchd has no unlocked GUI keychain). Plaid access tokens
    live in the 0600 tokens file keyed by item_id; only non-secret item metadata

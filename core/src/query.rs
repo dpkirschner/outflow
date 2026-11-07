@@ -331,8 +331,8 @@ pub fn top_merchants(
 /// TRANSFER_IN that the user re-flagged as Spending (a deposit they said is not
 /// a move). Refund: any other Plaid category, netted against Out (GLOSSARY: a
 /// refund is not In). With no Plaid category, a cash-side deposit is In so an
-/// unknown deposit never silently shrinks Out, and a credit on a card is a
-/// refund (add loans here when the loan kind lands, ho-2mj.4.1).
+/// unknown deposit never silently shrinks Out, and a credit on a card or a
+/// loan is a refund.
 fn is_refund(t: &Transaction, kind: AccountKind) -> bool {
     if t.amount.is_outflow() {
         return false;
@@ -340,7 +340,7 @@ fn is_refund(t: &Transaction, kind: AccountKind) -> bool {
     match t.pfc_primary.as_deref() {
         Some("INCOME") | Some("TRANSFER_IN") => false,
         Some(_) => true,
-        None => kind == AccountKind::Credit,
+        None => matches!(kind, AccountKind::Credit | AccountKind::Loan),
     }
 }
 
@@ -939,6 +939,17 @@ mod tests {
         assert_eq!(total(Some("Groceries")), Some(8000));
         assert_eq!(total(None), Some(-3500));
         assert_eq!(cats.iter().map(|c| c.total_cents).sum::<i64>(), m.out_cents);
+    }
+
+    /// With no Plaid category, a credit on a loan is a refund like a card
+    /// credit, not In (synthetic row).
+    #[test]
+    fn uncategorized_loan_credit_is_a_refund() {
+        use crate::model::AccountKind::{Checking, Loan, Other};
+        let x = t("adj", JAN15, 2500, "adj", None, false);
+        assert!(is_refund(&x, Loan));
+        assert!(!is_refund(&x, Checking));
+        assert!(!is_refund(&x, Other));
     }
 
     #[test]

@@ -55,6 +55,7 @@ fn plaid_kind(kind: &str, subtype: Option<&str>) -> AccountKind {
     match kind {
         "credit" => AccountKind::Credit,
         "investment" => AccountKind::Investment,
+        "loan" => AccountKind::Loan,
         "depository" => match subtype.unwrap_or("") {
             "checking" | "cash management" | "paypal" | "prepaid" => AccountKind::Checking,
             "hsa" => AccountKind::Investment,
@@ -201,8 +202,9 @@ pub fn parse_accounts_get(
             Some(n) => parse_amount(n, &id, "balance")?,
             None => Money::from_cents(0),
         };
-        // Plaid credit balances are positive-owed; domain stores them negative.
-        if kind == AccountKind::Credit {
+        // Plaid credit and loan balances are positive-owed; domain stores
+        // them negative.
+        if matches!(kind, AccountKind::Credit | AccountKind::Loan) {
             balance = Money::from_cents(-balance.cents());
         }
         let currency = balances
@@ -1125,7 +1127,19 @@ mod tests {
             plaid_kind("investment", Some("hsa")),
             AccountKind::Investment
         );
-        assert_eq!(plaid_kind("loan", Some("mortgage")), AccountKind::Other);
+        assert_eq!(plaid_kind("loan", Some("mortgage")), AccountKind::Loan);
+        assert_eq!(plaid_kind("brokerage?", None), AccountKind::Other);
+    }
+
+    #[test]
+    fn loan_parses_as_loan_with_balance_owed_negative() {
+        // Synthetic loan account, Plaid shape: balance is positive-owed.
+        let json = r#"{"accounts":[{"account_id":"loan-1","name":"Auto Loan",
+            "mask":"0000","type":"loan","subtype":"auto",
+            "balances":{"current":12400.00,"iso_currency_code":"USD"}}]}"#;
+        let accounts = parse_accounts_get(json, "Demo Bank", 0).unwrap();
+        assert_eq!(accounts[0].kind, AccountKind::Loan);
+        assert_eq!(accounts[0].balance.cents(), -12_400_00);
     }
 
     #[test]

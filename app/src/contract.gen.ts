@@ -202,9 +202,12 @@ export const recurringView: RecurringView = {
 export const balancesView: BalancesView = {
   "totals": {
     "net_worth": 393905,
-    "cash": 281250,
-    "invested": 125000,
-    "credit": -12345
+    "cash": 250000,
+    "invested": 156250,
+    "uninvested": 31250,
+    "credit": -12345,
+    "loans": 0,
+    "other": 0
   },
   "groups": [
     {
@@ -292,9 +295,12 @@ export const balancesView: BalancesView = {
 export const dayTotals: DayTotals = {
   "day": "2026-01-15",
   "net_worth": 393905,
-  "cash": 281250,
-  "invested": 125000,
-  "credit": -12345
+  "cash": 250000,
+  "invested": 156250,
+  "uninvested": 31250,
+  "credit": -12345,
+  "loans": 0,
+  "other": 0
 };
 
 export const positionRow: PositionRow = {

@@ -9,6 +9,9 @@ pub enum AccountKind {
     Credit,
     /// Brokerage / IRA / 401(k) / investment HSA — Plaid `type: investment`.
     Investment,
+    /// Mortgage / student / auto / personal loan — Plaid `type: loan`.
+    /// Balance negative = owed, like `Credit`.
+    Loan,
     Other,
 }
 
@@ -19,6 +22,7 @@ impl AccountKind {
             AccountKind::Savings => "savings",
             AccountKind::Credit => "credit",
             AccountKind::Investment => "investment",
+            AccountKind::Loan => "loan",
             AccountKind::Other => "other",
         }
     }
@@ -31,6 +35,7 @@ impl AccountKind {
             "savings" => AccountKind::Savings,
             "credit" => AccountKind::Credit,
             "investment" => AccountKind::Investment,
+            "loan" => AccountKind::Loan,
             _ => AccountKind::Other,
         }
     }

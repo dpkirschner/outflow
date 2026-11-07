@@ -6,7 +6,14 @@
 //! are all cash; an investment account's cash is its cash-equivalent holdings
 //! (money-market funds like VMFXX, `type: cash` sweeps) plus any balance the
 //! holdings don't account for (uninvested cash — an HSA with no positions is
-//! therefore 100% cash). Credit and other accounts hold no cash.
+//! therefore 100% cash). Credit, loan and other accounts hold no cash.
+//!
+//! The breakdown (`Totals`) is one signed sum, exact to the cent:
+//! `cash + invested + credit + loans + other == net_worth`. Each figure is
+//! the total of the group of the same name, so a screen can show the groups
+//! and the breakdown side by side and they agree. Brokerage cash counts under
+//! `invested` (it's money meant to be invested) and is broken out as
+//! `uninvested`, a part of `invested`, not a sixth term.
 
 use crate::model::{
     account_display_label, Account, AccountKind, BalanceSnapshot, Holding, HoldingSnapshot,
@@ -32,6 +39,7 @@ pub enum Group {
     Cash,
     Investments,
     Credit,
+    Loans,
     Other,
 }
 
@@ -41,6 +49,7 @@ impl Group {
             AccountKind::Checking | AccountKind::Savings => Group::Cash,
             AccountKind::Investment => Group::Investments,
             AccountKind::Credit => Group::Credit,
+            AccountKind::Loan => Group::Loans,
             AccountKind::Other => Group::Other,
         }
     }
@@ -90,22 +99,53 @@ pub struct GroupBalance {
     pub accounts: Vec<AccountBalance>,
 }
 
+/// The signed breakdown: `cash + invested + credit + loans + other ==
+/// net_worth`, exactly. Each figure equals its group's total.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Totals {
     /// Sum of every balance (credit and loans count negative).
     pub net_worth: Money,
+    /// Checking + savings balances.
     pub cash: Money,
+    /// Investment account balances, their cash included.
     pub invested: Money,
-    /// Sum of credit balances (negative = owed).
+    /// The part of `invested` held as cash (money-market funds, sweeps,
+    /// balance no position covers): `account_cash` over investment accounts.
+    pub uninvested: Money,
+    /// Credit card balances (negative = owed).
     pub credit: Money,
+    /// Loan balances (negative = owed).
+    pub loans: Money,
+    /// Accounts of no known kind; usually 0.
+    pub other: Money,
+}
+
+impl Totals {
+    /// Add one account: `cash` is its `account_cash`.
+    fn add(&mut self, group: Group, balance: Money, cash: Money) {
+        let plus = |m: &mut Money, c: i64| *m = Money::from_cents(m.cents() + c);
+        let b = balance.cents();
+        plus(&mut self.net_worth, b);
+        match group {
+            Group::Cash => plus(&mut self.cash, b),
+            Group::Investments => {
+                plus(&mut self.invested, b);
+                plus(&mut self.uninvested, cash.cents());
+            }
+            Group::Credit => plus(&mut self.credit, b),
+            Group::Loans => plus(&mut self.loans, b),
+            Group::Other => plus(&mut self.other, b),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BalancesView {
     pub totals: Totals,
-    /// In display order: cash, investments, credit, other; empty groups omitted.
+    /// In display order: cash, investments, credit, loans, other; empty
+    /// groups omitted.
     pub groups: Vec<GroupBalance>,
 }
 
@@ -132,7 +172,7 @@ pub fn account_cash(
             let uninvested = (balance.cents() - held).max(0);
             Money::from_cents(cash_held + uninvested)
         }
-        AccountKind::Credit | AccountKind::Other => Money::from_cents(0),
+        AccountKind::Credit | AccountKind::Loan | AccountKind::Other => Money::from_cents(0),
     }
 }
 
@@ -214,12 +254,7 @@ pub fn summarize(
             .collect();
         rows.sort_by_key(|r| std::cmp::Reverse(r.value.cents()));
 
-        totals.net_worth = Money::from_cents(totals.net_worth.cents() + a.balance.cents());
-        totals.cash = Money::from_cents(totals.cash.cents() + cash.cents());
-        totals.invested = Money::from_cents(totals.invested.cents() + invested.cents());
-        if group == Group::Credit {
-            totals.credit = Money::from_cents(totals.credit.cents() + a.balance.cents());
-        }
+        totals.add(group, a.balance, cash);
 
         let g = groups.entry(group as u8).or_insert_with(|| GroupBalance {
             group,
@@ -541,7 +576,8 @@ pub fn position_history(
     out
 }
 
-/// One calendar day of the trend (local time).
+/// One calendar day of the trend (local time): the same breakdown as
+/// `Totals`, from that day's snapshots.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DayTotals {
@@ -550,7 +586,10 @@ pub struct DayTotals {
     pub net_worth: Money,
     pub cash: Money,
     pub invested: Money,
+    pub uninvested: Money,
     pub credit: Money,
+    pub loans: Money,
+    pub other: Money,
 }
 
 fn local_day(ts: i64) -> Option<NaiveDate> {
@@ -592,26 +631,17 @@ pub fn history(
         }
         let mut t = Totals::default();
         for s in latest.values() {
-            let kind = kinds[&s.account_id];
-            t.net_worth = Money::from_cents(t.net_worth.cents() + s.balance.cents());
-            t.cash = Money::from_cents(t.cash.cents() + s.cash.cents());
-            match kind {
-                AccountKind::Investment => {
-                    t.invested =
-                        Money::from_cents(t.invested.cents() + s.balance.cents() - s.cash.cents())
-                }
-                AccountKind::Credit => {
-                    t.credit = Money::from_cents(t.credit.cents() + s.balance.cents())
-                }
-                _ => {}
-            }
+            t.add(Group::of(kinds[&s.account_id]), s.balance, s.cash);
         }
         out.push(DayTotals {
             day: day.format("%Y-%m-%d").to_string(),
             net_worth: t.net_worth,
             cash: t.cash,
             invested: t.invested,
+            uninvested: t.uninvested,
             credit: t.credit,
+            loans: t.loans,
+            other: t.other,
         });
         day = match day.checked_add_days(Days::new(1)) {
             Some(d) => d,
@@ -763,11 +793,111 @@ mod tests {
         let secs = [sec("vti", Some("VTI"), false)];
         let v = summarize(&accts, &secs, &[hold("ira", "vti", 9_000_00, None)]);
         assert_eq!(v.totals.net_worth.cents(), 11_500_00);
-        assert_eq!(v.totals.cash.cents(), 3_000_00);
-        assert_eq!(v.totals.invested.cents(), 9_000_00);
+        assert_eq!(v.totals.cash.cents(), 2_000_00); // checking only
+        assert_eq!(v.totals.invested.cents(), 10_000_00); // its cash included
+        assert_eq!(v.totals.uninvested.cents(), 1_000_00);
         assert_eq!(v.totals.credit.cents(), -500_00);
         let order: Vec<Group> = v.groups.iter().map(|g| g.group).collect();
         assert_eq!(order, [Group::Cash, Group::Investments, Group::Credit]);
+    }
+
+    /// The ho-bv6.15 repro (synthetic): the old tiles summed to 141,260
+    /// against a 128,860 net worth — brokerage cash sat in Cash and the
+    /// loan had no figure.
+    fn bv615() -> BalancesView {
+        let accts = [
+            acct("chk", AccountKind::Checking, 320_00),
+            acct("brk", AccountKind::Investment, 141_350_00),
+            acct("card", AccountKind::Credit, -410_00),
+            acct("auto", AccountKind::Loan, -12_400_00),
+        ];
+        let secs = [sec("vti", Some("VTI"), false)];
+        summarize(&accts, &secs, &[hold("brk", "vti", 134_928_00, None)])
+    }
+
+    fn breakdown_sum(t: &Totals) -> i64 {
+        t.cash.cents() + t.invested.cents() + t.credit.cents() + t.loans.cents() + t.other.cents()
+    }
+
+    #[test]
+    fn breakdown_sums_to_net_worth_with_loan_and_brokerage_cash() {
+        let t = bv615().totals;
+        assert_eq!(t.net_worth.cents(), 128_860_00);
+        assert_eq!(t.cash.cents(), 320_00);
+        assert_eq!(t.invested.cents(), 141_350_00);
+        assert_eq!(t.uninvested.cents(), 6_422_00);
+        assert_eq!(t.credit.cents(), -410_00);
+        assert_eq!(t.loans.cents(), -12_400_00);
+        assert_eq!(t.other.cents(), 0);
+        assert_eq!(breakdown_sum(&t), t.net_worth.cents());
+    }
+
+    #[test]
+    fn group_totals_match_the_breakdown() {
+        let mut accts = vec![
+            acct("chk", AccountKind::Checking, 320_00),
+            acct("sav", AccountKind::Savings, 5_000_00),
+            acct("brk", AccountKind::Investment, 1_000_00),
+            acct("card", AccountKind::Credit, -410_00),
+            acct("auto", AccountKind::Loan, -12_400_00),
+        ];
+        accts.push(acct("odd", AccountKind::Other, 77_00));
+        let v = summarize(&accts, &[], &[]);
+        let t = v.totals;
+        let total = |g: Group| {
+            v.groups
+                .iter()
+                .find(|x| x.group == g)
+                .unwrap()
+                .total
+                .cents()
+        };
+        assert_eq!(total(Group::Cash), t.cash.cents());
+        assert_eq!(total(Group::Investments), t.invested.cents());
+        assert_eq!(total(Group::Credit), t.credit.cents());
+        assert_eq!(total(Group::Loans), t.loans.cents());
+        assert_eq!(total(Group::Other), t.other.cents());
+        assert_eq!(breakdown_sum(&t), t.net_worth.cents());
+        let order: Vec<Group> = v.groups.iter().map(|g| g.group).collect();
+        assert_eq!(
+            order,
+            [
+                Group::Cash,
+                Group::Investments,
+                Group::Credit,
+                Group::Loans,
+                Group::Other
+            ]
+        );
+    }
+
+    #[test]
+    fn history_days_carry_the_same_breakdown() {
+        let kinds: HashMap<String, AccountKind> = [
+            ("chk".to_string(), AccountKind::Checking),
+            ("brk".to_string(), AccountKind::Investment),
+            ("card".to_string(), AccountKind::Credit),
+            ("auto".to_string(), AccountKind::Loan),
+        ]
+        .into();
+        let snaps = [
+            snap(noon(2026, 10, 1), "chk", 320_00, 320_00),
+            snap(noon(2026, 10, 1), "brk", 141_350_00, 6_422_00),
+            snap(noon(2026, 10, 1), "card", -410_00, 0),
+            snap(noon(2026, 10, 1), "auto", -12_400_00, 0),
+        ];
+        let d = &history(&snaps, &kinds)[0];
+        assert_eq!(d.net_worth.cents(), 128_860_00);
+        assert_eq!(d.cash.cents(), 320_00);
+        assert_eq!(d.invested.cents(), 141_350_00);
+        assert_eq!(d.uninvested.cents(), 6_422_00);
+        assert_eq!(d.loans.cents(), -12_400_00);
+        let sum = d.cash.cents()
+            + d.invested.cents()
+            + d.credit.cents()
+            + d.loans.cents()
+            + d.other.cents();
+        assert_eq!(sum, d.net_worth.cents());
     }
 
     fn snap(ts: i64, id: &str, bal: i64, cash: i64) -> BalanceSnapshot {
@@ -806,7 +936,8 @@ mod tests {
         let days: Vec<&str> = h.iter().map(|d| d.day.as_str()).collect();
         assert_eq!(days, ["2026-10-01", "2026-10-02", "2026-10-03"]);
         assert_eq!(h[0].net_worth.cents(), 1_150_00);
-        assert_eq!(h[0].invested.cents(), 990_00);
+        assert_eq!(h[0].invested.cents(), 1_000_00);
+        assert_eq!(h[0].uninvested.cents(), 10_00);
         assert_eq!(
             h[1],
             DayTotals {
@@ -815,7 +946,7 @@ mod tests {
             }
         );
         assert_eq!(h[2].net_worth.cents(), 1_200_00);
-        assert_eq!(h[2].cash.cents(), 210_00);
+        assert_eq!(h[2].cash.cents(), 200_00);
         assert!(history(&[], &kinds).is_empty());
     }
 

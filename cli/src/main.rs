@@ -917,6 +917,25 @@ fn pct(bp: i64) -> String {
     format!("{sign}{}.{}%", bp / 100, (bp % 100) / 10)
 }
 
+/// The signed breakdown on one line, terms that are 0 left out (cash and
+/// invested always shown): `cash + invested - credit - loans = net worth`,
+/// owed amounts printed after a minus sign.
+fn breakdown_line(t: &outflow_core::Totals) -> String {
+    let mut line = format!("cash {}", dollars(t.cash.cents()));
+    line += &format!("  + invested {}", dollars(t.invested.cents()));
+    if t.uninvested.cents() != 0 {
+        line += &format!(" (incl. {} uninvested)", dollars(t.uninvested.cents()));
+    }
+    for (name, m) in [("credit", t.credit), ("loans", t.loans), ("other", t.other)] {
+        let c = m.cents();
+        if c != 0 {
+            let sign = if c < 0 { '-' } else { '+' };
+            line += &format!("  {sign} {name} {}", dollars(c.abs()));
+        }
+    }
+    line + &format!("  = net worth {}", dollars(t.net_worth.cents()))
+}
+
 fn cmd_balances(
     store: &Store,
     history: bool,
@@ -936,17 +955,20 @@ fn cmd_balances(
             return json_out(&days);
         }
         println!(
-            "{:<10} {:>15} {:>14} {:>15} {:>13}",
-            "day", "net worth", "cash", "invested", "credit"
+            "{:<10} {:>15} {:>14} {:>15} {:>14} {:>13} {:>14} {:>12}",
+            "day", "net worth", "cash", "invested", "uninvested", "credit", "loans", "other"
         );
         for d in &days {
             println!(
-                "{:<10} {:>15} {:>14} {:>15} {:>13}",
+                "{:<10} {:>15} {:>14} {:>15} {:>14} {:>13} {:>14} {:>12}",
                 d.day,
                 dollars(d.net_worth.cents()),
                 dollars(d.cash.cents()),
                 dollars(d.invested.cents()),
-                dollars(d.credit.cents())
+                dollars(d.uninvested.cents()),
+                dollars(d.credit.cents()),
+                dollars(d.loans.cents()),
+                dollars(d.other.cents())
             );
         }
         return Ok(());
@@ -957,14 +979,7 @@ fn cmd_balances(
     if json {
         return json_out(&view);
     }
-    let t = &view.totals;
-    println!(
-        "net worth {}   cash {}   invested {}   credit {}",
-        dollars(t.net_worth.cents()),
-        dollars(t.cash.cents()),
-        dollars(t.invested.cents()),
-        dollars(t.credit.cents())
-    );
+    println!("{}", breakdown_line(&view.totals));
     for g in &view.groups {
         println!("\n{:?}  {}", g.group, dollars(g.total.cents()));
         for a in &g.accounts {
@@ -1338,6 +1353,24 @@ mod tests {
             .resolve_at(today())
             .unwrap_err();
         assert!(e.contains("YYYY-MM-DD"), "{e}");
+    }
+
+    #[test]
+    #[allow(clippy::inconsistent_digit_grouping)] // dollars_cents literals
+    fn breakdown_line_sums_visibly() {
+        let m = Money::from_cents;
+        let t = outflow_core::Totals {
+            net_worth: m(128_860_00),
+            cash: m(320_00),
+            invested: m(141_350_00),
+            uninvested: m(6_422_00),
+            credit: m(-410_00),
+            loans: m(-12_400_00),
+            other: m(0),
+        };
+        let line = breakdown_line(&t);
+        assert!(line.starts_with("cash $320.00  + invested $141350.00 (incl. $6422.00 uninvested)"));
+        assert!(line.ends_with("- credit $410.00  - loans $12400.00  = net worth $128860.00"));
     }
 
     #[test]

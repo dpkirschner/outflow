@@ -1039,8 +1039,13 @@ mod tests {
         let (status, v) = get_json(app.clone(), "/balances").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(v["totals"]["net_worth"], 14_910_00);
-        assert_eq!(v["totals"]["cash"], 2_000_00 + 100_00 + 3_210_00);
+        // The breakdown: brokerage/HSA cash sits under invested, as uninvested.
+        assert_eq!(v["totals"]["cash"], 2_000_00);
+        assert_eq!(v["totals"]["invested"], 13_210_00);
+        assert_eq!(v["totals"]["uninvested"], 100_00 + 3_210_00);
         assert_eq!(v["totals"]["credit"], -300_00);
+        assert_eq!(v["totals"]["loans"], 0);
+        assert_eq!(v["totals"]["other"], 0);
         let groups: Vec<&str> = v["groups"]
             .as_array()
             .unwrap()

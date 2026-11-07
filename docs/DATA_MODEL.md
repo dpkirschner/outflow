@@ -16,12 +16,13 @@ every amount as integer cents. See `core/src/money.rs`, `core/src/plaid.rs`.
 ```rust
 Account { id, org, name, kind: AccountKind, balance: Money, currency,
           last_synced, source }        // source: provenance ("plaid")
-AccountKind = Checking | Savings | Credit | Investment | Other
-// Real Plaid type/subtype mapping — credit/* → Credit (balance negated: Plaid
-// reports positive-owed), depository/checking → Checking,
+AccountKind = Checking | Savings | Credit | Investment | Loan | Other
+// Real Plaid type/subtype mapping — credit/* → Credit and loan/* → Loan (both
+// balances negated: Plaid reports positive-owed), depository/checking → Checking,
 // depository/savings|cd|money market → Savings, investment/* → Investment
 // (IRA, 401k, brokerage), and every HSA (depository or investment) →
-// Investment so its cash reads as idle. Loans and unknowns → Other.
+// Investment so its cash reads as idle. Unknown types → Other. Kind is
+// rewritten on every sync, so a mapping change needs no data migration.
 
 Security { security_id, ticker: Option<String>, name, sec_type,
            is_cash }   // is_cash = Plaid is_cash_equivalent || type "cash"
@@ -30,6 +31,23 @@ Holding { account_id, security_id, quantity: String, price: String,
           // quantity/price are EXACT decimal text (4+ share decimals, sub-cent
           // prices); only value/cost_basis are money
 BalanceSnapshot { taken_at, account_id, balance: Money, cash: Money }
+```
+
+**The signed breakdown** (`balances::Totals`, also each `DayTotals` of the
+trend). Every account adds its balance to exactly one term, by kind:
+
+```
+cash (Checking+Savings) + invested (Investment) + credit (Credit)
+  + loans (Loan) + other (Other) == net_worth        // exact, to the cent
+uninvested = account_cash summed over Investment accounts  // a PART of invested
+```
+
+Credit and loans are negative when owed (the UI shows "− Credit owed $410").
+Each term equals the total of the balances group of the same name (`Group`:
+cash, investments, credit, loans, other), so groups and breakdown agree.
+Brokerage cash counts under invested, never under cash.
+
+```rust
 
 Transaction {
     id,               // provider transaction id — the dedup key (stored raw)
@@ -126,7 +144,7 @@ Column lists are positional
 
 3. **Boundary parsing.** External JSON → domain with explicit validation;
    malformed data returns `SourceError`, never leaks defaults. Plaid signs flip
-   here (amounts negate; credit balances negate). Plaid
+   here (amounts negate; credit and loan balances negate). Plaid
    `personal_finance_category` seeds `flag` (LOAN_PAYMENTS_CREDIT_CARD_PAYMENT →
    CardPayment; *_INVESTMENT_AND_RETIREMENT_FUNDS → Invest; *_SAVINGS → Save;
    other LOAN_PAYMENTS → LoanPaydown, since paying down a loan counts as

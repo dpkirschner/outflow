@@ -253,9 +253,12 @@ fn balances_view() -> BalancesView {
     BalancesView {
         totals: Totals {
             net_worth: m(393_905),
-            cash: m(281_250),
-            invested: m(125_000),
+            cash: m(250_000),
+            invested: m(156_250),
+            uninvested: m(31_250),
             credit: m(-12_345),
+            loans: m(0),
+            other: m(0),
         },
         groups: vec![
             GroupBalance {
@@ -292,9 +295,12 @@ fn day_totals() -> DayTotals {
     DayTotals {
         day: "2026-01-15".into(),
         net_worth: m(393_905),
-        cash: m(281_250),
-        invested: m(125_000),
+        cash: m(250_000),
+        invested: m(156_250),
+        uninvested: m(31_250),
         credit: m(-12_345),
+        loans: m(0),
+        other: m(0),
     }
 }
 

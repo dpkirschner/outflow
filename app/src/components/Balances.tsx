@@ -22,6 +22,7 @@ const GROUP_LABEL: Record<BalanceGroup, string> = {
   cash: "Cash",
   investments: "Investments",
   credit: "Credit",
+  loans: "Loans",
   other: "Other",
 };
 
@@ -84,6 +85,8 @@ export function Balances({ notify }: { notify: (msg: ToastMsg) => void }) {
         <Stat label="Cash" cents={view.totals.cash} />
         <Stat label="Invested" cents={view.totals.invested} />
         <Stat label="Credit owed" cents={view.totals.credit} />
+        {view.totals.loans !== 0 && <Stat label="Loans" cents={view.totals.loans} />}
+        {view.totals.other !== 0 && <Stat label="Other" cents={view.totals.other} />}
       </div>
 
       <Trend days={history} />

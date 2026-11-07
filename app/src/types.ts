@@ -5,7 +5,7 @@
 // Every money value is integer cents; outflows are negative. Times are epoch
 // seconds unless a field says otherwise.
 
-export type AccountKind = "Checking" | "Savings" | "Credit" | "Investment" | "Other";
+export type AccountKind = "Checking" | "Savings" | "Credit" | "Investment" | "Loan" | "Other";
 
 export type CategorySource = "Plaid" | "Rule" | "Llm" | "Manual";
 
@@ -352,7 +352,7 @@ export type StreamCadence = "Daily" | "FewPerWeek" | "Weekly" | "FewPerMonth" | 
 /**
  * Which balances section an account sits in, from its `AccountKind`.
  */
-export type BalanceGroup = "cash" | "investments" | "credit" | "other";
+export type BalanceGroup = "cash" | "investments" | "credit" | "loans" | "other";
 
 export type HoldingRow = {
   security_id: string,
@@ -408,29 +408,54 @@ export type GroupBalance = {
   accounts: Array<AccountBalance>,
 };
 
+/**
+ * The signed breakdown: `cash + invested + credit + loans + other ==
+ * net_worth`, exactly. Each figure equals its group's total.
+ */
 export type Totals = {
   /**
    * Sum of every balance (credit and loans count negative).
    */
   net_worth: number,
+  /**
+   * Checking + savings balances.
+   */
   cash: number,
+  /**
+   * Investment account balances, their cash included.
+   */
   invested: number,
   /**
-   * Sum of credit balances (negative = owed).
+   * The part of `invested` held as cash (money-market funds, sweeps,
+   * balance no position covers): `account_cash` over investment accounts.
+   */
+  uninvested: number,
+  /**
+   * Credit card balances (negative = owed).
    */
   credit: number,
+  /**
+   * Loan balances (negative = owed).
+   */
+  loans: number,
+  /**
+   * Accounts of no known kind; usually 0.
+   */
+  other: number,
 };
 
 export type BalancesView = {
   totals: Totals,
   /**
-   * In display order: cash, investments, credit, other; empty groups omitted.
+   * In display order: cash, investments, credit, loans, other; empty
+   * groups omitted.
    */
   groups: Array<GroupBalance>,
 };
 
 /**
- * One calendar day of the trend (local time).
+ * One calendar day of the trend (local time): the same breakdown as
+ * `Totals`, from that day's snapshots.
  */
 export type DayTotals = {
   /**
@@ -440,7 +465,10 @@ export type DayTotals = {
   net_worth: number,
   cash: number,
   invested: number,
+  uninvested: number,
   credit: number,
+  loans: number,
+  other: number,
 };
 
 /**

@@ -12,6 +12,8 @@ mod plaid_routes;
 mod routes;
 mod state;
 mod sync;
+#[cfg(all(test, feature = "ts"))]
+mod ts_types;
 
 use axum::extract::{Request, State};
 use axum::http::{header, Method, StatusCode};

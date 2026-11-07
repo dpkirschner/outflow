@@ -2,6 +2,7 @@ use crate::money::Money;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum AccountKind {
     Checking,
     Savings,
@@ -43,6 +44,7 @@ pub fn default_source() -> String {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Account {
     pub id: String,
     pub org: String,
@@ -190,6 +192,7 @@ pub(crate) fn mask_suffix(name: &str) -> Option<&str> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum CategorySource {
     Plaid,
     Rule,
@@ -263,6 +266,7 @@ impl Mark {
 /// known yet": the name predates the finer groups and is kept so the wire
 /// format, the DB string and learned flag rules stay stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum TxnFlag {
     Spending,
     /// Between own accounts, or moved with no finer group known.
@@ -316,6 +320,7 @@ impl TxnFlag {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Transaction {
     pub id: String,
     pub account_id: String,

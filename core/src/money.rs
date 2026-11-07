@@ -3,6 +3,20 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Money(i64);
 
+/// On the wire Money is a bare number of cents (serde newtype), never a
+/// bigint, whatever the i64 setting of the TS generator.
+#[cfg(feature = "ts")]
+impl ts_rs::TS for Money {
+    type WithoutGenerics = Self;
+    type OptionInnerType = Self;
+    fn name(_: &ts_rs::Config) -> String {
+        "number".to_owned()
+    }
+    fn inline(cfg: &ts_rs::Config) -> String {
+        <Self as ts_rs::TS>::name(cfg)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoneyParseError {
     Empty,

@@ -23,7 +23,10 @@ pub const IDLE_CASH_MIN_CENTS: i64 = 100_000; // $1,000
 /// ...and at least this share of the account, in basis points (5%).
 pub const IDLE_CASH_MIN_BP: i64 = 500;
 
+/// Which balances section an account sits in, from its `AccountKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", ts(rename = "BalanceGroup"))]
 #[serde(rename_all = "snake_case")]
 pub enum Group {
     Cash,
@@ -44,6 +47,7 @@ impl Group {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct HoldingRow {
     pub security_id: String,
     /// Ticker when there is one, else the security name.
@@ -51,17 +55,20 @@ pub struct HoldingRow {
     pub name: String,
     pub sec_type: String,
     pub is_cash: bool,
+    /// Exact decimal text.
     pub quantity: String,
+    /// Exact decimal text.
     pub price: String,
     pub value: Money,
     pub cost_basis: Option<Money>,
     /// `value - cost_basis`; None when the basis is unknown.
     pub gain: Option<Money>,
-    /// Share of the account balance, in basis points.
+    /// Share of the account balance, in basis points (1% = 100).
     pub share_bp: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct AccountBalance {
     pub account: Account,
     pub group: Group,
@@ -76,6 +83,7 @@ pub struct AccountBalance {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct GroupBalance {
     pub group: Group,
     pub total: Money,
@@ -83,6 +91,7 @@ pub struct GroupBalance {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Totals {
     /// Sum of every balance (credit and loans count negative).
     pub net_worth: Money,
@@ -93,6 +102,7 @@ pub struct Totals {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct BalancesView {
     pub totals: Totals,
     /// In display order: cash, investments, credit, other; empty groups omitted.
@@ -238,6 +248,7 @@ pub fn summarize(
 /// One position, flattened with its account and security detail — the
 /// agent-facing `holdings` shape.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PositionRow {
     pub account_id: String,
     /// Nickname-aware display label (`account_display_label`).
@@ -256,9 +267,11 @@ pub struct PositionRow {
     pub quantity: String,
     /// The institution's price (exact decimal text), as of `price_as_of`.
     pub price: String,
+    /// `YYYY-MM-DD`; None when the institution doesn't say.
     pub price_as_of: Option<String>,
     /// Plaid's end-of-day price for the security, as of `close_price_as_of`.
     pub close_price: Option<String>,
+    /// `YYYY-MM-DD`.
     pub close_price_as_of: Option<String>,
     pub value: Money,
     pub cost_basis: Option<Money>,
@@ -458,6 +471,7 @@ fn uninvested_cash_rows(
 
 /// One position at one sync point.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PositionPoint {
     pub taken_at: i64,
     /// Local `YYYY-MM-DD` of `taken_at`.
@@ -466,8 +480,9 @@ pub struct PositionPoint {
     pub account: String,
     pub security_id: String,
     pub label: String,
+    /// Exact decimal text.
     pub quantity: String,
-    /// None on snapshots recorded before prices were kept.
+    /// Exact decimal text. None on snapshots recorded before prices were kept.
     pub price: Option<String>,
     pub value: Money,
     pub cost_basis: Option<Money>,
@@ -528,6 +543,7 @@ pub fn position_history(
 
 /// One calendar day of the trend (local time).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct DayTotals {
     /// `YYYY-MM-DD`.
     pub day: String,

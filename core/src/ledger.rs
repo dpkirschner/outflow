@@ -33,15 +33,18 @@ const COMMITTED_CATEGORIES: &[&str] = &[
 /// (e.g. "Travel Card (1234)"); `kind` = the account type, which the UI colors by
 /// (cash vs credit vs investment); `pct` = share of occurrences on this account.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Source {
     pub label: String,
     pub kind: AccountKind,
+    /// 0-100.
     pub pct: u8,
 }
 
 /// A recurring stream row: the detected rhythm plus its sources and the dominant
 /// category (used for Committed classification and display).
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Stream {
     #[serde(flatten)]
     pub rhythm: RhythmEntry,
@@ -52,6 +55,7 @@ pub struct Stream {
 /// A single transaction line item — used for both Notable one-offs and the
 /// expandable Noise list, so the user can always see the rows behind a zone.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LineItem {
     pub id: String,
     pub merchant: String,
@@ -68,6 +72,7 @@ pub struct LineItem {
 /// A suppressed group (Transfer or CardPayment), shown collapsed and excluded
 /// from every total.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct TransferGroup {
     pub merchant: String,
     pub flag: TxnFlag,
@@ -76,6 +81,7 @@ pub struct TransferGroup {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LedgerStats {
     pub recurring_monthly_cents: i64,
     pub stream_count: usize,
@@ -87,6 +93,7 @@ pub struct LedgerStats {
 /// How much data sits behind the current view — so the UI can distinguish "the
 /// window is set to 12mo" from "you only have 3 months of history."
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Coverage {
     /// Earliest behavioral date across the WHOLE database (not just the window).
     /// `None` when there are no transactions.
@@ -101,6 +108,7 @@ pub struct Coverage {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LedgerView {
     pub coverage: Coverage,
     pub stats: LedgerStats,

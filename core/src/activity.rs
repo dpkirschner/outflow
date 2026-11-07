@@ -8,8 +8,10 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ActivityRow {
     pub id: String,
+    /// Trade/settle date, `YYYY-MM-DD`.
     pub date: String,
     pub account_id: String,
     /// Nickname-aware display label.
@@ -23,7 +25,9 @@ pub struct ActivityRow {
     #[serde(rename = "type")]
     pub txn_type: String,
     pub subtype: String,
+    /// Exact decimal text; sells are negative.
     pub quantity: String,
+    /// Exact decimal text.
     pub price: String,
     /// Cash effect on the account: negative = cash out (buy, fee),
     /// positive = cash in (sell, dividend, contribution of cash).

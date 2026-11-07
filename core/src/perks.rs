@@ -40,6 +40,7 @@ impl std::error::Error for PerksError {}
 /// What an offer pays. Cash rewards are exact cents; points are Membership
 /// Rewards-style points and are never converted to dollars.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Reward {
     /// Fixed statement credit.
@@ -60,6 +61,7 @@ impl Reward {
 
 /// Total payout cap over the offer's life (or per year when `per_year`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum Cap {
     Cash(Money),
@@ -68,6 +70,7 @@ pub enum Cap {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Offer {
     pub merchant: String,
     pub reward: Reward,
@@ -303,6 +306,7 @@ pub fn load_offers(path: &Path) -> Result<Vec<CardOffers>, PerksError> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
     /// Not added, and you already spend at this merchant.
@@ -314,6 +318,7 @@ pub enum FindingKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Finding {
     pub kind: FindingKind,
     pub card_mask: String,
@@ -335,6 +340,7 @@ pub struct Finding {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CardStatus {
     pub issuer: String,
     pub mask: String,
@@ -348,6 +354,7 @@ pub struct CardStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PerksReport {
     pub cards: Vec<CardStatus>,
     /// Highest estimated cash first, then soonest expiry.

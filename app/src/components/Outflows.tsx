@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type {
   Account,
-  MonthlyFlow,
+  FlowMonth,
   SortKey,
   Transaction,
   TxnFlag,
@@ -50,7 +50,7 @@ export function Outflows({
   vocab: string[];
   notify: (msg: ToastMsg) => void;
 }) {
-  const [flow, setFlow] = useState<MonthlyFlow[]>([]);
+  const [flow, setFlow] = useState<FlowMonth[]>([]);
   // null = uninitialized (first load defaults to the latest month); "all" =
   // explicit, sticky all-time. The sentinel keeps loadFlow's `cur ?? latest`
   // default from snapping an all-time view back to the latest month.
@@ -162,8 +162,8 @@ export function Outflows({
   };
 
   const acctFor = (id: string) => accounts.find((a) => a.id === id);
-  const maxOut = Math.max(1, ...flow.map((m) => m.outflow_cents));
-  const allOut = flow.reduce((a, m) => a + m.outflow_cents, 0);
+  const maxOut = Math.max(1, ...flow.map((m) => m.out_cents));
+  const allOut = flow.reduce((a, m) => a + m.out_cents, 0);
   const arrow = (k: SortKey) => (sort === k ? (dir === "desc" ? " ↓" : " ↑") : "");
 
   return (
@@ -189,14 +189,14 @@ export function Outflows({
               key={`${m.year}-${m.month}`}
               className={`of-month${active ? " on" : ""}`}
               onClick={() => setMonth({ year: m.year, month: m.month })}
-              title={`${dollars(-m.outflow_cents)} out`}
+              title={`${dollars(-m.out_cents)} out`}
             >
               <span
                 className="of-bar"
-                style={{ height: `${Math.round((m.outflow_cents / maxOut) * 48) + 2}px` }}
+                style={{ height: `${Math.round((m.out_cents / maxOut) * 48) + 2}px` }}
               />
               <span className="of-mlabel">{monthLabel(m.year, m.month)}</span>
-              <span className="of-mout">{dollars(-m.outflow_cents)}</span>
+              <span className="of-mout">{dollars(-m.out_cents)}</span>
             </button>
           );
         })}

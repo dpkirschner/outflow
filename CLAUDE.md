@@ -36,7 +36,8 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/pl
 
 Subcommands: `pull --from-file P` (offline fixture; live syncs run on the
 server), `categorize [--llm]`,
-`report --by category|merchant|monthly [--top --since --until --posted-only]`,
+`report --by category|merchant|monthly [--top --since --until --posted-only]`
+(monthly = Flow lanes: in / out / earned − spent / saved / Moved groups),
 `subs`, `fix <id> <category> [--no-learn]`,
 `perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
 vs spending; file from `--file`/`OUTFLOW_PERKS`), `balances [--history]`

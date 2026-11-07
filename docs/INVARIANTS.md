@@ -52,8 +52,9 @@ data integrity or the domain contract — treat them as load-bearing.
 
 9. **Non-`Spending` transactions are excluded from every aggregation** unless
    `TxnFilter.include_non_spending` is set. Suppression lives in
-   `query::passes` so all aggregators inherit it and `monthly_flow` drops both
-   legs. (`query`)
+   `query::passes` so all aggregators inherit it. `flow_lanes` is the one
+   reader of every flag: it reports non-Spending rows in the Moved lane,
+   never in In or Out. (`query`)
 
 10. **User edits survive re-sync.** The upsert conflict-updates omit any
     user-owned column: transactions omit `flag`, accounts omit `nickname`

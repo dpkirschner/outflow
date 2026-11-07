@@ -459,7 +459,9 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// v9: investment_transactions (new table).
 /// v10: data-only — loan payments still flagged `spending` from before they
 /// seeded as `transfer` are re-flagged once (see `reflag_loan_payments`).
-const SCHEMA_VERSION: i64 = 10;
+/// v11: data-only — `transfer` rows split into the finer Moved groups (invest,
+/// save, loan_paydown) from their stored Plaid category (see `split_moved_groups`).
+const SCHEMA_VERSION: i64 = 11;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -554,6 +556,9 @@ impl Store {
         if version < 10 {
             self.reflag_loan_payments()?;
         }
+        if version < 11 {
+            self.split_moved_groups()?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -580,12 +585,48 @@ impl Store {
             };
             let pfc = v.get("personal_finance_category");
             let field = |k: &str| pfc.and_then(|p| p.get(k)).and_then(|x| x.as_str());
-            if crate::plaid::flag_from_pfc(field("primary"), field("detailed")) == TxnFlag::Transfer
-                && field("primary") == Some("LOAN_PAYMENTS")
+            // Checks the raw category, not `flag_from_pfc`: loans now seed as
+            // LoanPaydown, and v11 refines the 'transfer' this writes.
+            if field("primary") == Some("LOAN_PAYMENTS")
+                && field("detailed") != Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT")
             {
                 tx.execute(
                     "UPDATE transactions SET flag = 'transfer' WHERE id = ?1",
                     params![id],
+                )?;
+                n += 1;
+            }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// One-time v11 backfill: Plaid rows flagged `transfer` whose stored raw
+    /// category names a finer Moved group (invest, save, loan paydown) take
+    /// that group. Only `transfer` rows are touched, so spending and card
+    /// payments stay as they are; a manual `transfer` refines too, which keeps
+    /// it in the Moved lane. Pure Rust over `raw`, like v10.
+    fn split_moved_groups(&self) -> rusqlite::Result<usize> {
+        let rows: Vec<(String, String)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, raw FROM transactions WHERE flag = 'transfer' AND source = 'plaid'",
+            )?;
+            let it = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            it.collect::<rusqlite::Result<_>>()?
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        for (id, raw) in rows {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+                continue;
+            };
+            let pfc = v.get("personal_finance_category");
+            let field = |k: &str| pfc.and_then(|p| p.get(k)).and_then(|x| x.as_str());
+            let flag = crate::plaid::flag_from_pfc(field("primary"), field("detailed"));
+            if flag.is_saving() {
+                tx.execute(
+                    "UPDATE transactions SET flag = ?1 WHERE id = ?2",
+                    params![flag.as_str(), id],
                 )?;
                 n += 1;
             }
@@ -1240,8 +1281,10 @@ impl Store {
 
     /// Apply every flag rule to matching transactions. Only touches rows whose
     /// current flag differs from the rule's, and never resets a row to
-    /// `Spending` (rules only assign the flag they carry). Returns the count
-    /// changed.
+    /// `Spending` (rules only assign the flag they carry). A `Transfer` rule
+    /// means "moved, group unknown", so it doesn't pull a row already in a
+    /// finer Moved group (invest, save, loan paydown) back to `Transfer`.
+    /// Returns the count changed.
     pub fn apply_flags(&self) -> rusqlite::Result<usize> {
         let rules = self.flag_rules()?;
         if rules.is_empty() {
@@ -1252,7 +1295,8 @@ impl Store {
         let mut n = 0;
         for t in &txns {
             if let Some(r) = match_flag(&rules, t.merchant()) {
-                if t.flag != r.flag {
+                let downgrade = r.flag == TxnFlag::Transfer && t.flag.is_saving();
+                if t.flag != r.flag && !downgrade {
                     tx.execute(
                         "UPDATE transactions SET flag = ?1 WHERE id = ?2",
                         params![r.flag.as_str(), t.id],
@@ -2263,6 +2307,80 @@ mod tests {
     }
 
     #[test]
+    fn v11_splits_transfer_rows_into_moved_groups() {
+        let s = Store::open_in_memory().unwrap();
+        let raw = |primary: &str, detailed: &str| {
+            format!(
+                r#"{{"personal_finance_category":{{"primary":"{primary}","detailed":"{detailed}"}}}}"#
+            )
+        };
+        let ins = |id: &str, flag: &str, raw: &str| {
+            s.conn
+                .execute(
+                    "INSERT INTO transactions (id, account_id, posted, amount_cents, description,
+                        pending, raw, flag, source)
+                     VALUES (?1, 'chk', 0, -100, 'x', 0, ?2, ?3, 'plaid')",
+                    params![id, raw, flag],
+                )
+                .unwrap();
+        };
+        let brokerage = raw(
+            "TRANSFER_OUT",
+            "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS",
+        );
+        ins("ira", "transfer", &brokerage);
+        ins(
+            "sav",
+            "transfer",
+            &raw("TRANSFER_OUT", "TRANSFER_OUT_SAVINGS"),
+        );
+        ins(
+            "car",
+            "transfer",
+            &raw("LOAN_PAYMENTS", "LOAN_PAYMENTS_CAR_PAYMENT"),
+        );
+        ins(
+            "acct",
+            "transfer",
+            &raw("TRANSFER_OUT", "TRANSFER_OUT_ACCOUNT_TRANSFER"),
+        );
+        // The user said this savings transfer is real spending: left alone.
+        ins(
+            "mine",
+            "spending",
+            &raw("TRANSFER_OUT", "TRANSFER_OUT_SAVINGS"),
+        );
+        ins("junk", "transfer", "not json");
+        s.conn.pragma_update(None, "user_version", 10).unwrap();
+        s.run_migrations().unwrap();
+        let flag = |id: &str| s.transaction(id).unwrap().unwrap().flag;
+        assert_eq!(flag("ira"), TxnFlag::Invest);
+        assert_eq!(flag("sav"), TxnFlag::Save);
+        assert_eq!(flag("car"), TxnFlag::LoanPaydown);
+        assert_eq!(flag("acct"), TxnFlag::Transfer); // between own accounts
+        assert_eq!(flag("mine"), TxnFlag::Spending);
+        assert_eq!(flag("junk"), TxnFlag::Transfer);
+    }
+
+    #[test]
+    fn transfer_rule_does_not_downgrade_a_finer_moved_group() {
+        let s = Store::open_in_memory().unwrap();
+        let mut a = txn("a", "chk", 100, -500, false);
+        a.payee = Some("Example Brokerage".into());
+        a.flag = TxnFlag::Invest;
+        let mut b = txn("b", "chk", 200, -700, false);
+        b.payee = Some("Example Brokerage".into());
+        s.upsert_transactions(&[a, b]).unwrap();
+        let key = normalize_payee("Example Brokerage");
+        s.add_flag_rule(MatchType::Exact, &key, TxnFlag::Transfer)
+            .unwrap();
+        assert_eq!(s.apply_flags().unwrap(), 1);
+        // The spending row moves; the row already known to be Invest stays.
+        assert_eq!(s.transaction("a").unwrap().unwrap().flag, TxnFlag::Invest);
+        assert_eq!(s.transaction("b").unwrap().unwrap().flag, TxnFlag::Transfer);
+    }
+
+    #[test]
     fn v10_backfill_reflags_only_untouched_loan_payments() {
         let s = Store::open_in_memory().unwrap();
         let raw = |primary: &str, detailed: &str| {
@@ -2304,7 +2422,8 @@ mod tests {
         s.conn.pragma_update(None, "user_version", 9).unwrap();
         s.run_migrations().unwrap();
         let flag = |id: &str| s.transaction(id).unwrap().unwrap().flag;
-        assert_eq!(flag("mortgage"), TxnFlag::Transfer);
+        // v10 moves it off spending, v11 refines it to its Moved group.
+        assert_eq!(flag("mortgage"), TxnFlag::LoanPaydown);
         assert_eq!(flag("card"), TxnFlag::Spending); // not a loan; left alone
         assert_eq!(flag("coffee"), TxnFlag::Spending);
         assert_eq!(flag("chosen"), TxnFlag::CardPayment); // user's flag survives

@@ -109,18 +109,26 @@ fn require_str(v: &serde_json::Value, key: &str) -> Result<String, SourceError> 
         .ok_or_else(|| SourceError::Json(format!("missing field {key:?}")))
 }
 
-/// Seed the suppression flag from Plaid's classification. Seed-time only: the
-/// upsert never overwrites `flag` on conflict, so user overrides always win.
+/// Seed the flag (In/Out vs a Moved group) from Plaid's classification.
+/// Seed-time only: the upsert never overwrites `flag` on conflict, so user
+/// overrides always win.
 ///
-/// Loan payments (mortgage, student, auto, personal) are transfers, not
+/// Loan payments (mortgage, student, auto, personal) are LoanPaydown, not
 /// spending: paying down principal is saving — the user's call, 2026-11. Plaid
 /// doesn't split principal from interest, so the interest rides along.
+/// Transfers Plaid can't place (account transfers, deposits, withdrawals) are
+/// `Transfer`, the "between own accounts" group; a flag rule refines them.
 pub(crate) fn flag_from_pfc(primary: Option<&str>, detailed: Option<&str>) -> TxnFlag {
-    if detailed == Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT") {
-        return TxnFlag::CardPayment;
+    match detailed {
+        Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT") => return TxnFlag::CardPayment,
+        Some("TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS")
+        | Some("TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS") => return TxnFlag::Invest,
+        Some("TRANSFER_IN_SAVINGS") | Some("TRANSFER_OUT_SAVINGS") => return TxnFlag::Save,
+        _ => {}
     }
     match primary {
-        Some("TRANSFER_IN") | Some("TRANSFER_OUT") | Some("LOAN_PAYMENTS") => TxnFlag::Transfer,
+        Some("LOAN_PAYMENTS") => TxnFlag::LoanPaydown,
+        Some("TRANSFER_IN") | Some("TRANSFER_OUT") => TxnFlag::Transfer,
         _ => TxnFlag::Spending,
     }
 }
@@ -947,16 +955,35 @@ mod tests {
     // Synthetic, in Plaid's documented shape: a buy, a dividend with no
     // quantity, and a fee-bearing sale.
     #[test]
-    fn loan_payments_seed_as_transfers_but_card_payments_stay_card_payments() {
+    fn pfc_seeds_the_moved_groups() {
         let f = |p, d| flag_from_pfc(Some(p), Some(d));
         assert_eq!(
             f("LOAN_PAYMENTS", "LOAN_PAYMENTS_MORTGAGE_PAYMENT"),
-            TxnFlag::Transfer
+            TxnFlag::LoanPaydown
         );
         assert_eq!(
             f("LOAN_PAYMENTS", "LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT"),
+            TxnFlag::LoanPaydown
+        );
+        assert_eq!(
+            f(
+                "TRANSFER_OUT",
+                "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS"
+            ),
+            TxnFlag::Invest
+        );
+        assert_eq!(
+            f("TRANSFER_IN", "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS"),
+            TxnFlag::Invest
+        );
+        assert_eq!(f("TRANSFER_OUT", "TRANSFER_OUT_SAVINGS"), TxnFlag::Save);
+        assert_eq!(f("TRANSFER_IN", "TRANSFER_IN_SAVINGS"), TxnFlag::Save);
+        assert_eq!(
+            f("TRANSFER_OUT", "TRANSFER_OUT_ACCOUNT_TRANSFER"),
             TxnFlag::Transfer
         );
+        assert_eq!(f("TRANSFER_IN", "TRANSFER_IN_DEPOSIT"), TxnFlag::Transfer);
+        assert_eq!(flag_from_pfc(Some("TRANSFER_OUT"), None), TxnFlag::Transfer);
         assert_eq!(
             f("LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"),
             TxnFlag::CardPayment

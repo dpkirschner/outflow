@@ -83,5 +83,7 @@ product direction behind these terms is in
 - **Card-payment match**: a checking outflow paired with the
   equal-magnitude credit-card inflow it paid. High-confidence pairs are
   auto-accepted; medium ones wait for review in Settings.
-- **Flag**: the suppression axis on a transaction (`Spending`,
-  `Transfer`, `CardPayment`). It's separate from its category.
+- **Flag**: the lane axis on a transaction, separate from its category.
+  `Spending` is In / Out; every other value is a Moved group: `CardPayment`,
+  `Invest`, `Save`, `LoanPaydown`, and `Transfer` (between own accounts, or
+  moved with no finer group known yet).

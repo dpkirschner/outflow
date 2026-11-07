@@ -47,7 +47,7 @@ money            i64-cents type, decimal parse, display
   └ model        Account, Transaction, PlaidItem, TxnMatch, enums (+ merchant())
       └ store    SQLite persistence (rusqlite); upsert rules; plaid batches;
                  rule/category/match CRUD; sync_log
-          ├ query          spend_by_category, top_merchants, monthly_flow,
+          ├ query          spend_by_category, top_merchants, flow_lanes,
           │                search_transactions (text/sort/filter/pagination)
           ├ subscriptions  normalize_payee (THE normalizer), detect(), detect_rhythms()
           ├ ledger         the rhythm-ledger view model (ledger() → LedgerView)

@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    account_display_label, activity, balance_history, detect, evaluate_perks, load_offers,
-    monthly_flow, parse_fixture, position_history, positions, search_transactions,
+    account_display_label, activity, balance_history, detect, evaluate_perks, flow_lanes,
+    load_offers, parse_fixture, position_history, positions, search_transactions,
     spend_by_category, summarize_balances, top_merchants, ActivityFilter, Cap, CategorySource,
     FindingKind, MatchStatus, Money, Offer, PerkOptions, PositionFilter, Reward, SortKey, Store,
     TxnFilter, TxnFlag, TxnQuery,
@@ -229,8 +229,12 @@ pub(crate) enum MatchCmd {
 #[derive(ValueEnum, Clone, Copy)]
 pub(crate) enum FlagArg {
     Spending,
+    /// Between own accounts (or moved, group unknown).
     Transfer,
     CardPayment,
+    Invest,
+    Save,
+    LoanPaydown,
 }
 
 impl FlagArg {
@@ -239,6 +243,9 @@ impl FlagArg {
             FlagArg::Spending => TxnFlag::Spending,
             FlagArg::Transfer => TxnFlag::Transfer,
             FlagArg::CardPayment => TxnFlag::CardPayment,
+            FlagArg::Invest => TxnFlag::Invest,
+            FlagArg::Save => TxnFlag::Save,
+            FlagArg::LoanPaydown => TxnFlag::LoanPaydown,
         }
     }
 
@@ -249,6 +256,9 @@ impl FlagArg {
             FlagArg::Spending => "Spending",
             FlagArg::Transfer => "Transfer",
             FlagArg::CardPayment => "CardPayment",
+            FlagArg::Invest => "Invest",
+            FlagArg::Save => "Save",
+            FlagArg::LoanPaydown => "LoanPaydown",
         }
     }
 }
@@ -487,14 +497,27 @@ fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(
             }
         }
         By::Monthly => {
-            for r in monthly_flow(store, filter).map_err(|e| format!("{e}"))? {
+            // Flow lanes: In / Out (refunds netted) / earned − spent / saved,
+            // then the Moved groups (out of checking+cards, minus money back).
+            println!(
+                "{:<7}  {:>11}  {:>11}  {:>12}  {:>11}   moved: card · invest · save · loan · between",
+                "month", "in", "out", "earned-spent", "saved"
+            );
+            for r in flow_lanes(store, filter).map_err(|e| format!("{e}"))? {
+                let net = |g: outflow_core::MovedFlow| dollars(g.out_cents - g.in_cents);
                 println!(
-                    "{}-{:02}   in {:>11}   out {:>11}   net {:>11}",
+                    "{}-{:02}  {:>11}  {:>11}  {:>12}  {:>11}   {} · {} · {} · {} · {}",
                     r.year,
                     r.month,
-                    dollars(r.inflow_cents),
-                    dollars(r.outflow_cents),
-                    dollars(r.net_cents)
+                    dollars(r.in_cents),
+                    dollars(r.out_cents),
+                    dollars(r.earned_minus_spent_cents),
+                    dollars(r.saved_cents),
+                    dollars(r.moved.card_payment_cents),
+                    net(r.moved.invest),
+                    net(r.moved.save),
+                    net(r.moved.loan_paydown),
+                    net(r.moved.between),
                 );
             }
         }
@@ -547,8 +570,7 @@ fn json_out<T: serde::Serialize>(v: &T) -> Result<(), String> {
 
 fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
     let mut filter = build_filter(&a.since, &a.until, a.posted_only)?;
-    filter.include_non_spending =
-        a.show_excluded || matches!(a.flag, Some(FlagArg::Transfer) | Some(FlagArg::CardPayment));
+    filter.include_non_spending = a.show_excluded || a.flag.is_some_and(|f| f.to_flag().is_moved());
     let q = TxnQuery {
         filter,
         text: a.search.clone(),
@@ -1090,7 +1112,7 @@ fn report_json(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<
     match by {
         By::Category => json_out(&spend_by_category(store, filter).map_err(|e| format!("{e}"))?),
         By::Merchant => json_out(&top_merchants(store, filter, top).map_err(|e| format!("{e}"))?),
-        By::Monthly => json_out(&monthly_flow(store, filter).map_err(|e| format!("{e}"))?),
+        By::Monthly => json_out(&flow_lanes(store, filter).map_err(|e| format!("{e}"))?),
     }
 }
 

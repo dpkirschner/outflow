@@ -20,19 +20,28 @@ use std::sync::{Arc, Mutex};
 
 use crate::state::{now_secs, ApiError, AppState, Config};
 
+/// One source's outcome within a sync run.
 #[derive(Serialize, Debug, Clone)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct LegReport {
+    /// `"plaid:<institution>"`.
     pub source: String,
     pub added: usize,
     pub updated: usize,
+    /// The leg failed; its item's status becomes `login_required` or
+    /// `error`. Other legs still ran.
     pub error: Option<String>,
     /// Non-fatal problem (e.g. holdings fetch failed): transactions synced
     /// and the item stays `ok`, but something was left stale.
+    /// Omitted from the JSON when there is none.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts", ts(optional))]
     pub warning: Option<String>,
 }
 
+/// What one `POST /api/pull` (or background sync) did.
 #[derive(Serialize, Debug, Clone)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SyncReport {
     pub legs: Vec<LegReport>,
     /// Flag rules applied + rule categorization run after ingest.

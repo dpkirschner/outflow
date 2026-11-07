@@ -10,11 +10,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{with_store, ApiError, ApiResult, AppState};
 
+/// A card-payment pair enriched with both legs for display: the `TxnMatch`
+/// fields flattened in, plus each transaction (`null` if it has since gone
+/// from the archive).
 #[derive(Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MatchView {
     #[serde(flatten)]
     pub m: TxnMatch,
+    /// The outflow leg on checking/savings.
     pub bank: Option<Transaction>,
+    /// The offsetting inflow on the credit card.
     pub card: Option<Transaction>,
 }
 

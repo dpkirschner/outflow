@@ -53,10 +53,13 @@ impl FilterParams {
     }
 }
 
+/// `POST /api/categorize`: rows the rules categorized, and how many are
+/// still uncategorized (the LLM tail).
 #[derive(Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CategorizeResult {
-    rule: usize,
-    remaining: usize,
+    pub rule: usize,
+    pub remaining: usize,
 }
 
 #[derive(Deserialize)]

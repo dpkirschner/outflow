@@ -361,7 +361,9 @@ pub struct PlaidItem {
     pub investments_consent: bool,
 }
 
+/// Review state of a detected card-payment pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum MatchStatus {
     Proposed,
     Accepted,
@@ -389,7 +391,9 @@ impl MatchStatus {
     }
 }
 
+/// How sure the matcher is; `High` pairs are auto-accepted on sync.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum MatchConfidence {
     High,
     Medium,
@@ -418,6 +422,7 @@ impl MatchConfidence {
 /// checking/savings account; `card_txn_id` the offsetting inflow on a credit
 /// account. Accepting one flags both legs `CardPayment`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct TxnMatch {
     pub id: i64,
     pub bank_txn_id: String,

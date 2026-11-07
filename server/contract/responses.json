@@ -1,0 +1,582 @@
+{
+  "Account": {
+    "id": "acct-demo-card",
+    "org": "Demo Bank",
+    "name": "Demo Rewards Card (0000)",
+    "kind": "Credit",
+    "balance": -12345,
+    "currency": "USD",
+    "last_synced": 1768435200,
+    "source": "plaid",
+    "nickname": "Test card",
+    "hidden": false
+  },
+  "Transaction": {
+    "id": "txn-demo-001",
+    "account_id": "acct-demo-card",
+    "posted": 1768435200,
+    "transacted_at": 1768348800,
+    "amount": -1234,
+    "description": "EXAMPLE COFFEE CO #42",
+    "payee": "Example Coffee Co",
+    "category": "Dining",
+    "category_source": "Rule",
+    "pending": false,
+    "flag": "Spending",
+    "raw": "{}",
+    "source": "plaid"
+  },
+  "TxnPage": {
+    "total": 2,
+    "total_cents": -51234,
+    "items": [
+      {
+        "id": "txn-demo-001",
+        "account_id": "acct-demo-card",
+        "posted": 1768435200,
+        "transacted_at": 1768348800,
+        "amount": -1234,
+        "description": "EXAMPLE COFFEE CO #42",
+        "payee": "Example Coffee Co",
+        "category": "Dining",
+        "category_source": "Rule",
+        "pending": false,
+        "flag": "Spending",
+        "raw": "{}",
+        "source": "plaid"
+      },
+      {
+        "id": "txn-demo-002",
+        "account_id": "acct-demo-checking",
+        "posted": 1768521600,
+        "transacted_at": null,
+        "amount": -50000,
+        "description": "DEMO CARD PAYMENT",
+        "payee": null,
+        "category": null,
+        "category_source": null,
+        "pending": true,
+        "flag": "CardPayment",
+        "raw": "{}",
+        "source": "plaid"
+      }
+    ]
+  },
+  "CategorySpend": {
+    "category": "Groceries",
+    "total_cents": -45600,
+    "count": 7
+  },
+  "MerchantSpend": {
+    "merchant": "Sample Grocer",
+    "total_cents": -45600,
+    "count": 7
+  },
+  "FlowMonth": {
+    "year": 2026,
+    "month": 1,
+    "in_cents": 500000,
+    "out_cents": 310000,
+    "refunds_cents": 2500,
+    "moved": {
+      "card_payment_cents": 120000,
+      "invest": {
+        "out_cents": 50000,
+        "in_cents": 0
+      },
+      "save": {
+        "out_cents": 20000,
+        "in_cents": 5000
+      },
+      "loan_paydown": {
+        "out_cents": 30000,
+        "in_cents": 0
+      },
+      "between": {
+        "out_cents": 10000,
+        "in_cents": 10000
+      }
+    },
+    "earned_minus_spent_cents": 190000,
+    "saved_cents": 95000
+  },
+  "Subscription": {
+    "payee": "Sample Streaming",
+    "cadence": "Yearly",
+    "typical_amount_cents": -9900,
+    "occurrences": 3,
+    "first_seen": 1705363200,
+    "last_seen": 1768435200,
+    "total_cents": -29700
+  },
+  "LedgerView": {
+    "coverage": {
+      "earliest": 1733875200,
+      "window_txn_count": 120,
+      "covers_all": false
+    },
+    "stats": {
+      "recurring_monthly_cents": -7800,
+      "stream_count": 1,
+      "committed_monthly_cents": -9000,
+      "noise_total_cents": -2100,
+      "noise_count": 4
+    },
+    "streams": [
+      {
+        "merchant": "Example Coffee Co",
+        "cadence": "FewPerWeek",
+        "occurrence_count": 36,
+        "median_amount_cents": -650,
+        "amount_min_cents": -450,
+        "amount_max_cents": -1200,
+        "monthly_estimate_cents": -7800,
+        "last_seen": 1768435200,
+        "trend_pct": -12.5,
+        "trend": "Falling",
+        "spark_cents": [
+          -8400,
+          -7900,
+          -7100,
+          -3200
+        ],
+        "sources": [
+          {
+            "label": "Demo Rewards Card (0000)",
+            "kind": "Credit",
+            "pct": 75
+          },
+          {
+            "label": "Demo Rewards Card (0000)",
+            "kind": "Checking",
+            "pct": 25
+          }
+        ],
+        "category": "Dining"
+      }
+    ],
+    "committed": [
+      {
+        "merchant": "Sample Utility",
+        "cadence": "Monthly",
+        "occurrence_count": 36,
+        "median_amount_cents": -650,
+        "amount_min_cents": -450,
+        "amount_max_cents": -1200,
+        "monthly_estimate_cents": -7800,
+        "last_seen": 1768435200,
+        "trend_pct": -12.5,
+        "trend": "Steady",
+        "spark_cents": [
+          -8400,
+          -7900,
+          -7100,
+          -3200
+        ],
+        "sources": [
+          {
+            "label": "Demo Rewards Card (0000)",
+            "kind": "Credit",
+            "pct": 75
+          },
+          {
+            "label": "Demo Rewards Card (0000)",
+            "kind": "Checking",
+            "pct": 25
+          }
+        ],
+        "category": null
+      }
+    ],
+    "notable": [
+      {
+        "id": "txn-demo-003",
+        "merchant": "Test Hardware Store",
+        "merchant_key": "test hardware store",
+        "date": 1768176000,
+        "amount_cents": -18900,
+        "category": null,
+        "source": {
+          "label": "Demo Rewards Card (0000)",
+          "kind": "Credit",
+          "pct": 100
+        }
+      }
+    ],
+    "noise_items": [
+      {
+        "id": "txn-demo-003",
+        "merchant": "Test Hardware Store",
+        "merchant_key": "test hardware store",
+        "date": 1768176000,
+        "amount_cents": -18900,
+        "category": null,
+        "source": {
+          "label": "Demo Rewards Card (0000)",
+          "kind": "Credit",
+          "pct": 100
+        }
+      }
+    ],
+    "transfers": [
+      {
+        "merchant": "Demo Brokerage",
+        "flag": "Invest",
+        "total_cents": -50000,
+        "count": 2
+      }
+    ]
+  },
+  "Stream": {
+    "merchant": "Example Coffee Co",
+    "cadence": "FewPerWeek",
+    "occurrence_count": 36,
+    "median_amount_cents": -650,
+    "amount_min_cents": -450,
+    "amount_max_cents": -1200,
+    "monthly_estimate_cents": -7800,
+    "last_seen": 1768435200,
+    "trend_pct": -12.5,
+    "trend": "Falling",
+    "spark_cents": [
+      -8400,
+      -7900,
+      -7100,
+      -3200
+    ],
+    "sources": [
+      {
+        "label": "Demo Rewards Card (0000)",
+        "kind": "Credit",
+        "pct": 75
+      },
+      {
+        "label": "Demo Rewards Card (0000)",
+        "kind": "Checking",
+        "pct": 25
+      }
+    ],
+    "category": "Dining"
+  },
+  "BalancesView": {
+    "totals": {
+      "net_worth": 393905,
+      "cash": 281250,
+      "invested": 125000,
+      "credit": -12345
+    },
+    "groups": [
+      {
+        "group": "investments",
+        "total": 156250,
+        "accounts": [
+          {
+            "account": {
+              "id": "acct-demo-brokerage",
+              "org": "Demo Brokerage",
+              "name": "Demo Brokerage (2222)",
+              "kind": "Investment",
+              "balance": 156250,
+              "currency": "USD",
+              "last_synced": 1768435200,
+              "source": "plaid",
+              "nickname": null,
+              "hidden": false
+            },
+            "group": "investments",
+            "cash": 31250,
+            "invested": 125000,
+            "cash_bp": 2000,
+            "idle_cash": true,
+            "holdings": [
+              {
+                "security_id": "sec-demo-fund",
+                "label": "DEMO",
+                "name": "Demo Total Market Fund",
+                "sec_type": "etf",
+                "is_cash": false,
+                "quantity": "12.3456",
+                "price": "101.25",
+                "value": 125000,
+                "cost_basis": 100000,
+                "gain": 25000,
+                "share_bp": 8000
+              },
+              {
+                "security_id": "sec-demo-mmf",
+                "label": "Demo Money Market",
+                "name": "Demo Money Market",
+                "sec_type": "cash",
+                "is_cash": true,
+                "quantity": "31250",
+                "price": "1",
+                "value": 31250,
+                "cost_basis": null,
+                "gain": null,
+                "share_bp": 2000
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "group": "credit",
+        "total": -12345,
+        "accounts": [
+          {
+            "account": {
+              "id": "acct-demo-card",
+              "org": "Demo Bank",
+              "name": "Demo Rewards Card (0000)",
+              "kind": "Credit",
+              "balance": -12345,
+              "currency": "USD",
+              "last_synced": 1768435200,
+              "source": "plaid",
+              "nickname": "Test card",
+              "hidden": false
+            },
+            "group": "credit",
+            "cash": 0,
+            "invested": 0,
+            "cash_bp": 0,
+            "idle_cash": false,
+            "holdings": []
+          }
+        ]
+      }
+    ]
+  },
+  "DayTotals": {
+    "day": "2026-01-15",
+    "net_worth": 393905,
+    "cash": 281250,
+    "invested": 125000,
+    "credit": -12345
+  },
+  "PositionRow": {
+    "account_id": "acct-demo-brokerage",
+    "account": "Demo Brokerage (2222)",
+    "security_id": "sec-demo-fund",
+    "ticker": "DEMO",
+    "label": "DEMO",
+    "name": "Demo Total Market Fund",
+    "sec_type": "etf",
+    "is_cash": false,
+    "cusip": "000000000",
+    "isin": null,
+    "currency": "USD",
+    "quantity": "12.3456",
+    "price": "101.25",
+    "price_as_of": "2026-01-14",
+    "close_price": "101.10",
+    "close_price_as_of": "2026-01-14",
+    "value": 125000,
+    "cost_basis": 100000,
+    "unit_cost": "81.0005",
+    "gain": 25000,
+    "gain_bp": 2500,
+    "share_bp": 8000,
+    "synced_at": 1768435200
+  },
+  "PositionPoint": {
+    "taken_at": 1768435200,
+    "day": "2026-01-15",
+    "account_id": "acct-demo-brokerage",
+    "account": "Demo Brokerage (2222)",
+    "security_id": "sec-demo-fund",
+    "label": "DEMO",
+    "quantity": "12.3456",
+    "price": "101.25",
+    "value": 125000,
+    "cost_basis": null,
+    "gain": null
+  },
+  "ActivityRow": {
+    "id": "inv-demo-001",
+    "date": "2026-01-10",
+    "account_id": "acct-demo-brokerage",
+    "account": "Demo Brokerage (2222)",
+    "security_id": "sec-demo-fund",
+    "ticker": "DEMO",
+    "label": "DEMO",
+    "name": "BUY DEMO TOTAL MARKET FUND",
+    "type": "buy",
+    "subtype": "buy",
+    "quantity": "2.5",
+    "price": "100.00",
+    "amount": -25000,
+    "fees": 0,
+    "currency": "USD",
+    "cancel_txn_id": null
+  },
+  "SyncEntry": {
+    "id": 7,
+    "started": 1768435200,
+    "finished": 1768435205,
+    "source": "plaid:Demo Bank",
+    "added": 12,
+    "updated": 3,
+    "note": null
+  },
+  "SyncReport": {
+    "legs": [
+      {
+        "source": "plaid:Demo Bank",
+        "added": 12,
+        "updated": 3,
+        "error": null,
+        "warning": "holdings: demo warning"
+      },
+      {
+        "source": "plaid:Demo Brokerage",
+        "added": 0,
+        "updated": 0,
+        "error": "ITEM_LOGIN_REQUIRED: demo error"
+      }
+    ],
+    "flags_applied": 4,
+    "categorized": 9,
+    "matches_auto": 1,
+    "matches_proposed": 2
+  },
+  "CategorizeResult": {
+    "rule": 18,
+    "remaining": 5
+  },
+  "PerksReport": {
+    "cards": [
+      {
+        "issuer": "Demo Issuer",
+        "mask": "0000",
+        "account_id": "acct-demo-card",
+        "problem": null,
+        "offers": 2,
+        "added": 1,
+        "expired": 0
+      },
+      {
+        "issuer": "Demo Issuer",
+        "mask": "9999",
+        "account_id": null,
+        "problem": "no linked account ends in 9999",
+        "offers": 0,
+        "added": 0,
+        "expired": 0
+      }
+    ],
+    "findings": [
+      {
+        "kind": "add_offer",
+        "card_mask": "0000",
+        "offer": {
+          "merchant": "Sample Outfitters",
+          "reward": {
+            "kind": "back",
+            "value": 1000
+          },
+          "min": 5000,
+          "uses": 1,
+          "cap": {
+            "kind": "none"
+          },
+          "single": true,
+          "per_year": false,
+          "added": false,
+          "expires": 1771027200,
+          "patterns": [
+            "SAMPLE OUTFITTERS"
+          ],
+          "note": null
+        },
+        "days_left": 30,
+        "charges": 2,
+        "last_charge": 1767571200,
+        "typical_charge_cents": -6000,
+        "est_cash_cents": 1000,
+        "est_points": 0,
+        "txn_ids": [
+          "txn-demo-004",
+          "txn-demo-005"
+        ],
+        "matched_merchants": [
+          "Sample Outfitters"
+        ]
+      },
+      {
+        "kind": "expiring",
+        "card_mask": "0000",
+        "offer": {
+          "merchant": "Sample Outfitters",
+          "reward": {
+            "kind": "pts_per_dollar",
+            "value": 3
+          },
+          "min": 5000,
+          "uses": 1,
+          "cap": {
+            "kind": "points",
+            "value": 3000
+          },
+          "single": true,
+          "per_year": false,
+          "added": false,
+          "expires": 1771027200,
+          "patterns": [
+            "SAMPLE OUTFITTERS"
+          ],
+          "note": null
+        },
+        "days_left": 4,
+        "charges": 0,
+        "last_charge": null,
+        "typical_charge_cents": null,
+        "est_cash_cents": 0,
+        "est_points": 0,
+        "txn_ids": [],
+        "matched_merchants": []
+      }
+    ]
+  },
+  "PlaidItem": {
+    "item_id": "item-demo-001",
+    "institution": "Demo Bank",
+    "cursor": "cursor-demo",
+    "status": "login_required",
+    "created": 1760659200,
+    "last_synced": null,
+    "investments_consent": true
+  },
+  "ExchangeResult": {
+    "item_id": "item-demo-002",
+    "institution": "Demo Credit Union",
+    "added": 40,
+    "updated": 0,
+    "sync_error": null
+  },
+  "MatchView": {
+    "id": 3,
+    "bank_txn_id": "txn-demo-002",
+    "card_txn_id": "txn-demo-006",
+    "status": "Proposed",
+    "confidence": "Medium",
+    "reason": "same amount, 1 day apart",
+    "created": 1768521600,
+    "bank": {
+      "id": "txn-demo-002",
+      "account_id": "acct-demo-checking",
+      "posted": 1768521600,
+      "transacted_at": null,
+      "amount": -50000,
+      "description": "DEMO CARD PAYMENT",
+      "payee": null,
+      "category": null,
+      "category_source": null,
+      "pending": true,
+      "flag": "CardPayment",
+      "raw": "{}",
+      "source": "plaid"
+    },
+    "card": null
+  }
+}

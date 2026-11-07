@@ -144,6 +144,27 @@ fn render() -> String {
     }
 
     // --- server ---
+    {
+        use crate::match_routes::MatchView;
+        use crate::plaid_routes::ExchangeResult;
+        use crate::routes::CategorizeResult;
+        use crate::sync::{LegReport, SyncReport};
+        use outflow_core::model::{MatchConfidence, MatchStatus, TxnMatch};
+        decls!(
+            &cfg,
+            out,
+            [
+                MatchStatus,
+                MatchConfidence,
+                TxnMatch,
+                MatchView,
+                LegReport,
+                SyncReport,
+                CategorizeResult,
+                ExchangeResult,
+            ]
+        );
+    }
 
     out.truncate(out.trim_end().len());
     out.push('\n');

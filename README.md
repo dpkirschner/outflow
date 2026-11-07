@@ -1,12 +1,16 @@
 # outflow
 
-A **single-user spending analyzer** for one person's own bank data. A server
-(target: an always-on mac-mini, exposed over Tailscale) pulls transactions from
-[**Plaid**](https://plaid.com/) (checking/savings/credit cards) into a local
-SQLite database, categorizes them, auto-detects checking→card payments so
-spending isn't double-counted, and serves a web UI + JSON API to answer "where
-did my money go?", "how much did I spend at that coffee shop?", and "what
-subscriptions am I paying for?".
+A **single-user view of where your money is and where it's going**, built
+on one person's own bank data. A server (target: an always-on mac-mini,
+exposed over Tailscale) pulls accounts, transactions and investments from
+[**Plaid**](https://plaid.com/) into a local SQLite database and serves a web
+UI + JSON API built around three pillars: **Stock** (what you have, in what
+form, and how it has performed), **Flow** (money in, out, and moved between
+your own accounts, including recurring purchases), and **Find money** (card
+offers and the like; planned). The API is meant to be read by an agent you
+talk the numbers over with. See
+[docs/adr/0001-product-direction.md](docs/adr/0001-product-direction.md) and
+[GLOSSARY.md](GLOSSARY.md).
 
 Analysis, not budgeting — no limits or targets, just visibility. Your data
 lives in a local SQLite file and only ever leaves your machine to talk to Plaid

@@ -123,6 +123,17 @@ price_as_of/currency/synced_at, holding_snapshots.price), v9
    (`CategorySource::Plaid`) at parse time — seed-only, since the upsert never
    overwrites `flag` on conflict.
 
+## Periods (`core/src/period.rs`)
+
+`Period { kind: Week|Month|Quarter|Year|Custom, start, end }` is a half-open
+range of **local** calendar days `[start, end)`: ISO weeks (Monday first),
+months, quarters, years, or a custom range. `Period::parse` reads one spelling
+(`2026-11`, `2026-W45`, `2026-Q4`, `2026`, `this-`/`last-` + unit);
+`Period::resolve` adds `since`/`until` (`YYYY-MM-DD`, both inclusive).
+`bounds()` turns it into epoch seconds at local midnight, so DST weeks are an
+hour short or long. API, CLI and future screens all filter through it; see
+API.md **Dates**.
+
 ## Read / analysis layer
 
 `query` and `subscriptions` load all transactions and aggregate in memory over

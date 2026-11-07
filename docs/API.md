@@ -22,7 +22,23 @@ doc is for when you want the raw endpoints.
   the `ts` feature); `server/contract/responses.json` snapshots one instance
   of every response DTO. `make types` regenerates both; `make check` fails
   when either is stale.
-- **Timestamps** in query params and bodies are **epoch seconds** (`i64`).
+- **Dates: one convention.** Every read endpoint that filters by date takes
+  the same three params, resolved by `core::period::Period` in local time:
+  - `period` — a calendar period: `2026-11` (month), `2026-W45` (ISO week,
+    Monday first), `2026-Q4`, `2026`, or relative `this-week` / `last-week` /
+    `this-month` / `last-month` / `this-quarter` / `last-quarter` /
+    `this-year` / `last-year`.
+  - `since` / `until` — `YYYY-MM-DD`, **both inclusive**. A missing `since`
+    means from the start of history; a missing `until` means through today.
+  - `period` together with `since`/`until` is a `400`, as is a bad spelling.
+    Neither means all of history.
+  - **Legacy:** a bare integer `since`/`until` is read as epoch seconds
+    (`since` inclusive, `until` exclusive), the form the SPA still sends. New
+    endpoints don't accept it.
+  - Exceptions: `/ledger` `window` and `/perks` `lookback` are rolling
+    windows, not calendar periods (the ledger window goes with ho-2mj.3).
+- **Timestamps** in response bodies are **epoch seconds** (`i64`) unless a
+  field says `YYYY-MM-DD`.
 - **Errors** return the matching 4xx/5xx status with a JSON body
   `{ "error": "<message>" }`. An unknown `/api/*` path is a JSON `404`
   `{ "error": "no such API route" }` (it never falls through to the SPA shell).
@@ -57,9 +73,9 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 |---|---|---|
 | `GET /accounts` | `include_hidden` (default `false`) | `Account[]` — latest snapshot per account incl. `balance` (cents; credit balances negated) and `hidden`. Hidden accounts are omitted unless `include_hidden=true` (the Connections screen) |
 | `GET /transactions` | see **Transaction query** below | `TxnPage { items: Transaction[], total, total_cents }` — paginated |
-| `GET /spend/categories` | `since`, `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
-| `GET /merchants` | `since`, `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
-| `GET /flow` | `since`, `until`, `pending` | `FlowMonth[]` — Flow lanes per month (local-time buckets): `in_cents`, `out_cents` (refunds netted), `refunds_cents`, `moved` (`card_payment_cents` + `invest`/`save`/`loan_paydown`/`between` as `{out_cents, in_cents}` from checking + cards), `earned_minus_spent_cents`, `saved_cents` |
+| `GET /spend/categories` | `period` / `since` / `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
+| `GET /merchants` | `period` / `since` / `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
+| `GET /flow` | `period` / `since` / `until`, `pending` | `FlowMonth[]` — Flow lanes per month (local-time buckets): `in_cents`, `out_cents` (refunds netted), `refunds_cents`, `moved` (`card_payment_cents` + `invest`/`save`/`loan_paydown`/`between` as `{out_cents, in_cents}` from checking + cards), `earned_minus_spent_cents`, `saved_cents` |
 | `GET /subscriptions` | — | `Subscription[]` — fixed-amount recurring (≥3 occurrences) |
 | `GET /ledger` | `window` = `3mo`\|`6mo`(default)\|`12mo`\|`all` | `LedgerView` — the rhythm ledger (streams / committed / notable / transfers / noise) |
 | `GET /stream_occurrences` | `merchant` (required, normalized name), `window` | `Transaction[]` — the raw rows behind one stream |
@@ -68,10 +84,10 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 | `GET /has_credit_account` | — | `bool` — whether a credit account is ingested (card-payment suppression is only correct when true) |
 | `GET /sync_log` | `limit` (default 50) | `SyncEntry[]` — most recent sync runs |
 | `GET /balances` | — | `BalancesView { totals: {net_worth, cash, invested, credit}, groups: [{group: cash\|investments\|credit\|other, total, accounts: AccountBalance[]}] }`. `AccountBalance` = `{ account, group, cash, invested, cash_bp, idle_cash, holdings: HoldingRow[] }` (largest position first; `quantity`/`price` are decimal strings, `*_bp` basis points). Visible accounts only. `idle_cash` = investment account with ≥ $1,000 and ≥ 5% cash |
-| `GET /balances/history` | `since` (epoch secs, optional) | `DayTotals[]` — `{day: "YYYY-MM-DD", net_worth, cash, invested, credit}` per local day from the per-sync snapshots, each account's last value carried forward |
+| `GET /balances/history` | `period` / `since` / `until` (optional) | `DayTotals[]` — `{day: "YYYY-MM-DD", net_worth, cash, invested, credit}` per local day from the per-sync snapshots, each account's last value carried forward |
 | `GET /holdings` | `account` (id or label substring), `ticker` (ticker or security_id), both optional, case-insensitive | `PositionRow[]` — every current position on visible accounts, largest first: `{account_id, account, security_id, ticker, label, name, sec_type, is_cash, cusip, isin, currency, quantity, price, price_as_of, close_price, close_price_as_of, value, cost_basis, unit_cost, gain, gain_bp, share_bp, synced_at}`. `quantity`/`price`/`close_price`/`unit_cost` are decimal strings (`unit_cost` = basis ÷ qty, 4 places); `price` is the institution's, `close_price` Plaid's end-of-day (neither is a live quote); dates `YYYY-MM-DD`; `synced_at` = epoch secs of the sync that last refreshed the position (stale if a holdings fetch has been failing). Detail fields are `null` until the first holdings sync on v8. Each investment account whose balance its positions don't cover also gets one synthetic row: `security_id` `cash:uninvested`, `is_cash: true`, `quantity` = dollars at `price` `1` |
-| `GET /activity` | `account` (id or label substring), `ticker` (ticker or security_id), `type` (Plaid type or subtype: `buy`, `sell`, `dividend`, `contribution`, `fee`, …), `since` / `until` (inclusive `YYYY-MM-DD`) — all optional | `ActivityRow[]` — archived investment transactions on visible accounts, newest first: `{id, date, account_id, account, security_id, ticker, label, name, type, subtype, quantity, price, amount, fees, currency, cancel_txn_id}`. `amount` is the cash effect on the account (negative = cash out, e.g. a buy; positive = cash in, e.g. a dividend); `quantity`/`price` decimal strings |
-| `GET /holdings/history` | `since` (epoch secs), `account`, `ticker` — all optional | `PositionPoint[]` — `{taken_at, day, account_id, account, security_id, label, quantity, price, value, cost_basis, gain}` per position per holdings sync, oldest first (`price` null on pre-v8 snapshots) |
+| `GET /activity` | `account` (id or label substring), `ticker` (ticker or security_id), `type` (Plaid type or subtype: `buy`, `sell`, `dividend`, `contribution`, `fee`, …), `period` / `since` / `until` — all optional | `ActivityRow[]` — archived investment transactions on visible accounts, newest first: `{id, date, account_id, account, security_id, ticker, label, name, type, subtype, quantity, price, amount, fees, currency, cancel_txn_id}`. `amount` is the cash effect on the account (negative = cash out, e.g. a buy; positive = cash in, e.g. a dividend); `quantity`/`price` decimal strings |
+| `GET /holdings/history` | `period` / `since` / `until`, `account`, `ticker` — all optional | `PositionPoint[]` — `{taken_at, day, account_id, account, security_id, label, quantity, price, value, cost_basis, gain}` per position per holdings sync, oldest first (`price` null on pre-v8 snapshots) |
 | `GET /perks` | `lookback` = `3mo`\|`6mo`\|`12mo`(default)\|`all`, `expiring_days` (default 14) | `PerksReport { cards: CardStatus[], findings: Finding[] }` — card offers from the `OUTFLOW_PERKS` file(s) matched against spending; `kind` = `add_offer`\|`wrong_card`\|`expiring`, sorted by `est_cash_cents` desc. `400` if `OUTFLOW_PERKS` is unset; the file is re-read per request |
 
 ### Transaction query (`GET /transactions`)
@@ -80,7 +96,7 @@ All optional; a missing filter set means **everything** (pending included).
 
 | Param | Type | Meaning |
 |---|---|---|
-| `since` / `until` | epoch secs | window on `effective_date()`; `since` inclusive, `until` exclusive |
+| `period` / `since` / `until` | see **Dates** above | window on `effective_date()` |
 | `pending` | bool (default `true`) | include pending rows |
 | `transfers` | bool (default `false`) | include Moved (non-Spending) rows |
 | `q` | string | case-insensitive text over payee/description/category/normalized merchant |
@@ -97,9 +113,9 @@ All optional; a missing filter set means **everything** (pending included).
 page — page through with `offset` until you've read `total` items.
 
 ```bash
-# Most recent 50 Starbucks transactions since June, as an agent:
+# Most recent 50 coffee transactions last month, as an agent:
 curl -s -H "Authorization: Bearer $RO_TOKEN" \
-  "http://127.0.0.1:8080/api/transactions?q=starbucks&since=1717200000&limit=50&sort=date&dir=desc" | jq
+  "http://127.0.0.1:8080/api/transactions?q=coffee&period=last-month&limit=50&sort=date&dir=desc" | jq
 ```
 
 ## Mutation endpoints (POST/DELETE — full token required)

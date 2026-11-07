@@ -35,6 +35,7 @@ export type Window = "3mo" | "6mo" | "12mo" | "all";
 export type SortKey = "date" | "amount" | "merchant" | "category";
 
 export interface Filter {
+  period?: string; // e.g. "2026-11"; resolved in server-local days
   since?: number; // epoch seconds, inclusive
   until?: number; // epoch seconds, exclusive
   includePending?: boolean;
@@ -151,6 +152,7 @@ const post = <T>(path: string, body?: unknown) => req<T>("POST", path, body);
 // missing params mean "everything" (pending included, transfers excluded).
 function filterQuery(filter?: Filter, extra?: Record<string, string>): string {
   const q = new URLSearchParams(extra);
+  if (filter?.period !== undefined) q.set("period", filter.period);
   if (filter?.since !== undefined) q.set("since", String(filter.since));
   if (filter?.until !== undefined) q.set("until", String(filter.until));
   if (filter?.includePending !== undefined) q.set("pending", String(filter.includePending));

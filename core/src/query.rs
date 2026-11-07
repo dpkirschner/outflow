@@ -503,6 +503,9 @@ pub struct FlowMonth {
     pub earned_minus_spent_cents: i64,
     /// Invest + Save + LoanPaydown out, minus what came back from them.
     pub saved_cents: i64,
+    /// Earned − spent minus Saved: cash left sitting in checking (GLOSSARY).
+    /// Negative = more was saved than earned, drawn from cash.
+    pub gap_cents: i64,
 }
 
 /// Flow lanes per month (GLOSSARY: Flow lanes; ADR 0001).
@@ -538,6 +541,7 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
             moved: MovedLane::default(),
             earned_minus_spent_cents: 0,
             saved_cents: 0,
+            gap_cents: 0,
         });
         let cents = t.amount.cents();
         match lane {
@@ -569,6 +573,7 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
             m.earned_minus_spent_cents = m.in_cents - m.out_cents;
             let saving = [m.moved.invest, m.moved.save, m.moved.loan_paydown];
             m.saved_cents = saving.iter().map(|g| g.out_cents - g.in_cents).sum();
+            m.gap_cents = m.earned_minus_spent_cents - m.saved_cents;
             m
         })
         .collect();
@@ -855,6 +860,7 @@ mod tests {
         );
         assert_eq!(m.earned_minus_spent_cents, 296000);
         assert_eq!(m.saved_cents, 50000 - 10000 + 20000 + 30000);
+        assert_eq!(m.gap_cents, 296000 - 90000, "cash left in checking");
 
         // Category totals agree with Out: the refund nets in Groceries.
         let cats = spend_by_category(&s, &TxnFilter::all()).unwrap();

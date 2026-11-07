@@ -3,14 +3,14 @@
 // params. The server answers every non-/api, non-/assets path with
 // index.html (spa_index), so any path here is safe to reload.
 //
-// View state (the period, open panels) stays in app memory, not the URL.
+// View state (the selected month, open panels) stays in app memory, not the URL.
 import { useEffect, useState } from "react";
 
-export type Screen = "ledger" | "outflows" | "balances" | "settings";
+export type Screen = "ledger" | "flow" | "balances" | "settings";
 
 export const SCREENS: { screen: Screen; path: string; label: string }[] = [
   { screen: "ledger", path: "/ledger", label: "Ledger" },
-  { screen: "outflows", path: "/outflows", label: "Outflows" },
+  { screen: "flow", path: "/flow", label: "Flow" },
   { screen: "balances", path: "/balances", label: "Balances" },
   { screen: "settings", path: "/settings", label: "Settings" },
 ];

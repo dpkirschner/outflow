@@ -254,6 +254,11 @@ export type FlowMonth = {
    * Invest + Save + LoanPaydown out, minus what came back from them.
    */
   saved_cents: number,
+  /**
+   * Earned − spent minus Saved: cash left sitting in checking (GLOSSARY).
+   * Negative = more was saved than earned, drawn from cash.
+   */
+  gap_cents: number,
 };
 
 export type Cadence = "Monthly" | "Yearly";

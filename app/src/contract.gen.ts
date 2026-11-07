@@ -141,7 +141,8 @@ export const flowMonth: FlowMonth = {
     }
   },
   "earned_minus_spent_cents": 190000,
-  "saved_cents": 95000
+  "saved_cents": 95000,
+  "gap_cents": 95000
 };
 
 export const subscription: Subscription = {

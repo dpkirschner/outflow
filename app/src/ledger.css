@@ -602,7 +602,7 @@ body:has(.lg-app) {
   margin-top: 14px;
 }
 /* Each bar is a column: the bar sits in a fixed-height well, its dollar value
-   printed underneath (mirrors the Outflows month chart). */
+   printed underneath (mirrors the Flow month strip). */
 .lg-barcol {
   flex: 1;
   min-width: 0;
@@ -1066,194 +1066,427 @@ body:has(.lg-app) {
   margin: 12px 0 8px;
 }
 
-/* outflows screen */
-.of-wrap {
+/* ── Flow screen (fl-*) ──────────────────────────────────────────────── */
+.fl-wrap {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
-.of-months {
+.fl-wrap :focus-visible {
+  outline: 2px solid var(--lg-teal);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.fl-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.fl-state {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 12px;
+  padding: 24px;
+  color: var(--lg-dim);
+  font-size: 13px;
   display: flex;
-  gap: 6px;
-  align-items: flex-end;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
-.of-month {
+.fl-state p {
+  margin: 0;
+}
+.fl-state-hint a {
+  color: var(--lg-teal);
+  text-underline-offset: 3px;
+}
+
+/* month strip: Out per month */
+.fl-strip-key {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--lg-dim);
+}
+.fl-strip ol {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--lg-line) transparent;
+}
+.fl-month {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  background: none;
+  min-width: 60px;
+  padding: 8px 6px 6px;
+  background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
-  padding: 8px 6px 6px;
-  cursor: pointer;
   color: var(--lg-dim);
-  min-width: 58px;
+  font: inherit;
+  cursor: pointer;
 }
-.of-month:hover {
+.fl-month:hover {
   background: var(--lg-panel2);
-}
-.of-month.on {
-  background: var(--lg-panel);
   border-color: var(--lg-line);
+}
+.fl-month.on {
+  background: #1c2c40;
+  border-color: #2b415c;
   color: var(--lg-text);
 }
-/* "All" (lifetime) selector — separated from the month series and given its own
-   blue accent so its full-height bar doesn't read as just another month. */
-.of-month-all {
-  margin-right: 4px;
-  padding-right: 10px;
-  border-right: 1px solid var(--lg-line);
-  border-radius: 8px;
+.fl-bar-track {
+  height: 48px;
+  display: flex;
+  align-items: flex-end;
 }
-.of-month-all .of-bar {
-  background: var(--lg-blue);
+.fl-bar {
+  width: 20px;
+  background: var(--lg-faint);
+  border-radius: 4px 4px 0 0;
 }
-.of-bar {
-  width: 22px;
+.fl-month:hover .fl-bar {
+  background: var(--lg-dim);
+}
+.fl-month.on .fl-bar {
   background: var(--lg-teal);
-  opacity: 0.55;
-  border-radius: 3px 3px 0 0;
-  align-self: center;
 }
-.of-month.on .of-bar {
-  opacity: 1;
-}
-.of-mlabel {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.of-mout {
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: var(--lg-faint);
-}
-.of-controls {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.of-search {
-  flex: 1;
-  min-width: 220px;
-  background: var(--lg-panel);
-  border: 1px solid var(--lg-line);
-  border-radius: 8px;
-  color: var(--lg-text);
-  padding: 8px 12px;
-  font-size: 13px;
-}
-.of-search:focus {
-  outline: none;
-  border-color: var(--lg-teal);
-}
-.of-select {
-  background: var(--lg-panel);
-  border: 1px solid var(--lg-line);
-  border-radius: 8px;
-  color: var(--lg-text);
-  padding: 7px 8px;
-  font-size: 12px;
-}
-.of-chip {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--lg-dim);
-  cursor: pointer;
-}
-.of-total {
-  font-size: 12px;
-  color: var(--lg-dim);
-}
-.of-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  /* Fixed layout so column widths don't reflow when row content changes
-     (e.g. toggling "show excluded" swaps in different merchants/actions).
-     Merchant (col 2) has no width set, so it absorbs the remaining space and
-     clips with an ellipsis; every other column is pinned. */
-  table-layout: fixed;
-}
-.of-table th:nth-child(1),
-.of-table td:nth-child(1) { width: 88px; }   /* date */
-.of-table th:nth-child(3),
-.of-table td:nth-child(3) {
-  width: 150px;  /* category */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.of-table td:nth-child(3) .of-select { max-width: 100%; }
-.of-table th:nth-child(4),
-.of-table td:nth-child(4) { width: 176px; }  /* account (colored source chip) */
-.of-table th:nth-child(5),
-.of-table td:nth-child(5) { width: 112px; }  /* amount */
-.of-table th:nth-child(6),
-.of-table td:nth-child(6) { width: 96px; }   /* row action */
-.of-table th {
-  text-align: left;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--lg-faint);
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--lg-line);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-.of-table td {
-  padding: 7px 8px;
-  border-bottom: 1px solid var(--lg-line);
-}
-.of-table .num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.of-date {
-  color: var(--lg-dim);
-  white-space: nowrap;
-}
-.of-pending {
-  flex: none;
-  color: var(--lg-amber);
-  font-size: 10px;
+.fl-mlabel {
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  padding: 1px 6px;
+  white-space: nowrap;
+}
+.fl-mout {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--lg-dim);
+  white-space: nowrap;
+}
+.fl-month.on .fl-mout {
+  color: var(--lg-text);
+}
+
+/* month title + headline pair */
+.fl-title {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.fl-sofar {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lg-amber);
+  padding: 1px 8px;
   border: 1px solid rgba(251, 191, 36, 0.35);
   border-radius: 999px;
-  line-height: 1.5;
 }
-.of-merch {
-  max-width: 300px;
+.fl-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fl-pair {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.fl-pair > div {
+  background: var(--lg-panel2);
+  border: 1px solid var(--lg-line);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.fl-pair dt {
+  font-size: 13px;
+  color: var(--lg-dim);
+}
+.fl-pair dd {
+  margin: 4px 0 0;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.fl-gap {
+  margin: 0;
+  font-size: 13px;
+  color: var(--lg-dim);
+  max-width: 70ch;
+}
+.fl-gap b {
+  color: var(--lg-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* three equal lanes */
+.fl-lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.fl-lane {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+.fl-lane-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.fl-lane-figure {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.fl-lane-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--lg-dim);
+}
+.fl-rows {
+  margin: 6px 0 0;
+  border-top: 1px solid var(--lg-line);
+}
+.fl-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid #172230;
+  font-size: 13px;
+}
+.fl-row:last-child {
+  border-bottom: 0;
+}
+.fl-row dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fl-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.fl-row.quiet {
+  color: var(--lg-dim);
+}
+.fl-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--lg-dim);
+}
+.fl-more {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--lg-line);
+  border-radius: 6px;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.fl-more:hover {
+  color: var(--lg-text);
+  border-color: var(--lg-dim);
+}
+
+/* transactions */
+.fl-txns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+.fl-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.fl-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fl-field {
+  display: flex;
+}
+.fl-field-grow {
+  flex: 1 1 240px;
+}
+.fl-input {
+  width: 100%;
+  min-height: 36px;
+  box-sizing: border-box;
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 8px;
+  color: var(--lg-text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  accent-color: var(--lg-teal);
+}
+.fl-input::placeholder {
+  color: var(--lg-dim);
+}
+.fl-input:focus-visible {
+  outline: 2px solid var(--lg-teal);
+  outline-offset: 0;
+  border-color: var(--lg-teal);
+}
+.fl-input-sm {
+  min-height: 28px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.fl-total {
+  margin: 0;
+  font-size: 12px;
+  color: var(--lg-dim);
+}
+.fl-total b {
+  color: var(--lg-text);
+  font-variant-numeric: tabular-nums;
+}
+.fl-table-wrap {
+  overflow-x: auto;
+}
+.fl-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.fl-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lg-dim);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--lg-line);
+  white-space: nowrap;
+}
+.fl-table th:nth-child(1) { width: 64px; }
+.fl-table th:nth-child(3) { width: 140px; }
+.fl-table th:nth-child(4) { width: 164px; }
+.fl-table th:nth-child(5) { width: 112px; }
+.fl-table th:nth-child(6) { width: 132px; }
+.fl-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid #172230;
+  vertical-align: middle;
+}
+.fl-table tbody tr:hover {
+  background: #0e1620;
+}
+.fl-table .num {
+  text-align: right;
+}
+.fl-sort {
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 4px;
+}
+.fl-sort:hover {
+  color: var(--lg-text);
+}
+.fl-sort-mark {
+  min-width: 0.8em;
+  color: var(--lg-teal);
+}
+.fl-date {
+  color: var(--lg-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.fl-merch {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
-.of-merch-name {
+.fl-merch-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.of-cat {
-  cursor: pointer;
-  border-bottom: 1px dotted var(--lg-faint);
+.fl-pending,
+.fl-tag {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 6px;
+  border-radius: 4px;
+  line-height: 1.6;
+  white-space: nowrap;
 }
-.of-acct {
+.fl-pending {
+  color: var(--lg-amber);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+}
+.fl-tag {
+  color: var(--lg-dim);
+  border: 1px solid var(--lg-line);
+}
+.fl-cat-cell {
   overflow: hidden;
 }
-/* Reuse the ledger's kind-colored account chip; truncate if it can't fit the
-   fixed cell rather than widening the column. */
-.of-acct .lg-src {
+.fl-cat {
+  max-width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed var(--lg-faint);
+  border-radius: 0;
+  padding: 2px 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-cat:hover {
+  border-bottom-color: var(--lg-teal);
+}
+.fl-col-acct {
+  overflow: hidden;
+}
+.fl-col-acct .lg-src {
   display: inline-block;
   max-width: 100%;
   overflow: hidden;
@@ -1261,42 +1494,96 @@ body:has(.lg-app) {
   white-space: nowrap;
   vertical-align: middle;
 }
-.of-out {
-  color: var(--lg-text);
+.fl-faint {
+  color: var(--lg-dim);
 }
-.of-in {
+.fl-amt {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fl-amt.in {
   color: var(--lg-green);
 }
-/* Summary "net out" total — spent more than received (money lost this view). */
-.of-netout {
-  color: var(--lg-red);
+.fl-moved .fl-merch-name,
+.fl-moved .fl-amt {
+  color: var(--lg-dim);
 }
-.of-excluded td {
-  opacity: 0.5;
-}
-.of-rowact {
+.fl-col-act {
   text-align: right;
 }
-.of-mini {
+.fl-mini {
   background: none;
   border: 1px solid var(--lg-line);
   border-radius: 6px;
-  color: var(--lg-faint);
-  font-size: 10px;
-  padding: 2px 7px;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  white-space: nowrap;
   cursor: pointer;
 }
-.of-mini:hover {
+.fl-mini:hover {
   color: var(--lg-text);
   border-color: var(--lg-dim);
 }
-.of-pager {
+/* With a pointer, the row action waits for the row: one at a time instead of
+   a column of identical buttons. Keyboard focus shows it too. */
+@media (hover: hover) {
+  .fl-mini {
+    opacity: 0;
+  }
+  .fl-table tr:hover .fl-mini,
+  .fl-table tr:focus-within .fl-mini {
+    opacity: 1;
+  }
+}
+.fl-cat.unset {
+  color: var(--lg-dim);
+}
+.fl-cat-cell .fl-tag {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+}
+.fl-pager {
   display: flex;
   gap: 12px;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   color: var(--lg-dim);
+}
+
+/* narrow: lanes stack In → Out → Moved; the table keeps date, merchant,
+   category and amount */
+@media (max-width: 720px) {
+  .fl-lanes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .fl-col-acct,
+  .fl-col-act {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .fl-pair dd {
+    font-size: 22px;
+  }
+  .fl-table th:nth-child(1) { width: 52px; }
+  .fl-table th:nth-child(3) { width: 96px; }
+  .fl-table th:nth-child(5) { width: 96px; }
+  .fl-month {
+    min-height: 44px;
+  }
+  /* Tags wrap under the name instead of squeezing it. */
+  .fl-merch {
+    flex-wrap: wrap;
+    gap: 2px 6px;
+  }
+  .fl-merch-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* "Allow holdings" as a clickable investment-gold chip, matching the account

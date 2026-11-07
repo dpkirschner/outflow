@@ -9,6 +9,21 @@ export function formatCents(cents: number): string {
   return `${neg ? "-" : ""}$${dollars}`;
 }
 
+/// Signed amount for money in vs out, so the sign carries direction and
+/// colour never has to (DESIGN.md Not-Colour-Alone): +$1,234.56, −$1,234.56,
+/// $0.00. Uses a true minus sign.
+export function signedCents(cents: number): string {
+  const body = formatCents(Math.abs(cents));
+  return cents > 0 ? `+${body}` : cents < 0 ? `\u2212${body}` : body;
+}
+
+/// An amount that isn't a direction (a refund total, a gap): $1,234.56.
+/// With `minus`, a negative value keeps a true minus sign.
+export function unsignedCents(cents: number, minus = false): string {
+  const body = formatCents(Math.abs(cents));
+  return minus && cents < 0 ? `\u2212${body}` : body;
+}
+
 /// Compact form for axis ticks and chart labels: $1.2k, $980, $3.4M.
 export function formatCentsShort(cents: number): string {
   const neg = cents < 0;

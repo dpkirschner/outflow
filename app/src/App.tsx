@@ -9,7 +9,7 @@ import { StreamsCard, type SortMode } from "./components/ledger/Streams";
 import { StreamSlideOver } from "./components/ledger/SlideOver";
 import { coverageText } from "./components/ledger/labels";
 import { Balances } from "./components/Balances";
-import { Outflows } from "./components/Outflows";
+import { Flow } from "./components/Flow";
 import { Settings } from "./components/Settings";
 import { SCREENS, onLinkClick, useScreen } from "./route";
 
@@ -27,6 +27,9 @@ export default function App() {
   const [view, setView] = useState<LedgerView | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vocab, setVocab] = useState<string[]>([]);
+  // The selected calendar month (`YYYY-MM`), shared across screens so Flow
+  // and, later, Holdings read the same one. null = the latest with data.
+  const [month, setMonth] = useState<string | null>(null);
   const [hasCard, setHasCard] = useState(false);
   const [win, setWin] = useState<Window>("6mo");
   const [sort, setSort] = useState<SortMode>("size");
@@ -227,9 +230,15 @@ export default function App() {
           <Balances notify={notify} />
           {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
-      ) : tab === "outflows" ? (
+      ) : tab === "flow" ? (
         <>
-          <Outflows accounts={accounts} vocab={vocab} notify={notify} />
+          <Flow
+            accounts={accounts}
+            vocab={vocab}
+            notify={notify}
+            month={month}
+            onMonth={setMonth}
+          />
           {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : (

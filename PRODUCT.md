@@ -49,9 +49,9 @@ hidden and never counted as spending or income.
   a browser. Data arrives from Plaid on a background sync (every few
   hours) or a manual pull.
 - Screens (per ADR 0001): Check-in (home), Holdings, Flow, Find money
-  (placeholder), Settings. The UI is mid-reshape: the current Ledger and
-  Outflows tabs are being replaced by Flow, and Balances becomes
-  Holdings.
+  (placeholder), Settings. The UI is mid-reshape: Flow has replaced
+  Outflows, the Ledger is next (Recurring, on the Flow screen), and
+  Balances becomes Holdings.
 - Upkeep (bank connections, card-payment match review, categorize,
   reset) lives in Settings, away from the analysis screens.
 

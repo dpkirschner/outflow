@@ -7,7 +7,7 @@ export type SortMode = "size" | "change";
 // Hand-rolled flexbox rhythm strip (not Recharts, per spec). Heights normalized
 // to the series max; the final bar is the in-progress month (muted teal). The
 // `big` variant (sidebar detail) has room to print each bar's dollar value
-// underneath, mirroring the Outflows month chart; the compact row variant stays
+// underneath, mirroring the Flow month strip; the compact row variant stays
 // a pure sparkline.
 export function RhythmStrip({ spark, big }: { spark: number[]; big?: boolean }) {
   const max = Math.max(1, ...spark.map((v) => Math.abs(v)));

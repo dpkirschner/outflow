@@ -169,6 +169,7 @@ fn flow_month() -> FlowMonth {
         },
         earned_minus_spent_cents: 190_000,
         saved_cents: 95_000,
+        gap_cents: 95_000,
     }
 }
 

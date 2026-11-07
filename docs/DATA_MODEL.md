@@ -193,9 +193,9 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
     month (never double-counted, still counted when one leg is missing);
     both sides are reported (`card_payment_bank_cents`,
     `card_payment_card_cents`).
-  - **Earned − spent** = In − Out; **Saved** = Invest + Save + LoanPaydown out
+  - **Earned − spent** = In − Out; **gap** = earned − spent − saved; **Saved** = Invest + Save + LoanPaydown out
     of the spending side, minus what came back.
-- `search_transactions(store, TxnQuery) -> TxnPage` — the Outflows screen and
+- `search_transactions(store, TxnQuery) -> TxnPage` — the Flow screen and
   CLI `txns` query: case-insensitive text over payee/description/category/
   normalized merchant, filters (account, category, source, flag, amount band,
   `lane`, `uncategorized`, `direction` = out|in by sign; a lane reads Moved

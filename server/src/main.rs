@@ -149,7 +149,7 @@ fn build_app(state: AppState) -> Router {
         ));
 
     // SPA fallback to index.html (status 200) is load-bearing: the screen
-    // routes (/ledger, /settings, ...) must survive a reload, and /oauth-return
+    // routes (/flow, /settings, ...) must survive a reload, and /oauth-return
     // must serve the app so Plaid Link can resume after an OAuth bank redirect.
     Router::new()
         .nest("/api", api)
@@ -374,12 +374,7 @@ mod tests {
         std::fs::write(dir.join("index.html"), "<!doctype html><div id=root></div>").unwrap();
         let app = build_app(test_state(None, None, dir.to_str().unwrap()));
 
-        for path in [
-            "/",
-            "/ledger",
-            "/settings",
-            "/oauth-return?oauth_state_id=x",
-        ] {
+        for path in ["/", "/flow", "/settings", "/oauth-return?oauth_state_id=x"] {
             let res = app
                 .clone()
                 .oneshot(HttpRequest::get(path).body(Body::empty()).unwrap())

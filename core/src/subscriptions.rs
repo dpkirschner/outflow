@@ -1,31 +1,14 @@
+//! The one merchant normalizer (`normalize_payee`, invariant #4) and the one
+//! recurring detector (`detect_rhythms`, GLOSSARY: Recurring). The recurring
+//! list built on it lives in `recurring`.
+
 use crate::model::{Transaction, TxnFlag};
 use serde::Serialize;
 use std::collections::HashMap;
 
 const DAY: i64 = 86400;
 const MIN_OCCURRENCES: usize = 3;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub enum Cadence {
-    Monthly,
-    Yearly,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct Subscription {
-    /// Normalized merchant (`normalize_payee`).
-    pub payee: String,
-    pub cadence: Cadence,
-    /// Median charge, positive.
-    pub typical_amount_cents: i64,
-    pub occurrences: usize,
-    pub first_seen: i64,
-    pub last_seen: i64,
-    /// Sum of all charges, positive.
-    pub total_cents: i64,
-}
+pub(crate) const MONTH_DAYS: f64 = 30.44;
 
 fn is_processor_prefix(head: &str) -> bool {
     matches!(
@@ -62,135 +45,18 @@ pub(crate) fn median(sorted: &[i64]) -> i64 {
     sorted[sorted.len() / 2]
 }
 
-pub fn detect(txns: &[Transaction]) -> Vec<Subscription> {
-    let mut groups: HashMap<String, Vec<&Transaction>> = HashMap::new();
-    // Spending only: a recurring transfer or card payment is not a subscription.
-    for t in txns
-        .iter()
-        .filter(|t| t.amount.is_outflow() && t.flag == TxnFlag::Spending)
-    {
-        let key = normalize_payee(t.merchant());
-        if key.is_empty() {
-            continue;
-        }
-        groups.entry(key).or_default().push(t);
-    }
-
-    let mut out = Vec::new();
-
-    for (payee, mut items) in groups {
-        if items.len() < MIN_OCCURRENCES {
-            continue;
-        }
-        items.sort_by_key(|t| t.posted);
-
-        let mut amounts: Vec<i64> = items.iter().map(|t| t.amount.cents().abs()).collect();
-        amounts.sort_unstable();
-        let med = median(&amounts);
-        let tol = std::cmp::max(100, med / 20);
-        let stable = amounts.iter().filter(|a| (**a - med).abs() <= tol).count();
-        if stable * 3 < amounts.len() * 2 {
-            continue;
-        }
-
-        let mut monthly = 0usize;
-        let mut yearly = 0usize;
-        let mut gaps = 0usize;
-        for w in items.windows(2) {
-            let days = (w[1].posted - w[0].posted) / DAY;
-            gaps += 1;
-            if (26..=35).contains(&days) {
-                monthly += 1;
-            } else if (350..=380).contains(&days) {
-                yearly += 1;
-            }
-        }
-        if gaps == 0 {
-            continue;
-        }
-
-        let cadence = if monthly * 2 >= gaps && monthly >= yearly {
-            Cadence::Monthly
-        } else if yearly * 2 >= gaps {
-            Cadence::Yearly
-        } else {
-            continue;
-        };
-
-        let first_seen = items.first().unwrap().posted;
-        let last_seen = items.last().unwrap().posted;
-        let total_cents = amounts.iter().sum();
-
-        out.push(Subscription {
-            payee,
-            cadence,
-            typical_amount_cents: med,
-            occurrences: items.len(),
-            first_seen,
-            last_seen,
-            total_cents,
-        });
-    }
-
-    out.sort_by_key(|x| std::cmp::Reverse(x.total_cents));
-    out
-}
-
-/// How often a stream recurs, classified from the median inter-occurrence
-/// interval. Distinct from `Cadence` (Monthly/Yearly, used by `detect`) — a
-/// stream can be daily or weekly. The UI maps each variant to a badge label.
+/// How often a recurring merchant charges, classified from the median gap
+/// between charges. The UI maps each variant to a label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum StreamCadence {
     Daily,       // "~daily"
     FewPerWeek,  // "~3×/wk"
-    Weekly,      // "~weekly"
+    Weekly,      // "weekly"
     FewPerMonth, // "~4×/mo"
     Monthly,     // "monthly"
     Yearly,      // "yearly"
-    /// Spacing too erratic to classify. The auto-detector never emits this
-    /// (it rejects irregular streams); it's only produced when the user
-    /// force-promotes a noise merchant into a stream via `rhythm_for_items`.
-    Irregular, // "irregular"
 }
-
-/// Direction of a stream's monthly-rate change, derived from `trend_pct` for
-/// coloring (Rising = spending more).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub enum Trend {
-    Rising,
-    Falling,
-    Steady,
-}
-
-/// A recurring merchant surfaced as a time series (the rhythm-ledger row). The
-/// data contract the stream row and slide-over render directly.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct RhythmEntry {
-    pub merchant: String,
-    pub cadence: StreamCadence,
-    pub occurrence_count: usize,
-    pub median_amount_cents: i64,
-    pub amount_min_cents: i64,
-    pub amount_max_cents: i64,
-    /// Average monthly spend over completed months (the in-progress month is
-    /// excluded so a partial month can't deflate the rate).
-    pub monthly_estimate_cents: i64,
-    pub last_seen: i64,
-    /// Signed pct change of the monthly rate: last completed month vs the mean of
-    /// the prior three completed months. 0.0 when there isn't enough history.
-    pub trend_pct: f64,
-    pub trend: Trend,
-    /// Per-month spend for the rhythm strip, oldest→newest (up to the last 6
-    /// months of the window). The final element is the in-progress month.
-    pub spark_cents: Vec<i64>,
-}
-
-pub(crate) const MONTH_DAYS: f64 = 30.44;
-/// Number of trailing months drawn in the rhythm strip.
-const SPARK_MONTHS: usize = 6;
 
 fn f64_median(sorted: &[f64]) -> f64 {
     sorted[sorted.len() / 2]
@@ -238,111 +104,21 @@ fn classify_stream_cadence(sorted_dates: &[i64]) -> Option<(StreamCadence, f64)>
     Some((cadence, med))
 }
 
-/// Per-completed-month spend and per-month series for a merchant's occurrences.
-/// `now` fixes the in-progress month (its `month_index`) so a partial current
-/// month is excluded from the rate/trend math but still drawn in the strip.
-struct MonthlySpend {
-    /// completed-month totals, oldest→newest (in-progress month excluded)
-    completed: Vec<i64>,
-    /// last `SPARK_MONTHS` months incl. in-progress, oldest→newest
-    spark: Vec<i64>,
-}
-
-fn monthly_spend(items: &[&Transaction], now: i64) -> MonthlySpend {
-    use crate::query::month_index;
-    let current = month_index(now);
-    let mut by_month: std::collections::BTreeMap<i64, i64> = std::collections::BTreeMap::new();
-    for t in items {
-        let mi = month_index(t.effective_date());
-        *by_month.entry(mi).or_insert(0) += t.amount.cents().abs();
-    }
-    if by_month.is_empty() {
-        return MonthlySpend {
-            completed: vec![],
-            spark: vec![],
-        };
-    }
-    // Dense range from first to last observed month so gaps count as $0 months.
-    let first = *by_month.keys().next().unwrap();
-    let last = *by_month.keys().next_back().unwrap();
-    let mut dense: Vec<(i64, i64)> = Vec::new();
-    for mi in first..=last {
-        dense.push((mi, *by_month.get(&mi).unwrap_or(&0)));
-    }
-    let completed = dense
-        .iter()
-        .filter(|(mi, _)| *mi < current)
-        .map(|(_, c)| *c)
-        .collect();
-    let spark = dense
-        .iter()
-        .rev()
-        .take(SPARK_MONTHS)
-        .rev()
-        .map(|(_, c)| *c)
-        .collect();
-    MonthlySpend { completed, spark }
-}
-
-/// Monthly rate (mean of completed months) and its signed trend pct (last
-/// completed month vs the mean of the three before it).
-fn rate_and_trend(completed: &[i64]) -> (i64, f64) {
-    if completed.is_empty() {
-        return (0, 0.0);
-    }
-    let rate = completed.iter().sum::<i64>() / completed.len() as i64;
-    if completed.len() < 2 {
-        return (rate, 0.0);
-    }
-    let last = *completed.last().unwrap() as f64;
-    let prior = &completed[completed.len().saturating_sub(4)..completed.len() - 1];
-    let base = prior.iter().sum::<i64>() as f64 / prior.len() as f64;
-    let pct = if base > 0.0 {
-        (last - base) / base * 100.0
-    } else {
-        0.0
-    };
-    (rate, pct)
-}
-
-fn trend_dir(pct: f64) -> Trend {
-    if pct > 10.0 {
-        Trend::Rising
-    } else if pct < -10.0 {
-        Trend::Falling
-    } else {
-        Trend::Steady
-    }
-}
-
-/// Detect merchants that recur on a regular cadence, WITHOUT the fixed-amount
-/// constraint of `detect` — this is what surfaces variable streams (coffee,
-/// groceries, utilities) that `detect` filters out. Groups Spending outflows by
-/// normalized merchant, keys cadence off the behavioral date, and reports the
-/// amount range/median, monthly rate, and trend (completed months only, per
-/// `now`). Sorted by monthly estimate desc.
-pub fn detect_rhythms(txns: &[Transaction], now: i64) -> Vec<RhythmEntry> {
-    let mut out: Vec<RhythmEntry> = rhythm_groups(txns)
-        .into_iter()
-        .map(|g| build_rhythm(g.merchant, &g.items, g.cadence, g.med_gap, now))
-        .collect();
-    out.sort_by_key(|x| std::cmp::Reverse(x.monthly_estimate_cents));
-    out
-}
-
-/// A merchant that passed the detector's gates: its Spending outflows sorted
-/// by behavioral date, the cadence, and the median gap in days.
-pub(crate) struct RhythmGroup<'a> {
+/// A merchant that passed the detector: its Spending outflows sorted by
+/// behavioral date, the cadence, and the median gap in days.
+pub struct RhythmGroup<'a> {
+    /// Normalized merchant (`normalize_payee`).
     pub merchant: String,
     pub items: Vec<&'a Transaction>,
     pub cadence: StreamCadence,
     pub med_gap: f64,
 }
 
-/// The detector's gates on their own: group Spending outflows by normalized
-/// merchant, keep merchants with at least `MIN_OCCURRENCES` charges spaced
-/// regularly. Unordered.
-pub(crate) fn rhythm_groups(txns: &[Transaction]) -> Vec<RhythmGroup<'_>> {
+/// The recurring detector: group Spending outflows by normalized merchant and
+/// keep merchants with at least `MIN_OCCURRENCES` charges spaced regularly
+/// (amounts may vary, so groceries and utilities count, not just fixed
+/// subscriptions). Unordered.
+pub fn detect_rhythms(txns: &[Transaction]) -> Vec<RhythmGroup<'_>> {
     let mut groups: HashMap<String, Vec<&Transaction>> = HashMap::new();
     for t in txns
         .iter()
@@ -356,17 +132,14 @@ pub(crate) fn rhythm_groups(txns: &[Transaction]) -> Vec<RhythmGroup<'_>> {
     }
 
     let mut out = Vec::new();
-
     for (merchant, mut items) in groups {
         if items.len() < MIN_OCCURRENCES {
             continue;
         }
         items.sort_by_key(|t| t.effective_date());
         let dates: Vec<i64> = items.iter().map(|t| t.effective_date()).collect();
-        // Gate: only regular spacing qualifies for auto-detection.
-        let (cadence, med_gap) = match classify_stream_cadence(&dates) {
-            Some(c) => c,
-            None => continue,
+        let Some((cadence, med_gap)) = classify_stream_cadence(&dates) else {
+            continue;
         };
         out.push(RhythmGroup {
             merchant,
@@ -378,92 +151,13 @@ pub(crate) fn rhythm_groups(txns: &[Transaction]) -> Vec<RhythmGroup<'_>> {
     out
 }
 
-/// Assemble a `RhythmEntry` from a merchant's occurrences (assumed sorted by
-/// behavioral date), given an already-decided cadence and median gap. Shared by
-/// the auto-detector and the force-promote path so their numbers can't diverge.
-fn build_rhythm(
-    merchant: String,
-    items: &[&Transaction],
-    cadence: StreamCadence,
-    med_gap: f64,
-    now: i64,
-) -> RhythmEntry {
-    let mut amounts: Vec<i64> = items.iter().map(|t| t.amount.cents().abs()).collect();
-    let amount_min = *amounts.iter().min().unwrap();
-    let amount_max = *amounts.iter().max().unwrap();
-    amounts.sort_unstable();
-    let med_amount = median(&amounts);
-
-    let ms = monthly_spend(items, now);
-    let (mut monthly_estimate, trend_pct) = rate_and_trend(&ms.completed);
-    // Fallback when there isn't a completed month yet: median × frequency.
-    if monthly_estimate == 0 {
-        let per_month = (MONTH_DAYS / med_gap.max(0.5)).min(31.0);
-        monthly_estimate = (med_amount as f64 * per_month).round() as i64;
-    }
-
-    RhythmEntry {
-        merchant,
-        cadence,
-        occurrence_count: items.len(),
-        median_amount_cents: med_amount,
-        amount_min_cents: amount_min,
-        amount_max_cents: amount_max,
-        monthly_estimate_cents: monthly_estimate,
-        last_seen: items.last().map(|t| t.effective_date()).unwrap_or(0),
-        trend_pct,
-        trend: trend_dir(trend_pct),
-        spark_cents: ms.spark,
-    }
-}
-
-/// Build a `RhythmEntry` for a merchant's occurrences WITHOUT the
-/// min-occurrences / regularity gates `detect_rhythms` enforces — the user has
-/// asserted this is a stream (force-promote from Noise). Cadence is the detected
-/// one when the spacing happens to be regular, else `Irregular`. Returns `None`
-/// only when `items` is empty. `items` need not be pre-sorted.
-pub fn rhythm_for_items(merchant: String, items: &[&Transaction], now: i64) -> Option<RhythmEntry> {
-    if items.is_empty() {
-        return None;
-    }
-    let mut items: Vec<&Transaction> = items.to_vec();
-    items.sort_by_key(|t| t.effective_date());
-    let dates: Vec<i64> = items.iter().map(|t| t.effective_date()).collect();
-    let (cadence, med_gap) = match classify_stream_cadence(&dates) {
-        Some(c) => c,
-        // Erratic (or too few) spacing: label Irregular and derive the median
-        // gap directly for the monthly-rate fallback. A lone occurrence has no
-        // gap, so assume ~monthly rather than divide by zero.
-        None => (
-            StreamCadence::Irregular,
-            median_gap_days(&dates).unwrap_or(MONTH_DAYS),
-        ),
-    };
-    Some(build_rhythm(merchant, &items, cadence, med_gap, now))
-}
-
-/// Median gap (in days) between consecutive dates; `None` for fewer than two.
-fn median_gap_days(sorted_dates: &[i64]) -> Option<f64> {
-    if sorted_dates.len() < 2 {
-        return None;
-    }
-    let mut gaps: Vec<f64> = sorted_dates
-        .windows(2)
-        .map(|w| (w[1] - w[0]) as f64 / DAY as f64)
-        .collect();
-    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    Some(f64_median(&gaps))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::money::Money;
 
-    // Noon on 2021-01-15 UTC — mid-month so month bucketing is tz-unambiguous.
+    // Noon on 2021-01-15 UTC.
     const BASE: i64 = 1610712000;
-    // A `now` far after all fixtures, so every fixture month counts as completed.
-    const LATER: i64 = BASE + 400 * DAY;
 
     fn charge(id: &str, day_offset: i64, cents: i64, merchant: &str) -> Transaction {
         Transaction {
@@ -486,42 +180,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_monthly_subscription() {
-        let txns = vec![
-            charge("1", 0, -1599, "Netflix"),
-            charge("2", 30, -1599, "Netflix"),
-            charge("3", 60, -1599, "Netflix"),
-            charge("4", 91, -1599, "Netflix"),
-        ];
-        let subs = detect(&txns);
-        assert_eq!(subs.len(), 1);
-        assert_eq!(subs[0].cadence, Cadence::Monthly);
-        assert_eq!(subs[0].typical_amount_cents, 1599);
-        assert_eq!(subs[0].occurrences, 4);
-    }
-
-    #[test]
-    fn ignores_irregular_purchases() {
-        let txns = vec![
-            charge("1", 0, -1200, "Corner Store"),
-            charge("2", 3, -4500, "Corner Store"),
-            charge("3", 47, -800, "Corner Store"),
-        ];
-        let subs = detect(&txns);
-        assert!(subs.is_empty());
-    }
-
-    #[test]
-    fn ignores_inflows() {
-        let txns = vec![
-            charge("1", 0, 200000, "Payroll"),
-            charge("2", 30, 200000, "Payroll"),
-            charge("3", 60, 200000, "Payroll"),
-        ];
-        assert!(detect(&txns).is_empty());
-    }
-
-    #[test]
     fn normalizes_merchant_noise() {
         assert_eq!(normalize_payee("SQ *BLUE BOTTLE 4471"), "blue bottle");
         assert_eq!(normalize_payee("AMZN Mktp US*2X4K9"), "amzn mktp us");
@@ -529,78 +187,27 @@ mod tests {
     }
 
     #[test]
-    fn groups_across_merchant_noise() {
+    fn groups_across_merchant_noise_with_varying_amounts() {
         let txns = vec![
-            charge("1", 0, -1599, "SQ *SPOTIFY 001"),
-            charge("2", 30, -1599, "SQ *SPOTIFY 002"),
-            charge("3", 60, -1599, "SQ *SPOTIFY 003"),
+            charge("1", 0, -1000, "SQ *PG&E 001"),
+            charge("2", 31, -1200, "SQ *PG&E 002"),
+            charge("3", 59, -1500, "SQ *PG&E 003"),
         ];
-        let subs = detect(&txns);
-        assert_eq!(subs.len(), 1);
-        assert_eq!(subs[0].payee, "spotify");
-    }
-
-    #[test]
-    fn detect_ignores_flagged_recurring_payment() {
-        let mut txns = vec![
-            charge("1", 0, -100000, "Amex Payment"),
-            charge("2", 30, -100000, "Amex Payment"),
-            charge("3", 60, -100000, "Amex Payment"),
-        ];
-        // A regular, fixed-amount card payment would otherwise look exactly like a
-        // subscription; the flag keeps it out.
-        for t in &mut txns {
-            t.flag = TxnFlag::CardPayment;
-        }
-        assert!(detect(&txns).is_empty());
-    }
-
-    #[test]
-    fn rhythm_detects_monthly_variable_merchant_with_trend() {
-        // One charge per month, Jan–Apr, rising amounts.
-        let txns = vec![
-            charge("1", 0, -1000, "PG&E"),
-            charge("2", 31, -1200, "PG&E"),
-            charge("3", 59, -1500, "PG&E"),
-            charge("4", 90, -1800, "PG&E"),
-        ];
-        // The fixed-amount detector rejects this (amounts vary too much)...
-        assert!(detect(&txns).is_empty());
-        // ...but the rhythm detector surfaces it.
-        let r = detect_rhythms(&txns, LATER);
+        let r = detect_rhythms(&txns);
         assert_eq!(r.len(), 1);
-        let e = &r[0];
-        assert_eq!(e.merchant, "pg e");
-        assert_eq!(e.cadence, StreamCadence::Monthly);
-        assert_eq!(e.occurrence_count, 4);
-        assert_eq!(e.amount_min_cents, 1000);
-        assert_eq!(e.amount_max_cents, 1800);
-        assert_eq!(e.median_amount_cents, 1500);
-        // Rate = mean of the four completed months.
-        assert_eq!(e.monthly_estimate_cents, (1000 + 1200 + 1500 + 1800) / 4);
-        // Last month (1800) vs mean of prior three (1233) → rising.
-        assert_eq!(e.trend, Trend::Rising);
-        assert!(e.trend_pct > 0.0);
+        assert_eq!(r[0].merchant, "pg e");
+        assert_eq!(r[0].cadence, StreamCadence::Monthly);
+        assert_eq!(r[0].items.len(), 3);
     }
 
     #[test]
-    fn rhythm_surfaces_a_daily_variable_stream() {
-        // The case the old detector could NOT see: ~daily, variable amount.
-        // (Starbucks/grocery in the demo DB.) 20 consecutive days.
-        let mut txns = Vec::new();
-        for d in 0..20 {
-            let cents = -(400 + (d % 5) * 30); // $4.00–$5.20, varying
-            txns.push(charge(&format!("c{d}"), d, cents, "Starbucks"));
-        }
-        assert!(
-            detect(&txns).is_empty(),
-            "fixed-amount detector must not see it"
-        );
-        let r = detect_rhythms(&txns, LATER);
+    fn surfaces_a_daily_variable_stream() {
+        let txns: Vec<_> = (0..20)
+            .map(|d| charge(&format!("c{d}"), d, -(400 + (d % 5) * 30), "Starbucks"))
+            .collect();
+        let r = detect_rhythms(&txns);
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].merchant, "starbucks");
         assert_eq!(r[0].cadence, StreamCadence::Daily);
-        assert_eq!(r[0].occurrence_count, 20);
     }
 
     #[test]
@@ -613,7 +220,7 @@ mod tests {
             .enumerate()
             .map(|(i, o)| charge(&format!("c{i}"), *o, -500, "Blue Bottle"))
             .collect();
-        let r = detect_rhythms(&txns, LATER);
+        let r = detect_rhythms(&txns);
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].cadence, StreamCadence::Daily);
     }
@@ -626,7 +233,7 @@ mod tests {
             charge("2", 3, -4500, "Corner Store"),
             charge("3", 47, -800, "Corner Store"),
         ];
-        assert!(detect_rhythms(&txns, LATER).is_empty());
+        assert!(detect_rhythms(&txns).is_empty());
     }
 
     #[test]
@@ -637,56 +244,28 @@ mod tests {
             charge("3", 60, -4800, "Amex Payment"),
             charge("4", 90, -5100, "Amex Payment"),
         ];
-        assert_eq!(detect_rhythms(&txns, LATER).len(), 1);
+        assert_eq!(detect_rhythms(&txns).len(), 1);
         for t in &mut txns {
             t.flag = TxnFlag::CardPayment;
         }
-        assert!(detect_rhythms(&txns, LATER).is_empty());
+        assert!(detect_rhythms(&txns).is_empty());
     }
 
     #[test]
-    fn rhythm_for_items_uses_detected_cadence_when_regular() {
-        // Uber-shaped: alternating 17/13-day gaps → regular FewPerMonth, NOT Irregular.
-        let txns = [
-            charge("1", 0, -633, "Uber"),
-            charge("2", 17, -540, "Uber"),
-            charge("3", 30, -633, "Uber"),
-            charge("4", 47, -540, "Uber"),
-            charge("5", 60, -633, "Uber"),
-            charge("6", 77, -540, "Uber"),
+    fn ignores_inflows_and_moved_money() {
+        let pay = vec![
+            charge("1", 0, 200000, "Payroll"),
+            charge("2", 30, 200000, "Payroll"),
+            charge("3", 60, 200000, "Payroll"),
         ];
-        let items: Vec<&Transaction> = txns.iter().collect();
-        let e = rhythm_for_items("uber".into(), &items, LATER).unwrap();
-        assert_eq!(e.cadence, StreamCadence::FewPerMonth);
-        assert_eq!(e.occurrence_count, 6);
-    }
-
-    #[test]
-    fn rhythm_for_items_is_irregular_when_scattered() {
-        // The exact scatter detect_rhythms rejects — force-promote labels it Irregular.
-        let txns = vec![
-            charge("1", 0, -1200, "Corner Store"),
-            charge("2", 3, -4500, "Corner Store"),
-            charge("3", 47, -800, "Corner Store"),
-        ];
-        assert!(detect_rhythms(&txns, LATER).is_empty());
-        let items: Vec<&Transaction> = txns.iter().collect();
-        let e = rhythm_for_items("corner store".into(), &items, LATER).unwrap();
-        assert_eq!(e.cadence, StreamCadence::Irregular);
-        assert_eq!(e.occurrence_count, 3);
-    }
-
-    #[test]
-    fn rhythm_for_items_single_occurrence_is_irregular() {
-        let txns = [charge("1", 0, -900, "One Off")];
-        let items: Vec<&Transaction> = txns.iter().collect();
-        let e = rhythm_for_items("one off".into(), &items, LATER).unwrap();
-        assert_eq!(e.cadence, StreamCadence::Irregular);
-        assert_eq!(e.occurrence_count, 1);
-    }
-
-    #[test]
-    fn rhythm_for_items_empty_is_none() {
-        assert!(rhythm_for_items("nobody".into(), &[], LATER).is_none());
+        assert!(detect_rhythms(&pay).is_empty());
+        let mut card: Vec<_> = (0..4)
+            .map(|i| charge(&format!("p{i}"), i * 30, -5000, "Amex Payment"))
+            .collect();
+        assert_eq!(detect_rhythms(&card).len(), 1);
+        for t in &mut card {
+            t.flag = TxnFlag::CardPayment;
+        }
+        assert!(detect_rhythms(&card).is_empty());
     }
 }

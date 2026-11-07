@@ -6,16 +6,15 @@
 // View state (the selected month, open panels) stays in app memory, not the URL.
 import { useEffect, useState } from "react";
 
-export type Screen = "ledger" | "flow" | "balances" | "settings";
+export type Screen = "flow" | "balances" | "settings";
 
 export const SCREENS: { screen: Screen; path: string; label: string }[] = [
-  { screen: "ledger", path: "/ledger", label: "Ledger" },
   { screen: "flow", path: "/flow", label: "Flow" },
   { screen: "balances", path: "/balances", label: "Balances" },
   { screen: "settings", path: "/settings", label: "Settings" },
 ];
 
-const DEFAULT: Screen = "ledger";
+const DEFAULT: Screen = "flow";
 
 // Plaid sends OAuth banks back here. It shows Settings, and the URL is left
 // alone until Connections has read it (Link needs the full return URL).

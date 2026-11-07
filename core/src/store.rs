@@ -489,7 +489,9 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// save, loan_paydown) from their stored Plaid category (see `split_moved_groups`).
 /// v12: transactions.pfc_primary/pfc_detailed/flag_overridden, backfilled from
 /// `raw` once (see `backfill_pfc_columns`); the flag is an override from here.
-const SCHEMA_VERSION: i64 = 12;
+/// v13: data-only — merchant_overrides keeps one mark, `ignored` (was the
+/// ledger's `dismissed`); `committed` and `kept` rows are deleted.
+const SCHEMA_VERSION: i64 = 13;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -596,6 +598,14 @@ impl Store {
                 "INTEGER NOT NULL DEFAULT 0",
             )?;
             self.backfill_pfc_columns()?;
+        }
+        if version < 13 {
+            // v13: one per-merchant mark (Ignored). The ledger's Dismissed
+            // meant the same; Committed and Kept have no meaning any more.
+            self.conn.execute_batch(
+                "UPDATE merchant_overrides SET mark = 'ignored' WHERE mark = 'dismissed';
+                 DELETE FROM merchant_overrides WHERE mark <> 'ignored';",
+            )?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -882,7 +892,7 @@ impl Store {
     }
 
     /// Transactions on visible accounts — the single read behind search,
-    /// spend, ledger, subscriptions and perks, so hiding an account drops its
+    /// spend, recurring and perks, so hiding an account drops its
     /// rows from all of them. Rows whose account isn't in `accounts` at all
     /// (e.g. fixture-only ingests) are kept.
     pub fn all_transactions(&self) -> rusqlite::Result<Vec<Transaction>> {
@@ -1427,32 +1437,11 @@ impl Store {
         Ok(n != 0)
     }
 
-    /// Set a per-merchant ledger override (Committed / Dismissed). `pattern` is a
-    /// normalized merchant key; upserts so re-marking replaces.
-    pub fn set_merchant_mark(&self, pattern: &str, mark: Mark) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "INSERT INTO merchant_overrides (pattern, mark) VALUES (?1, ?2)
-             ON CONFLICT(pattern) DO UPDATE SET mark = excluded.mark",
-            params![pattern.to_lowercase(), mark.as_str()],
-        )?;
-        Ok(())
-    }
-
-    /// Remove a merchant's override, returning it to the normal streams list.
-    pub fn clear_merchant_mark(&self, pattern: &str) -> rusqlite::Result<()> {
-        self.conn.execute(
-            "DELETE FROM merchant_overrides WHERE pattern = ?1",
-            params![pattern.to_lowercase()],
-        )?;
-        Ok(())
-    }
-
     /// Normalized merchants carrying the Ignored mark (GLOSSARY: Recurring).
-    /// Until the ledger goes (ho-2mj.3.2), its `dismissed` mark counts too.
     pub fn ignored_merchants(&self) -> rusqlite::Result<HashSet<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT pattern FROM merchant_overrides WHERE mark IN ('ignored', 'dismissed')",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT pattern FROM merchant_overrides WHERE mark = 'ignored'")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect()
     }
@@ -1473,47 +1462,6 @@ impl Store {
             )?;
         }
         Ok(())
-    }
-
-    /// All merchant overrides, keyed by normalized merchant.
-    pub fn merchant_marks(&self) -> rusqlite::Result<HashMap<String, Mark>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT pattern, mark FROM merchant_overrides")?;
-        let rows = stmt.query_map([], |r| {
-            let pattern: String = r.get(0)?;
-            let mark: String = r.get(1)?;
-            Ok((pattern, mark))
-        })?;
-        let mut out = HashMap::new();
-        for row in rows {
-            let (pattern, mark) = row?;
-            if let Some(m) = Mark::from_str(&mark) {
-                out.insert(pattern, m);
-            }
-        }
-        Ok(out)
-    }
-
-    /// The outflow transactions behind one stream — its normalized merchant, since
-    /// `since` (inclusive, on the behavioral date) — newest first, for the
-    /// slide-over. Includes flagged rows so their state is visible.
-    pub fn stream_occurrences(
-        &self,
-        merchant_key: &str,
-        since: Option<i64>,
-    ) -> rusqlite::Result<Vec<Transaction>> {
-        let mut txns: Vec<Transaction> = self
-            .all_transactions()?
-            .into_iter()
-            .filter(|t| {
-                t.amount.is_outflow()
-                    && normalize_payee(t.merchant()) == merchant_key
-                    && since.is_none_or(|s| t.effective_date() >= s)
-            })
-            .collect();
-        txns.sort_by_key(|x| std::cmp::Reverse(x.effective_date()));
-        Ok(txns)
     }
 
     /// Register (or refresh) a linked Plaid item. Never touches the cursor —
@@ -3002,47 +2950,47 @@ mod tests {
     }
 
     #[test]
-    fn merchant_marks_round_trip_and_clear() {
+    fn ignored_mark_round_trip() {
         let s = Store::open_in_memory().unwrap();
-        s.set_merchant_mark("chase mortgage", Mark::Committed)
-            .unwrap();
-        s.set_merchant_mark("random pop up", Mark::Dismissed)
-            .unwrap();
-        let marks = s.merchant_marks().unwrap();
-        assert_eq!(marks.get("chase mortgage"), Some(&Mark::Committed));
-        assert_eq!(marks.get("random pop up"), Some(&Mark::Dismissed));
-        // Re-marking replaces.
-        s.set_merchant_mark("chase mortgage", Mark::Dismissed)
-            .unwrap();
+        s.set_merchant_ignored("Sample Gym", true).unwrap();
+        s.set_merchant_ignored("sample gym", true).unwrap(); // idempotent, lowercased
         assert_eq!(
-            s.merchant_marks().unwrap().get("chase mortgage"),
-            Some(&Mark::Dismissed)
+            s.ignored_merchants().unwrap(),
+            ["sample gym".to_string()].into()
         );
-        s.clear_merchant_mark("chase mortgage").unwrap();
-        assert!(!s.merchant_marks().unwrap().contains_key("chase mortgage"));
+        s.set_merchant_ignored("sample gym", false).unwrap();
+        assert!(s.ignored_merchants().unwrap().is_empty());
     }
 
     #[test]
-    fn stream_occurrences_filters_by_merchant_and_window() {
-        let s = Store::open_in_memory().unwrap();
-        // Two "blue bottle" (normalize to same key) + one other.
-        let mut a = txn("a", "acct1", 1_000_000, -500, false);
-        a.payee = Some("SQ *BLUE BOTTLE 1".into());
-        let mut b = txn("b", "acct1", 2_000_000, -600, false);
-        b.payee = Some("SQ *BLUE BOTTLE 2".into());
-        let mut c = txn("c", "acct1", 2_000_000, -700, false);
-        c.payee = Some("Whole Foods".into());
-        s.upsert_transactions(&[a, b, c]).unwrap();
-
-        let occ = s.stream_occurrences("blue bottle", None).unwrap();
-        assert_eq!(occ.len(), 2);
-        assert_eq!(occ[0].id, "b"); // newest first
-                                    // Window bound drops the older one.
-        let recent = s
-            .stream_occurrences("blue bottle", Some(1_500_000))
+    fn v13_keeps_dismissed_as_ignored_and_drops_ledger_marks() {
+        let path = std::env::temp_dir().join(format!("outflow-v13-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let p = path.to_str().unwrap();
+        drop(Store::open(p).unwrap());
+        {
+            let c = Connection::open(p).unwrap();
+            c.execute_batch(
+                "INSERT INTO merchant_overrides (pattern, mark) VALUES
+                    ('sample parking', 'dismissed'),
+                    ('sample utility', 'committed'),
+                    ('corner store', 'kept');
+                 PRAGMA user_version = 12;",
+            )
             .unwrap();
-        assert_eq!(recent.len(), 1);
-        assert_eq!(recent[0].id, "b");
+        }
+        let s = Store::open(p).unwrap();
+        assert_eq!(
+            s.ignored_merchants().unwrap(),
+            ["sample parking".to_string()].into()
+        );
+        let n: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM merchant_overrides", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        drop(s);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

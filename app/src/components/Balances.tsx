@@ -15,8 +15,7 @@ import {
 } from "recharts";
 import { api } from "../api";
 import type { AccountBalance, BalanceGroup, BalancesView, DayTotals, HoldingRow } from "../types";
-import { accountSource, agoLabel } from "./ledger/labels";
-import { SourceChip } from "./ledger/Streams";
+import { SourceChip, accountSource, agoLabel } from "./accounts";
 import type { ToastMsg } from "./Toast";
 
 const GROUP_LABEL: Record<BalanceGroup, string> = {

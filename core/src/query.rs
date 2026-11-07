@@ -227,7 +227,7 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
 /// (year, month) of an epoch-seconds instant in the machine's local timezone.
 /// Local (not UTC) so a late-night purchase buckets into the day/month the user
 /// actually made it, and DST-correct because each instant gets its own offset.
-/// Shared with the rhythm detector and ledger so all month math agrees.
+/// Shared with the recurring list so all month math agrees.
 pub(crate) fn ym_local(secs: i64) -> (i64, u32) {
     match Local.timestamp_opt(secs, 0).single() {
         Some(dt) => (dt.year() as i64, dt.month()),
@@ -236,7 +236,7 @@ pub(crate) fn ym_local(secs: i64) -> (i64, u32) {
 }
 
 /// A monotonic month index (year*12 + month-1) in local time, so months can be
-/// compared, diffed, and used as map keys. Shared with the detector/ledger.
+/// compared, diffed, and used as map keys. Shared with the recurring list.
 pub(crate) fn month_index(secs: i64) -> i64 {
     let (y, m) = ym_local(secs);
     y * 12 + (m as i64 - 1)

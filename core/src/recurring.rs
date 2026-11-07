@@ -1,13 +1,13 @@
 //! The recurring list (GLOSSARY: Recurring). One row per recurring merchant
 //! over the 12 calendar months ending at a chosen month: how often, the
 //! monthly cost, a six-month spark and a change marker. Detection is
-//! `subscriptions::detect_rhythms`' gates; the one per-merchant mark is
+//! `subscriptions::detect_rhythms`; the one per-merchant mark is
 //! Ignored, which moves a merchant to a separate list.
 
 use crate::model::Transaction;
 use crate::query::month_index;
 use crate::store::Store;
-use crate::subscriptions::{median, rhythm_groups, StreamCadence, MONTH_DAYS};
+use crate::subscriptions::{detect_rhythms, median, StreamCadence, MONTH_DAYS};
 use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -129,7 +129,7 @@ fn build(
 
     let mut items = Vec::new();
     let mut ign = Vec::new();
-    for g in rhythm_groups(&window) {
+    for g in detect_rhythms(&window) {
         let row = merchant_row(
             &g.merchant,
             &g.items,

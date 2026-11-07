@@ -167,7 +167,7 @@ fn category_from_pfc(primary: Option<&str>, detailed: Option<&str>) -> Option<&'
 /// Parse an `/accounts/get` response. `institution` becomes `org` (Plaid's
 /// response carries only an institution_id; the human name is captured from
 /// Link metadata at exchange time). The account mask is appended to the name
-/// so the ledger's card last-4 attribution keeps working.
+/// so account chips keep the card last-4.
 pub fn parse_accounts_get(
     json: &str,
     institution: &str,

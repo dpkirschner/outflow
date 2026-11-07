@@ -9,17 +9,13 @@ import type {
   ExchangeResult,
   CategorizeResult,
   CategorySpend,
-  LedgerView,
-  Mark,
   MatchView,
   MerchantSpend,
   FlowMonth,
   PlaidItem,
-  Stream,
-  Subscription,
+  RecurringView,
   SyncEntry,
   SyncReport,
-  Transaction,
   TxnFlag,
   Lane,
   Direction,
@@ -29,8 +25,6 @@ import type {
 // Request-side shapes. types.ts is generated from the Rust response DTOs;
 // these are browser-side query parameters and client-built results, so they
 // live here, next to the calls that use them.
-
-export type Window = "3mo" | "6mo" | "12mo" | "all";
 
 export type SortKey = "date" | "amount" | "merchant" | "category";
 
@@ -44,8 +38,8 @@ export interface Filter {
 
 // Search/sort/filter over the transaction list (GET /api/transactions).
 export interface TxnSearch {
-  since?: number;
-  until?: number;
+  since?: number | string; // epoch seconds, or YYYY-MM-DD (inclusive)
+  until?: number | string; // epoch seconds (exclusive), or YYYY-MM-DD (inclusive)
   includePending?: boolean;
   includeNonSpending?: boolean;
   q?: string;
@@ -55,6 +49,7 @@ export interface TxnSearch {
   flag?: TxnFlag;
   period?: string; // e.g. "2026-11"; resolved in server-local days
   lane?: Lane; // exactly the rows behind that Flow figure
+  merchant?: string; // normalized merchant key, e.g. a recurring merchant's
   uncategorized?: boolean;
   direction?: Direction; // card payment: out = bank side, in = card side
   minCents?: number;
@@ -187,6 +182,7 @@ export const api = {
     set("flag", s?.flag);
     set("period", s?.period);
     set("lane", s?.lane);
+    set("merchant", s?.merchant);
     set("uncategorized", s?.uncategorized || undefined);
     set("direction", s?.direction);
     set("min_cents", s?.minCents);
@@ -206,20 +202,11 @@ export const api = {
       `/merchants${filterQuery(filter, limit !== undefined ? { limit: String(limit) } : undefined)}`,
     ),
   flow: (filter?: Filter) => get<FlowMonth[]>(`/flow${filterQuery(filter)}`),
-  subscriptions: () => get<Subscription[]>("/subscriptions"),
-  // Rhythm ledger — the primary screen query.
-  ledger: (window: Window) => get<LedgerView>(`/ledger?window=${window}`),
-  streamOccurrences: (merchant: string, window: Window) =>
-    get<Transaction[]>(
-      `/stream_occurrences?merchant=${encodeURIComponent(merchant)}&window=${window}`,
-    ),
-  // The stream a noise merchant would become if promoted (preview, no mutation).
-  streamPreview: (merchant: string, window: Window) =>
-    get<Stream | null>(
-      `/stream_preview?merchant=${encodeURIComponent(merchant)}&window=${window}`,
-    ),
-  markStream: (merchant: string, mark: Mark) => post<void>("/mark_stream", { merchant, mark }),
-  clearStreamMark: (merchant: string) => post<void>("/clear_stream_mark", { merchant }),
+  // The recurring list over the 12 months ending at `month` (YYYY-MM).
+  recurring: (month: string) =>
+    get<RecurringView>(`/recurring?period=${encodeURIComponent(month)}`),
+  setRecurringIgnored: (merchant: string, ignored: boolean) =>
+    post<void>("/recurring/ignored", { merchant, ignored }),
   categories: () => get<string[]>("/categories"),
   setCategory: (txnId: string, category: string, learn: boolean) =>
     post<number | null>(`/txn/${encodeURIComponent(txnId)}/category`, { category, learn }),

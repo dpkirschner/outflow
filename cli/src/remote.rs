@@ -106,7 +106,6 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
                 Ok(rule)
             }
         }
-        Cmd::Subs => remote.get("/subscriptions"),
         Cmd::Fix {
             txn_id,
             category,
@@ -401,6 +400,6 @@ mod tests {
 
     #[test]
     fn other_commands_are_not_reads() {
-        assert_eq!(path(&["subs"]).unwrap(), None);
+        assert_eq!(path(&["status"]).unwrap(), None);
     }
 }

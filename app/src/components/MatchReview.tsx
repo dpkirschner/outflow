@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { MatchView } from "../types";
-import { agoLabel, dollars } from "./ledger/labels";
+import { unsignedCents } from "../format";
+import { agoLabel } from "./accounts";
 import type { ToastMsg } from "./Toast";
 
 function TxnCell({ label, txn }: { label: string; txn: MatchView["bank"] }) {
@@ -75,7 +76,7 @@ export function MatchReview({
         <ul className="mr-list">
           {proposed.map((mv) => (
             <li key={mv.id} className="mr-item">
-              <div className="mr-amount">{dollars(mv.bank?.amount ?? 0)}</div>
+              <div className="mr-amount">{unsignedCents(mv.bank?.amount ?? 0)}</div>
               <div className="mr-legs">
                 <TxnCell label="bank" txn={mv.bank} />
                 <TxnCell label="card" txn={mv.card} />
@@ -100,7 +101,7 @@ export function MatchReview({
           <ul className="mr-list">
             {accepted.map((mv) => (
               <li key={mv.id} className="mr-item mr-dim">
-                <div className="mr-amount">{dollars(mv.bank?.amount ?? 0)}</div>
+                <div className="mr-amount">{unsignedCents(mv.bank?.amount ?? 0)}</div>
                 <div className="mr-legs">
                   <TxnCell label="bank" txn={mv.bank} />
                   <TxnCell label="card" txn={mv.card} />

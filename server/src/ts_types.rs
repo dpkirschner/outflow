@@ -54,7 +54,6 @@ fn render() -> String {
                 TxnFlag,
                 Account,
                 Transaction,
-                Mark,
                 PlaidItem,
                 SyncEntry,
             ]
@@ -67,10 +66,9 @@ fn render() -> String {
         decls!(&cfg, out, [PeriodKind, Period]);
     }
 
-    // --- core::query, core::subscriptions ---
+    // --- core::query ---
     {
         use outflow_core::query::*;
-        use outflow_core::subscriptions::*;
         decls!(
             &cfg,
             out,
@@ -83,8 +81,6 @@ fn render() -> String {
                 MovedFlow,
                 MovedLane,
                 FlowMonth,
-                Cadence,
-                Subscription,
             ]
         );
     }
@@ -95,26 +91,10 @@ fn render() -> String {
         decls!(&cfg, out, [Change, RecurringMerchant, RecurringView]);
     }
 
-    // --- core::ledger ---
+    // --- core::subscriptions ---
     {
-        use outflow_core::ledger::*;
-        use outflow_core::subscriptions::{RhythmEntry, StreamCadence, Trend};
-        decls!(
-            &cfg,
-            out,
-            [
-                StreamCadence,
-                Trend,
-                RhythmEntry,
-                Source,
-                Stream,
-                LineItem,
-                TransferGroup,
-                LedgerStats,
-                Coverage,
-                LedgerView
-            ]
-        );
+        use outflow_core::subscriptions::*;
+        decls!(&cfg, out, [StreamCadence]);
     }
 
     // --- core::balances, core::activity ---

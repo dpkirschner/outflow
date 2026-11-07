@@ -76,15 +76,6 @@ export type Transaction = {
 };
 
 /**
- * A per-merchant override the user applies from the ledger slide-over. All three
- * are sticky, keyed on the normalized merchant so they apply to siblings:
- * `Committed` = a fixed obligation (kept out of the "hunt"); `Dismissed` = not a
- * real stream (its spend falls to Notable/Noise); `Kept` = force back into the
- * main streams list, overriding a committed-by-category classification.
- */
-export type Mark = "Committed" | "Dismissed" | "Kept";
-
-/**
  * Non-secret metadata for a linked Plaid Item (one bank connection). The
  * access token is a secret and lives in a 0600 file outside the DB; the sync
  * cursor lives here because it must commit atomically with the transaction
@@ -261,27 +252,6 @@ export type FlowMonth = {
   gap_cents: number,
 };
 
-export type Cadence = "Monthly" | "Yearly";
-
-export type Subscription = {
-  /**
-   * Normalized merchant (`normalize_payee`).
-   */
-  payee: string,
-  cadence: Cadence,
-  /**
-   * Median charge, positive.
-   */
-  typical_amount_cents: number,
-  occurrences: number,
-  first_seen: number,
-  last_seen: number,
-  /**
-   * Sum of all charges, positive.
-   */
-  total_cents: number,
-};
-
 /**
  * How a recurring merchant's cost moved.
  */
@@ -374,168 +344,10 @@ export type RecurringView = {
 };
 
 /**
- * How often a stream recurs, classified from the median inter-occurrence
- * interval. Distinct from `Cadence` (Monthly/Yearly, used by `detect`) — a
- * stream can be daily or weekly. The UI maps each variant to a badge label.
+ * How often a recurring merchant charges, classified from the median gap
+ * between charges. The UI maps each variant to a label.
  */
-export type StreamCadence = "Daily" | "FewPerWeek" | "Weekly" | "FewPerMonth" | "Monthly" | "Yearly" | "Irregular";
-
-/**
- * Direction of a stream's monthly-rate change, derived from `trend_pct` for
- * coloring (Rising = spending more).
- */
-export type Trend = "Rising" | "Falling" | "Steady";
-
-/**
- * A recurring merchant surfaced as a time series (the rhythm-ledger row). The
- * data contract the stream row and slide-over render directly.
- */
-export type RhythmEntry = {
-  merchant: string,
-  cadence: StreamCadence,
-  occurrence_count: number,
-  median_amount_cents: number,
-  amount_min_cents: number,
-  amount_max_cents: number,
-  /**
-   * Average monthly spend over completed months (the in-progress month is
-   * excluded so a partial month can't deflate the rate).
-   */
-  monthly_estimate_cents: number,
-  last_seen: number,
-  /**
-   * Signed pct change of the monthly rate: last completed month vs the mean of
-   * the prior three completed months. 0.0 when there isn't enough history.
-   */
-  trend_pct: number,
-  trend: Trend,
-  /**
-   * Per-month spend for the rhythm strip, oldest→newest (up to the last 6
-   * months of the window). The final element is the in-progress month.
-   */
-  spark_cents: Array<number>,
-};
-
-/**
- * Which account(s) a stream's charges land on. `label` = the full account name
- * (e.g. "Travel Card (1234)"); `kind` = the account type, which the UI colors by
- * (cash vs credit vs investment); `pct` = share of occurrences on this account.
- */
-export type Source = {
-  label: string,
-  kind: AccountKind,
-  /**
-   * 0-100.
-   */
-  pct: number,
-};
-
-/**
- * A recurring stream row: the detected rhythm plus its sources and the dominant
- * category (used for Committed classification and display).
- */
-export type Stream = {
-  sources: Array<Source>,
-  category: string | null,
-  merchant: string,
-  cadence: StreamCadence,
-  occurrence_count: number,
-  median_amount_cents: number,
-  amount_min_cents: number,
-  amount_max_cents: number,
-  /**
-   * Average monthly spend over completed months (the in-progress month is
-   * excluded so a partial month can't deflate the rate).
-   */
-  monthly_estimate_cents: number,
-  last_seen: number,
-  /**
-   * Signed pct change of the monthly rate: last completed month vs the mean of
-   * the prior three completed months. 0.0 when there isn't enough history.
-   */
-  trend_pct: number,
-  trend: Trend,
-  /**
-   * Per-month spend for the rhythm strip, oldest→newest (up to the last 6
-   * months of the window). The final element is the in-progress month.
-   */
-  spark_cents: Array<number>,
-};
-
-/**
- * A single transaction line item — used for both Notable one-offs and the
- * expandable Noise list, so the user can always see the rows behind a zone.
- */
-export type LineItem = {
-  id: string,
-  merchant: string,
-  /**
-   * Normalized merchant (`normalize_payee`) — the key the frontend groups
-   * noise rows by and addresses promote/preview with, since it must not run
-   * the normalizer itself (invariant #4).
-   */
-  merchant_key: string,
-  date: number,
-  amount_cents: number,
-  category: string | null,
-  source: Source,
-};
-
-/**
- * A suppressed group (Transfer or CardPayment), shown collapsed and excluded
- * from every total.
- */
-export type TransferGroup = {
-  merchant: string,
-  flag: TxnFlag,
-  total_cents: number,
-  count: number,
-};
-
-export type LedgerStats = {
-  recurring_monthly_cents: number,
-  stream_count: number,
-  committed_monthly_cents: number,
-  noise_total_cents: number,
-  noise_count: number,
-};
-
-/**
- * How much data sits behind the current view — so the UI can distinguish "the
- * window is set to 12mo" from "you only have 3 months of history."
- */
-export type Coverage = {
-  /**
-   * Earliest behavioral date across the WHOLE database (not just the window).
-   * `None` when there are no transactions.
-   */
-  earliest: number | null,
-  /**
-   * Count of outflow transactions within the window — the spend the screen
-   * analyzes.
-   */
-  window_txn_count: number,
-  /**
-   * True when the window reaches back to (or before) the earliest data — i.e.
-   * it's showing everything, not clipping. Every window ≥ your history reads
-   * the same until the archive accumulates past the window.
-   */
-  covers_all: boolean,
-};
-
-export type LedgerView = {
-  coverage: Coverage,
-  stats: LedgerStats,
-  streams: Array<Stream>,
-  committed: Array<Stream>,
-  notable: Array<LineItem>,
-  /**
-   * The individual sub-threshold one-offs behind the Noise summary, newest
-   * first — so the fold can list them, not just the total.
-   */
-  noise_items: Array<LineItem>,
-  transfers: Array<TransferGroup>,
-};
+export type StreamCadence = "Daily" | "FewPerWeek" | "Weekly" | "FewPerMonth" | "Monthly" | "Yearly";
 
 /**
  * Which balances section an account sits in, from its `AccountKind`.

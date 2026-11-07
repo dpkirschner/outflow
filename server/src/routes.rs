@@ -7,18 +7,18 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    activity, balance_history, detect, flow_lanes, position_history, positions, spend_by_category,
+    activity, balance_history, flow_lanes, position_history, positions, spend_by_category,
     summarize_balances, today_local, top_merchants, Account, AccountKind, ActivityFilter,
-    ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, LedgerView,
-    Mark, MerchantSpend, Period, PositionFilter, PositionPoint, PositionRow, RecurringView,
-    Subscription, SyncEntry, Transaction, TxnFilter, TxnFlag,
+    ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, MerchantSpend,
+    Period, PositionFilter, PositionPoint, PositionRow, RecurringView, SyncEntry, TxnFilter,
+    TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::state::{now_secs, with_store, ApiError, ApiResult, AppState};
 
-/// Rolling-window control → a `since` bound (epoch secs). ~30.5-day months is a
-/// coarse filter; the ledger's month/rate math is exact via `chrono::Local`.
+/// The perks lookback (`3mo`/`6mo`/`12mo`/`all`) → a `since` bound (epoch
+/// secs), with coarse ~30.5-day months.
 const MONTH_SECS: i64 = 2_635_200;
 pub fn window_since(window: &str, now: i64) -> Option<i64> {
     match window {
@@ -499,101 +499,6 @@ async fn flow(
     .map(Json)
 }
 
-async fn subscriptions(State(state): State<AppState>) -> ApiResult<Vec<Subscription>> {
-    with_store(&state, |s| {
-        let txns = s.all_transactions().map_err(|e| e.to_string())?;
-        Ok(detect(&txns))
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct WindowParam {
-    window: Option<String>,
-}
-
-/// The whole rhythm-ledger view for a rolling window (`3mo`/`6mo`/`12mo`/`all`).
-async fn ledger(
-    State(state): State<AppState>,
-    Query(p): Query<WindowParam>,
-) -> ApiResult<LedgerView> {
-    let now = now_secs();
-    let since = window_since(p.window.as_deref().unwrap_or("6mo"), now);
-    with_store(&state, move |s| {
-        outflow_core::ledger(s, since, now).map_err(|e| e.to_string())
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct StreamParams {
-    merchant: String,
-    window: Option<String>,
-}
-
-async fn stream_occurrences(
-    State(state): State<AppState>,
-    Query(p): Query<StreamParams>,
-) -> ApiResult<Vec<Transaction>> {
-    let since = window_since(p.window.as_deref().unwrap_or("6mo"), now_secs());
-    with_store(&state, move |s| {
-        s.stream_occurrences(&p.merchant, since)
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map(Json)
-}
-
-/// The `Stream` a noise merchant WOULD become if promoted — cadence, rate, and
-/// rhythm strip — without committing the mark. Powers the Noise popover preview.
-/// `null` when the merchant has no spending occurrences in the window.
-async fn stream_preview(
-    State(state): State<AppState>,
-    Query(p): Query<StreamParams>,
-) -> ApiResult<Option<outflow_core::Stream>> {
-    let now = now_secs();
-    let since = window_since(p.window.as_deref().unwrap_or("6mo"), now);
-    with_store(&state, move |s| {
-        outflow_core::stream_preview(s, &p.merchant, since, now).map_err(|e| e.to_string())
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct MarkBody {
-    merchant: String,
-    mark: Mark,
-}
-
-async fn mark_stream(State(state): State<AppState>, Json(body): Json<MarkBody>) -> ApiResult<()> {
-    with_store(&state, move |s| {
-        s.set_merchant_mark(&body.merchant, body.mark)
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map(Json)
-}
-
-#[derive(Deserialize)]
-struct MerchantBody {
-    merchant: String,
-}
-
-async fn clear_stream_mark(
-    State(state): State<AppState>,
-    Json(body): Json<MerchantBody>,
-) -> ApiResult<()> {
-    with_store(&state, move |s| {
-        s.clear_merchant_mark(&body.merchant)
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map(Json)
-}
-
 #[derive(Deserialize)]
 struct RecurringParams {
     period: Option<String>,
@@ -825,10 +730,6 @@ pub fn api_router() -> Router<AppState> {
         .route("/flow", get(flow))
         .route("/recurring", get(recurring))
         .route("/recurring/ignored", post(set_recurring_ignored))
-        .route("/subscriptions", get(subscriptions))
-        .route("/ledger", get(ledger))
-        .route("/stream_occurrences", get(stream_occurrences))
-        .route("/stream_preview", get(stream_preview))
         .route("/categories", get(categories))
         .route("/has_credit_account", get(has_credit_account))
         .route("/sync_log", get(sync_log))
@@ -839,8 +740,6 @@ pub fn api_router() -> Router<AppState> {
         .route("/account/{account_id}/nickname", post(set_account_nickname))
         .route("/account/{account_id}/hidden", post(set_account_hidden))
         .route("/apply_flags", post(apply_flags))
-        .route("/mark_stream", post(mark_stream))
-        .route("/clear_stream_mark", post(clear_stream_mark))
         .route("/pull", post(pull))
         .route("/reset_data", post(reset_data))
 }
@@ -851,6 +750,7 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
+    use outflow_core::Transaction;
     use outflow_core::{Money, Store};
     use std::sync::{Arc, Mutex};
     use tower::ServiceExt; // for `oneshot`
@@ -1407,22 +1307,6 @@ mod tests {
         assert!(body["error"].as_str().unwrap().contains("bogus"));
     }
 
-    // The Noise popover preview: /stream_preview synthesizes a Stream for a
-    // merchant keyed by its normalized name, with no min-occurrence gate.
-    #[tokio::test]
-    async fn stream_preview_returns_a_stream_for_a_noise_merchant() {
-        let app = app_with_txns(&[
-            txn("u1", -600, "Uber"),
-            txn("u2", -700, "Uber"),
-            txn("u3", -650, "Uber"),
-        ]);
-        let (status, body) = get_json(app, "/stream_preview?merchant=uber&window=all").await;
-        assert_eq!(status, StatusCode::OK, "body: {body}");
-        assert_eq!(body["merchant"], "uber");
-        assert_eq!(body["occurrence_count"], 3);
-        assert!(body["cadence"].is_string());
-    }
-
     /// Local noon on `day` (YYYY-MM-DD), as epoch seconds.
     fn noon(day: &str) -> i64 {
         use chrono::TimeZone;
@@ -1651,14 +1535,5 @@ mod tests {
         assert_eq!(ids(v), ["b", "c"]);
         let (_, v) = get_json(app, "/activity?since=2026-09-30&until=2026-10-01").await;
         assert_eq!(ids(v), ["a", "b"]);
-    }
-
-    // Unknown merchant → null (JSON `null`, a 200), not an error.
-    #[tokio::test]
-    async fn stream_preview_null_for_unknown_merchant() {
-        let app = app_with_txns(&[txn("u1", -600, "Uber")]);
-        let (status, body) = get_json(app, "/stream_preview?merchant=nobody&window=all").await;
-        assert_eq!(status, StatusCode::OK);
-        assert!(body.is_null());
     }
 }

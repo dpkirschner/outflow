@@ -13,7 +13,6 @@ import type {
   DayTotals,
   ExchangeResult,
   FlowMonth,
-  LedgerView,
   MatchView,
   MerchantSpend,
   PerksReport,
@@ -21,8 +20,6 @@ import type {
   PositionPoint,
   PositionRow,
   RecurringView,
-  Stream,
-  Subscription,
   SyncEntry,
   SyncReport,
   Transaction,
@@ -200,167 +197,6 @@ export const recurringView: RecurringView = {
       "account_id": "acct-demo-card"
     }
   ]
-};
-
-export const subscription: Subscription = {
-  "payee": "Sample Streaming",
-  "cadence": "Yearly",
-  "typical_amount_cents": -9900,
-  "occurrences": 3,
-  "first_seen": 1705363200,
-  "last_seen": 1768435200,
-  "total_cents": -29700
-};
-
-export const ledgerView: LedgerView = {
-  "coverage": {
-    "earliest": 1733875200,
-    "window_txn_count": 120,
-    "covers_all": false
-  },
-  "stats": {
-    "recurring_monthly_cents": -7800,
-    "stream_count": 1,
-    "committed_monthly_cents": -9000,
-    "noise_total_cents": -2100,
-    "noise_count": 4
-  },
-  "streams": [
-    {
-      "merchant": "Example Coffee Co",
-      "cadence": "FewPerWeek",
-      "occurrence_count": 36,
-      "median_amount_cents": -650,
-      "amount_min_cents": -450,
-      "amount_max_cents": -1200,
-      "monthly_estimate_cents": -7800,
-      "last_seen": 1768435200,
-      "trend_pct": -12.5,
-      "trend": "Falling",
-      "spark_cents": [
-        -8400,
-        -7900,
-        -7100,
-        -3200
-      ],
-      "sources": [
-        {
-          "label": "Demo Rewards Card (0000)",
-          "kind": "Credit",
-          "pct": 75
-        },
-        {
-          "label": "Demo Rewards Card (0000)",
-          "kind": "Checking",
-          "pct": 25
-        }
-      ],
-      "category": "Dining"
-    }
-  ],
-  "committed": [
-    {
-      "merchant": "Sample Utility",
-      "cadence": "Monthly",
-      "occurrence_count": 36,
-      "median_amount_cents": -650,
-      "amount_min_cents": -450,
-      "amount_max_cents": -1200,
-      "monthly_estimate_cents": -7800,
-      "last_seen": 1768435200,
-      "trend_pct": -12.5,
-      "trend": "Steady",
-      "spark_cents": [
-        -8400,
-        -7900,
-        -7100,
-        -3200
-      ],
-      "sources": [
-        {
-          "label": "Demo Rewards Card (0000)",
-          "kind": "Credit",
-          "pct": 75
-        },
-        {
-          "label": "Demo Rewards Card (0000)",
-          "kind": "Checking",
-          "pct": 25
-        }
-      ],
-      "category": null
-    }
-  ],
-  "notable": [
-    {
-      "id": "txn-demo-003",
-      "merchant": "Test Hardware Store",
-      "merchant_key": "test hardware store",
-      "date": 1768176000,
-      "amount_cents": -18900,
-      "category": null,
-      "source": {
-        "label": "Demo Rewards Card (0000)",
-        "kind": "Credit",
-        "pct": 100
-      }
-    }
-  ],
-  "noise_items": [
-    {
-      "id": "txn-demo-003",
-      "merchant": "Test Hardware Store",
-      "merchant_key": "test hardware store",
-      "date": 1768176000,
-      "amount_cents": -18900,
-      "category": null,
-      "source": {
-        "label": "Demo Rewards Card (0000)",
-        "kind": "Credit",
-        "pct": 100
-      }
-    }
-  ],
-  "transfers": [
-    {
-      "merchant": "Demo Brokerage",
-      "flag": "Invest",
-      "total_cents": -50000,
-      "count": 2
-    }
-  ]
-};
-
-export const stream: Stream = {
-  "merchant": "Example Coffee Co",
-  "cadence": "FewPerWeek",
-  "occurrence_count": 36,
-  "median_amount_cents": -650,
-  "amount_min_cents": -450,
-  "amount_max_cents": -1200,
-  "monthly_estimate_cents": -7800,
-  "last_seen": 1768435200,
-  "trend_pct": -12.5,
-  "trend": "Falling",
-  "spark_cents": [
-    -8400,
-    -7900,
-    -7100,
-    -3200
-  ],
-  "sources": [
-    {
-      "label": "Demo Rewards Card (0000)",
-      "kind": "Credit",
-      "pct": 75
-    },
-    {
-      "label": "Demo Rewards Card (0000)",
-      "kind": "Checking",
-      "pct": 25
-    }
-  ],
-  "category": "Dining"
 };
 
 export const balancesView: BalancesView = {

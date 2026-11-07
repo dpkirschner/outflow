@@ -8,8 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { api, type LinkErrorReport } from "../api";
 import type { Account, PlaidItem, SyncEntry } from "../types";
-import { accountDisplayLabel, accountSource, agoLabel } from "./ledger/labels";
-import { SourceChip } from "./ledger/Streams";
+import { SourceChip, accountDisplayLabel, accountSource, agoLabel } from "./accounts";
 import type { ToastMsg } from "./Toast";
 import { isOauthReturn, navigate, pathOf } from "../route";
 

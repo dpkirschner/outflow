@@ -16,9 +16,6 @@ use outflow_core::balances::{
     AccountBalance, BalancesView, DayTotals, Group, GroupBalance, HoldingRow, PositionPoint,
     PositionRow, Totals,
 };
-use outflow_core::ledger::{
-    Coverage, LedgerStats, LedgerView, LineItem, Source, Stream, TransferGroup,
-};
 use outflow_core::model::{
     Account, AccountKind, CategorySource, MatchConfidence, MatchStatus, PlaidItem, SyncEntry,
     Transaction, TxnFlag, TxnMatch,
@@ -26,7 +23,7 @@ use outflow_core::model::{
 use outflow_core::perks::{Cap, CardStatus, Finding, FindingKind, Offer, PerksReport, Reward};
 use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, MovedLane, TxnPage};
 use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
-use outflow_core::subscriptions::{Cadence, RhythmEntry, StreamCadence, Subscription, Trend};
+use outflow_core::subscriptions::StreamCadence;
 use outflow_core::{ActivityRow, Money};
 use serde::Serialize;
 
@@ -175,18 +172,6 @@ fn flow_month() -> FlowMonth {
     }
 }
 
-fn subscription() -> Subscription {
-    Subscription {
-        payee: "Sample Streaming".into(),
-        cadence: Cadence::Yearly,
-        typical_amount_cents: -9_900,
-        occurrences: 3,
-        first_seen: T0 - 730 * DAY,
-        last_seen: T0,
-        total_cents: -29_700,
-    }
-}
-
 fn recurring_merchant() -> RecurringMerchant {
     RecurringMerchant {
         merchant: "example coffee co".into(),
@@ -220,81 +205,6 @@ fn recurring_view() -> RecurringView {
         monthly_total_cents: 7_800,
         items: vec![recurring_merchant()],
         ignored: vec![ignored],
-    }
-}
-
-fn source(kind: AccountKind, pct: u8) -> Source {
-    Source {
-        label: "Demo Rewards Card (0000)".into(),
-        kind,
-        pct,
-    }
-}
-
-fn stream() -> Stream {
-    Stream {
-        rhythm: RhythmEntry {
-            merchant: "Example Coffee Co".into(),
-            cadence: StreamCadence::FewPerWeek,
-            occurrence_count: 36,
-            median_amount_cents: -650,
-            amount_min_cents: -450,
-            amount_max_cents: -1_200,
-            monthly_estimate_cents: -7_800,
-            last_seen: T0,
-            trend_pct: -12.5,
-            trend: Trend::Falling,
-            spark_cents: vec![-8_400, -7_900, -7_100, -3_200],
-        },
-        sources: vec![
-            source(AccountKind::Credit, 75),
-            source(AccountKind::Checking, 25),
-        ],
-        category: Some("Dining".into()),
-    }
-}
-
-fn line_item() -> LineItem {
-    LineItem {
-        id: "txn-demo-003".into(),
-        merchant: "Test Hardware Store".into(),
-        merchant_key: "test hardware store".into(),
-        date: T0 - 3 * DAY,
-        amount_cents: -18_900,
-        category: None,
-        source: source(AccountKind::Credit, 100),
-    }
-}
-
-fn ledger_view() -> LedgerView {
-    let mut committed = stream();
-    committed.rhythm.merchant = "Sample Utility".into();
-    committed.rhythm.cadence = StreamCadence::Monthly;
-    committed.rhythm.trend = Trend::Steady;
-    committed.category = None;
-    LedgerView {
-        coverage: Coverage {
-            earliest: Some(T0 - 400 * DAY),
-            window_txn_count: 120,
-            covers_all: false,
-        },
-        stats: LedgerStats {
-            recurring_monthly_cents: -7_800,
-            stream_count: 1,
-            committed_monthly_cents: -9_000,
-            noise_total_cents: -2_100,
-            noise_count: 4,
-        },
-        streams: vec![stream()],
-        committed: vec![committed],
-        notable: vec![line_item()],
-        noise_items: vec![line_item()],
-        transfers: vec![TransferGroup {
-            merchant: "Demo Brokerage".into(),
-            flag: TxnFlag::Invest,
-            total_cents: -50_000,
-            count: 2,
-        }],
     }
 }
 
@@ -619,9 +529,6 @@ fn entries() -> Vec<(&'static str, String)> {
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
         ("RecurringView", j(recurring_view())),
-        ("Subscription", j(subscription())),
-        ("LedgerView", j(ledger_view())),
-        ("Stream", j(stream())),
         ("BalancesView", j(balances_view())),
         ("DayTotals", j(day_totals())),
         ("PositionRow", j(position_row())),

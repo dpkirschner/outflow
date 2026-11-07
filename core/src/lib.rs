@@ -1,7 +1,6 @@
 pub mod activity;
 pub mod balances;
 pub mod categorize;
-pub mod ledger;
 pub mod llm;
 pub mod model;
 pub mod money;
@@ -21,15 +20,11 @@ pub use balances::{
     HoldingRow, PositionFilter, PositionPoint, PositionRow, Totals,
 };
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
-pub use ledger::{
-    ledger, stream_preview, Coverage, LedgerStats, LedgerView, LineItem, Source, Stream,
-    TransferGroup,
-};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
     account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding,
-    HoldingSnapshot, InvestmentTxn, Mark, MatchConfidence, MatchStatus, PlaidItem, Security,
-    SyncEntry, Transaction, TxnFlag, TxnMatch,
+    HoldingSnapshot, InvestmentTxn, MatchConfidence, MatchStatus, PlaidItem, Security, SyncEntry,
+    Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use period::{parse_day, today_local, Period, PeriodError, PeriodKind};
@@ -49,8 +44,5 @@ pub use query::{
 };
 pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
-pub use subscriptions::{
-    detect, detect_rhythms, normalize_payee, Cadence, RhythmEntry, StreamCadence, Subscription,
-    Trend,
-};
+pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};
 pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};

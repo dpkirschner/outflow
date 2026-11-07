@@ -1,11 +1,11 @@
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    account_display_label, activity, balance_history, detect, evaluate_perks, flow_lanes,
-    load_offers, parse_fixture, position_history, positions, search_transactions,
-    spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
-    CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions,
-    PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    account_display_label, activity, balance_history, evaluate_perks, flow_lanes, load_offers,
+    parse_fixture, position_history, positions, search_transactions, spend_by_category,
+    summarize_balances, today_local, top_merchants, ActivityFilter, Cap, CategorySource, Direction,
+    FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions, PositionFilter, Reward,
+    SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
@@ -145,7 +145,6 @@ pub(crate) enum Cmd {
         #[arg(long)]
         posted_only: bool,
     },
-    Subs,
     /// Recurring merchants over the 12 months ending with the period's last
     /// month (default: this month): cadence, usual monthly cost, change
     /// (new / up / down >25% vs usual). --json prints the whole view,
@@ -606,30 +605,6 @@ fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(
     Ok(())
 }
 
-fn cmd_subs(store: &Store) -> Result<(), String> {
-    let txns = store.all_transactions().map_err(|e| format!("{e}"))?;
-    let subs = detect(&txns);
-    if subs.is_empty() {
-        println!("no recurring charges detected yet");
-        return Ok(());
-    }
-    for s in subs {
-        let cadence = match s.cadence {
-            outflow_core::Cadence::Monthly => "monthly",
-            outflow_core::Cadence::Yearly => "yearly",
-        };
-        println!(
-            "{:<24} {:>10} {:<8} x{}  total {}",
-            s.payee,
-            dollars(s.typical_amount_cents),
-            cadence,
-            s.occurrences,
-            dollars(s.total_cents)
-        );
-    }
-    Ok(())
-}
-
 fn cmd_recurring(
     store: &Store,
     period: &PeriodArgs,
@@ -698,7 +673,6 @@ fn cadence_label(c: StreamCadence) -> &'static str {
         StreamCadence::FewPerMonth => "~4x/mo",
         StreamCadence::Monthly => "monthly",
         StreamCadence::Yearly => "yearly",
-        StreamCadence::Irregular => "irregular",
     }
 }
 
@@ -1245,13 +1219,6 @@ fn run() -> Result<(), String> {
                 return report_json(&store, by, top, &f);
             }
             cmd_report(&store, by, top, &f)
-        }
-        Cmd::Subs => {
-            if cli.json {
-                let txns = store.all_transactions().map_err(|e| format!("{e}"))?;
-                return json_out(&detect(&txns));
-            }
-            cmd_subs(&store)
         }
         Cmd::Recurring { period, ignored } => cmd_recurring(&store, &period, ignored, cli.json),
         Cmd::Fix {

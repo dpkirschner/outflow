@@ -6,7 +6,9 @@
 //
 // Drill-down: every figure with rows behind it is a button. Selecting one
 // filters the table through core's lane filter (lane + direction /
-// uncategorized / category), so the rows always sum to the figure.
+// uncategorized / category), so the rows always sum to the figure. A
+// recurring merchant (Recurring.tsx) drills in the same way, by merchant over
+// the recurring window instead of the month.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SortKey } from "../api";
 import type {
@@ -16,14 +18,16 @@ import type {
   FlowMonth,
   Lane,
   MovedFlow,
+  RecurringMerchant,
+  RecurringView,
   Transaction,
   TxnFlag,
   TxnPage,
 } from "../types";
 import { formatCentsShort, monthLabel, monthLabelShort, signedCents, unsignedCents } from "../format";
 import { onLinkClick, pathOf } from "../route";
-import { accountDisplayLabel, accountSource } from "./ledger/labels";
-import { SourceChip } from "./ledger/Streams";
+import { SourceChip, accountDisplayLabel, accountSource } from "./accounts";
+import { RecurringSection, windowLabel } from "./Recurring";
 import type { ToastMsg } from "./Toast";
 
 const PAGE = 50;
@@ -60,6 +64,10 @@ export interface Pick {
   direction?: Direction;
   uncategorized?: boolean;
   category?: string;
+  /** A recurring merchant's key: its charges over the recurring window. */
+  merchant?: string;
+  /** Display name for `merchant`. */
+  name?: string;
 }
 
 function samePick(a: Pick | null, b: Pick | null): boolean {
@@ -69,7 +77,8 @@ function samePick(a: Pick | null, b: Pick | null): boolean {
     a.lane === b.lane &&
     a.direction === b.direction &&
     !!a.uncategorized === !!b.uncategorized &&
-    a.category === b.category
+    a.category === b.category &&
+    a.merchant === b.merchant
   );
 }
 
@@ -85,6 +94,7 @@ const LANE_PATH: Record<Lane, string[]> = {
 
 /** "Moved › Save › back", for the chip and the empty state. */
 function pickLabel(p: Pick): string {
+  if (p.merchant) return `Recurring › ${p.name ?? p.merchant}`;
   const parts = [...LANE_PATH[p.lane]];
   if (p.uncategorized) parts.push("Not yet categorized");
   if (p.category) parts.push(p.category);
@@ -125,7 +135,9 @@ export function Flow({
   // Clearing removes the control that had focus (the chip's Clear button);
   // send focus back to the figure that was selected, or to the table title.
   const clearPick = useCallback(() => {
-    const pressed = document.querySelector<HTMLElement>('.fl-lanes .fl-pick[aria-pressed="true"]');
+    const pressed = document.querySelector<HTMLElement>(
+      '.fl-lanes .fl-pick[aria-pressed="true"], .fl-rc-pick[aria-pressed="true"]',
+    );
     setPick(null);
     window.requestAnimationFrame(() => {
       const to = pressed?.isConnected ? pressed : document.getElementById("fl-txns-title");
@@ -170,9 +182,59 @@ export function Flow({
     void loadCats();
   }, [loadCats]);
 
+  const [recurring, setRecurring] = useState<Load<RecurringView>>({ state: "loading" });
+  const loadRecurring = useCallback(async () => {
+    if (!month) return;
+    try {
+      setRecurring({ state: "ok", data: await api.recurring(month) });
+    } catch (err) {
+      setRecurring({ state: "error", error: String(err) });
+    }
+  }, [month]);
+
+  useEffect(() => {
+    void loadRecurring();
+  }, [loadRecurring]);
+
   const refreshFigures = useCallback(async () => {
-    await Promise.all([loadFlow(), loadCats()]);
-  }, [loadFlow, loadCats]);
+    await Promise.all([loadFlow(), loadCats(), loadRecurring()]);
+  }, [loadFlow, loadCats, loadRecurring]);
+
+  const setIgnored = useCallback(
+    async (r: RecurringMerchant, ignored: boolean) => {
+      try {
+        await api.setRecurringIgnored(r.merchant, ignored);
+        if (ignored) setPick((cur) => (cur?.merchant === r.merchant ? null : cur));
+        notify({
+          kind: "ok",
+          text: ignored
+            ? `${r.name} is ignored: off the recurring list.`
+            : `${r.name} is back on the recurring list.`,
+          action: ignored
+            ? {
+                label: "Undo",
+                run: () => {
+                  void api
+                    .setRecurringIgnored(r.merchant, false)
+                    .then(loadRecurring)
+                    .catch((err) => notify({ kind: "err", text: String(err) }));
+                },
+              }
+            : undefined,
+        });
+        await loadRecurring();
+      } catch (err) {
+        notify({ kind: "err", text: String(err) });
+      }
+    },
+    [notify, loadRecurring],
+  );
+
+  // A merchant pick reads the recurring window, not the month.
+  const range =
+    pick?.merchant && recurring.state === "ok"
+      ? { since: recurring.data.since, until: recurring.data.until, label: windowLabel(recurring.data) }
+      : null;
 
   if (flow.state === "loading") {
     return (
@@ -252,10 +314,19 @@ export function Flow({
         </>
       )}
 
+      <RecurringSection
+        load={recurring}
+        onRetry={() => void loadRecurring()}
+        pick={pick}
+        onPick={onPick}
+        onIgnore={setIgnored}
+      />
+
       {month && (
         <TxnTable
           key={month}
           period={month}
+          range={range}
           periodLabel={selected ? monthLabel(selected.year, selected.month) : month}
           month={selected}
           pick={pick}
@@ -672,7 +743,8 @@ interface Block {
 
 function TxnTable({
   period,
-  periodLabel,
+  range,
+  periodLabel: monthName,
   month,
   pick,
   onClearPick,
@@ -682,6 +754,8 @@ function TxnTable({
   onFiguresChanged,
 }: {
   period: string;
+  /** Overrides `period` (a recurring pick reads the recurring window). */
+  range: { since: string; until: string; label: string } | null;
   periodLabel: string;
   month: FlowMonth | null;
   pick: Pick | null;
@@ -691,6 +765,7 @@ function TxnTable({
   notify: (msg: ToastMsg) => void;
   onFiguresChanged: () => Promise<void>;
 }) {
+  const periodLabel = range?.label ?? monthName;
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [account, setAccount] = useState("");
@@ -744,7 +819,7 @@ function TxnTable({
 
   const base = useMemo(
     () => ({
-      period,
+      ...(range ? { since: range.since, until: range.until } : { period }),
       // Moved rows are shown, never hidden (GLOSSARY).
       includeNonSpending: true,
       q: debounced || undefined,
@@ -753,10 +828,11 @@ function TxnTable({
       direction: pick?.direction,
       uncategorized: pick?.uncategorized,
       category: pick?.category,
+      merchant: pick?.merchant,
       sort,
       dir,
     }),
-    [period, debounced, account, pick, sort, dir],
+    [period, range?.since, range?.until, debounced, account, pick, sort, dir],
   );
 
   const seq = useRef(0);
@@ -1099,7 +1175,7 @@ function TxnTable({
             )}
             {what && (
               <button className="lg-pill" onClick={onClearPick}>
-                Show all of {periodLabel}
+                Show all of {monthName}
               </button>
             )}
           </div>

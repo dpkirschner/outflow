@@ -169,7 +169,7 @@ pub struct BalanceSnapshot {
 /// auto last-4 mask preserved. `plaid::parse_accounts_get` bakes the mask onto
 /// `name` as a trailing `" (1234)"`; when a nickname is set we strip that suffix
 /// off `name` and re-attach it to the nickname. No nickname → the raw `name`.
-/// Mirrored in the frontend as `accountDisplayLabel` (app/src/components/ledger/labels.ts).
+/// Mirrored in the frontend as `accountDisplayLabel` (app/src/components/accounts.tsx).
 pub fn account_display_label(name: &str, nickname: Option<&str>) -> String {
     match nickname.map(str::trim).filter(|s| !s.is_empty()) {
         None => name.to_string(),
@@ -219,40 +219,6 @@ impl CategorySource {
             "llm" => Some(CategorySource::Llm),
             "manual" => Some(CategorySource::Manual),
             // Unknown historical values (e.g. "simplefin") degrade to None.
-            _ => None,
-        }
-    }
-}
-
-/// A per-merchant override the user applies from the ledger slide-over. All three
-/// are sticky, keyed on the normalized merchant so they apply to siblings:
-/// `Committed` = a fixed obligation (kept out of the "hunt"); `Dismissed` = not a
-/// real stream (its spend falls to Notable/Noise); `Kept` = force back into the
-/// main streams list, overriding a committed-by-category classification.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub enum Mark {
-    Committed,
-    Dismissed,
-    Kept,
-}
-
-impl Mark {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Mark::Committed => "committed",
-            Mark::Dismissed => "dismissed",
-            Mark::Kept => "kept",
-        }
-    }
-
-    // Lenient DB/wire lookup (Option / total fallback), not FromStr's Result.
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> Option<Mark> {
-        match s {
-            "committed" => Some(Mark::Committed),
-            "dismissed" => Some(Mark::Dismissed),
-            "kept" => Some(Mark::Kept),
             _ => None,
         }
     }

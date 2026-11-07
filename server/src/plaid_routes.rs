@@ -62,15 +62,17 @@ struct ExchangeBody {
     institution: Option<String>,
 }
 
+/// `POST /api/plaid/exchange`: the newly linked item and its first sync.
 #[derive(Serialize)]
-struct ExchangeResult {
-    item_id: String,
-    institution: String,
-    added: usize,
-    updated: usize,
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub(crate) struct ExchangeResult {
+    pub item_id: String,
+    pub institution: String,
+    pub added: usize,
+    pub updated: usize,
     /// Set when the link succeeded but its first sync didn't; the background
     /// sync retries it.
-    sync_error: Option<String>,
+    pub sync_error: Option<String>,
 }
 
 fn exchange_result(

@@ -165,8 +165,10 @@ Violating these breaks data integrity or the domain contract:
    live in the 0600 tokens file keyed by item_id; only non-secret item metadata
    (institution, cursor, status) is in the DB. The SQLCipher DB key comes from
    `OUTFLOW_DB_KEY[_FILE]`; losing or changing it orphans the encrypted DB.
-7. **User flag decisions survive re-sync.** `flag` is absent from the upsert
-   conflict-update; Plaid PFC hints seed flags at parse time only.
+7. **User flag decisions survive re-sync.** The flag is Plaid's category
+   (`pfc_primary`/`pfc_detailed` columns, mapped on read) unless
+   `flag_overridden`; the upsert never touches an override. Read the PFC
+   columns, never search `raw`.
 
 ## Traps that have already cost time (see docs/GOTCHAS.md)
 

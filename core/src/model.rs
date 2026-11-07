@@ -335,10 +335,18 @@ pub struct Transaction {
     pub category: Option<String>,
     pub category_source: Option<CategorySource>,
     pub pending: bool,
+    /// The effective flag: the user's override when there is one, else the
+    /// one Plaid's category gives (`plaid::flag_from_pfc`, worked out on read).
     pub flag: TxnFlag,
     pub raw: String,
     #[serde(default = "default_source")]
     pub source: String,
+    /// Plaid `personal_finance_category.primary` / `.detailed`, as sent.
+    /// `None` for rows from other sources or when Plaid sent none.
+    #[serde(default)]
+    pub pfc_primary: Option<String>,
+    #[serde(default)]
+    pub pfc_detailed: Option<String>,
 }
 
 /// Non-secret metadata for a linked Plaid Item (one bank connection). The

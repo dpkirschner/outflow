@@ -60,9 +60,19 @@ export type Transaction = {
   category: string | null,
   category_source: CategorySource | null,
   pending: boolean,
+  /**
+   * The effective flag: the user's override when there is one, else the
+   * one Plaid's category gives (`plaid::flag_from_pfc`, worked out on read).
+   */
   flag: TxnFlag,
   raw: string,
   source: string,
+  /**
+   * Plaid `personal_finance_category.primary` / `.detailed`, as sent.
+   * `None` for rows from other sources or when Plaid sent none.
+   */
+  pfc_primary: string | null,
+  pfc_detailed: string | null,
 };
 
 /**

@@ -43,9 +43,12 @@ Transaction {
     category: Option<String>,
     category_source: Option<CategorySource>, // Plaid | Rule | Llm | Manual
     pending: bool,
-    flag: TxnFlag,    // Spending (default) or a Moved group; see TxnFlag
+    flag: TxnFlag,    // EFFECTIVE flag: the override if set, else Plaid's
+                      // (see "Flags: Plaid's classification + overrides")
     raw: String,      // original provider JSON, retained (full Plaid payload)
     source: String,   // provenance ("plaid"; "simplefin" on retired-era rows)
+    pfc_primary: Option<String>,   // Plaid personal_finance_category.primary
+    pfc_detailed: Option<String>,  // ... .detailed; None off Plaid / when absent
 }
 TxnFlag = Spending | Transfer | CardPayment | Invest | Save | LoanPaydown
           // Spending = In/Out lanes; every other value is a Moved group.
@@ -66,12 +69,12 @@ keys off. Plaid calendar dates (`YYYY-MM-DD`) are anchored at **local noon** so
 they never straddle a month boundary. All enums have `as_str`/`from_str` for
 string round-tripping in SQLite.
 
-## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 7)
+## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 12)
 
 | Table | Role | Key notes |
 |---|---|---|
 | `accounts` | latest account snapshot | upsert by `id`; `source` column; user-owned `nickname` + `hidden` (never overwritten by a re-pull) |
-| `transactions` | the durable archive | grows past the providers' pull windows; this is the permanent history; `source` column |
+| `transactions` | the durable archive | grows past the providers' pull windows; this is the permanent history; `source` column; `pfc_primary`/`pfc_detailed` (Plaid's category, refreshed on re-sync) and `flag_overridden` (0/1, see below) |
 | `category_rules` | learned/manual rules | `match_type` (exact/contains), `pattern` (lowercased), `category` |
 | `flag_rules` | learned/manual suppression rules | same shape but carries a `flag` — an independent axis |
 | `categories` | the vocabulary | seeded on first open; constrains the LLM |
@@ -95,7 +98,13 @@ Schema changes run through the `PRAGMA user_version` migration runner
 (securities cusip/isin/close_price/close_price_as_of, holdings
 price_as_of/currency/synced_at, holding_snapshots.price), v9
 `investment_transactions` (new table), v10 data-only: loan payments still
-`spending` re-flagged to `transfer` once (`reflag_loan_payments`). Column lists are positional
+`spending` re-flagged to `transfer` once (`reflag_loan_payments`), v11
+data-only: `transfer` rows split into the Moved groups (`split_moved_groups`),
+v12 `transactions.pfc_primary`/`pfc_detailed`/`flag_overridden`, backfilled
+once from `raw` (`backfill_pfc_columns`; a row is marked overridden when its
+stored flag differs from what its category gives, so no effective flag
+changes). The v10 and v11 backfills still parse `raw`; nothing after v12 does.
+Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
 ## Write invariants (these govern every upsert)
@@ -120,8 +129,26 @@ price_as_of/currency/synced_at, holding_snapshots.price), v9
    CardPayment; *_INVESTMENT_AND_RETIREMENT_FUNDS → Invest; *_SAVINGS → Save;
    other LOAN_PAYMENTS → LoanPaydown, since paying down a loan counts as
    saving; other TRANSFER_IN/OUT → Transfer) and a conservative category
-   (`CategorySource::Plaid`) at parse time — seed-only, since the upsert never
-   overwrites `flag` on conflict.
+   (`CategorySource::Plaid`) at parse time. The category is also kept as the
+   `pfc_primary`/`pfc_detailed` columns; see below for how the flag follows it.
+
+## Flags: Plaid's classification + overrides
+
+The flag Plaid's category gives (`plaid::flag_from_pfc` over the two PFC
+columns) is worked out **on every read**, so changing that mapping (a new
+Moved group, say) reclassifies history with no data migration. The stored
+`flag` column counts only when `flag_overridden = 1`: a user's flag
+(`Store::set_flag`), a flag rule (`apply_flags`) or an accepted card-payment
+match. Undoing an accepted match drops the override (`Store::clear_flag`), so
+each leg goes back to Plaid's flag. On re-sync the PFC columns refresh and an
+un-overridden row follows them; an override is never touched. A row inserted
+with a flag other than its category's (fixture or test rows) is stored as an
+override, so what goes in reads back. For un-overridden rows the stored `flag`
+just mirrors the last seed and is ignored on read.
+
+Code reads Plaid's category from the columns, never by searching `raw`
+(`transfers::has_payment_signal` reads `pfc_detailed`; a test fails on any
+`.raw.contains(` in `core` production code).
 
 ## Periods (`core/src/period.rs`)
 

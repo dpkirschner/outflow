@@ -109,9 +109,10 @@ fn require_str(v: &serde_json::Value, key: &str) -> Result<String, SourceError> 
         .ok_or_else(|| SourceError::Json(format!("missing field {key:?}")))
 }
 
-/// Seed the flag (In/Out vs a Moved group) from Plaid's classification.
-/// Seed-time only: the upsert never overwrites `flag` on conflict, so user
-/// overrides always win.
+/// The flag (In/Out vs a Moved group) Plaid's classification gives. The store
+/// calls this on every read for rows without a user override
+/// (`transactions.flag_overridden = 0`), so changing the mapping here
+/// reclassifies history with no data migration; overrides always win.
 ///
 /// Loan payments (mortgage, student, auto, personal) are LoanPaydown, not
 /// spending: paying down principal is saving — the user's call, 2026-11. Plaid
@@ -611,6 +612,8 @@ fn parse_txn(v: &serde_json::Value) -> Result<Transaction, SourceError> {
         flag: flag_from_pfc(primary, detailed),
         raw: v.to_string(),
         source: "plaid".to_string(),
+        pfc_primary: primary.map(str::to_string),
+        pfc_detailed: detailed.map(str::to_string),
     })
 }
 
@@ -841,6 +844,12 @@ mod tests {
         assert_eq!(
             raw["personal_finance_category"]["detailed"],
             "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"
+        );
+        // ...and the category lands in its own fields.
+        assert_eq!(ccpay.pfc_primary.as_deref(), Some("LOAN_PAYMENTS"));
+        assert_eq!(
+            ccpay.pfc_detailed.as_deref(),
+            Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT")
         );
     }
 

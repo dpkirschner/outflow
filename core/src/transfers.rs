@@ -54,7 +54,7 @@ fn has_payment_signal(t: &Transaction) -> bool {
     if t.flag == TxnFlag::CardPayment {
         return true;
     }
-    if t.raw.contains("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT") {
+    if t.pfc_detailed.as_deref() == Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT") {
         return true;
     }
     let m = normalize_payee(t.merchant());
@@ -208,6 +208,8 @@ mod tests {
             pending: false,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: default_source(),
         }
     }
@@ -298,6 +300,18 @@ mod tests {
         let accounts = setup();
         let mut bank = txn("b1", "checking", 100, -30_000, "ACH WITHDRAWAL");
         bank.flag = TxnFlag::CardPayment; // seeded by Plaid PFC at parse time
+        let card = txn("c1", "card", 101, 30_000, "ONLINE CREDIT");
+        let m = detect_card_payments(&accounts, &[bank, card], &[], &MatchOptions::default());
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].confidence, MatchConfidence::High);
+    }
+
+    #[test]
+    fn plaid_card_payment_category_is_a_signal_even_when_overridden() {
+        let accounts = setup();
+        let mut bank = txn("b1", "checking", 100, -30_000, "ACH WITHDRAWAL");
+        bank.pfc_detailed = Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT".into());
+        // The user moved it to Spending; Plaid's category still counts.
         let card = txn("c1", "card", 101, 30_000, "ONLINE CREDIT");
         let m = detect_card_payments(&accounts, &[bank, card], &[], &MatchOptions::default());
         assert_eq!(m.len(), 1);

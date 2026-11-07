@@ -24,7 +24,9 @@
     "pending": false,
     "flag": "Spending",
     "raw": "{}",
-    "source": "plaid"
+    "source": "plaid",
+    "pfc_primary": null,
+    "pfc_detailed": null
   },
   "TxnPage": {
     "total": 2,
@@ -43,7 +45,9 @@
         "pending": false,
         "flag": "Spending",
         "raw": "{}",
-        "source": "plaid"
+        "source": "plaid",
+        "pfc_primary": null,
+        "pfc_detailed": null
       },
       {
         "id": "txn-demo-002",
@@ -58,7 +62,9 @@
         "pending": true,
         "flag": "CardPayment",
         "raw": "{}",
-        "source": "plaid"
+        "source": "plaid",
+        "pfc_primary": null,
+        "pfc_detailed": null
       }
     ]
   },
@@ -575,7 +581,9 @@
       "pending": true,
       "flag": "CardPayment",
       "raw": "{}",
-      "source": "plaid"
+      "source": "plaid",
+      "pfc_primary": null,
+      "pfc_detailed": null
     },
     "card": null
   }

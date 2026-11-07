@@ -110,6 +110,8 @@ mod tests {
             transacted_at: None,
             flag: crate::model::TxnFlag::Spending,
             raw: "{}".into(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: crate::model::default_source(),
         }
     }

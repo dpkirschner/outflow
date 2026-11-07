@@ -626,6 +626,8 @@ mod tests {
             pending: false,
             flag: TxnFlag::Spending,
             raw: String::new(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: default_source(),
         }
     }

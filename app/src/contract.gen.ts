@@ -54,7 +54,9 @@ export const transaction: Transaction = {
   "pending": false,
   "flag": "Spending",
   "raw": "{}",
-  "source": "plaid"
+  "source": "plaid",
+  "pfc_primary": null,
+  "pfc_detailed": null
 };
 
 export const txnPage: TxnPage = {
@@ -74,7 +76,9 @@ export const txnPage: TxnPage = {
       "pending": false,
       "flag": "Spending",
       "raw": "{}",
-      "source": "plaid"
+      "source": "plaid",
+      "pfc_primary": null,
+      "pfc_detailed": null
     },
     {
       "id": "txn-demo-002",
@@ -89,7 +93,9 @@ export const txnPage: TxnPage = {
       "pending": true,
       "flag": "CardPayment",
       "raw": "{}",
-      "source": "plaid"
+      "source": "plaid",
+      "pfc_primary": null,
+      "pfc_detailed": null
     }
   ]
 };
@@ -624,7 +630,9 @@ export const matchView: MatchView = {
     "pending": true,
     "flag": "CardPayment",
     "raw": "{}",
-    "source": "plaid"
+    "source": "plaid",
+    "pfc_primary": null,
+    "pfc_detailed": null
   },
   "card": null
 };

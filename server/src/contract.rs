@@ -85,6 +85,8 @@ fn transaction() -> Transaction {
         pending: false,
         flag: TxnFlag::Spending,
         raw: "{}".into(),
+        pfc_primary: None,
+        pfc_detailed: None,
         source: "plaid".into(),
     }
 }
@@ -103,6 +105,8 @@ fn payment_leg(id: &str, account_id: &str, cents: i64) -> Transaction {
         pending: true,
         flag: TxnFlag::CardPayment,
         raw: "{}".into(),
+        pfc_primary: None,
+        pfc_detailed: None,
         source: "plaid".into(),
     }
 }

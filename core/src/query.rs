@@ -474,6 +474,8 @@ mod tests {
             pending,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: crate::model::default_source(),
         }
     }

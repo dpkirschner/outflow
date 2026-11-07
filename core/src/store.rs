@@ -25,12 +25,23 @@ fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
         raw: r.get(9)?,
         transacted_at: r.get(10)?,
         flag: {
-            // NOT NULL DEFAULT 'spending', so this is always present; unknown
-            // values degrade to Spending rather than dropping the row.
-            let f: String = r.get(11)?;
-            TxnFlag::from_str(&f).unwrap_or(TxnFlag::Spending)
+            // Only a user override is read from the column; otherwise the flag
+            // is Plaid's classification, worked out now so a mapping change
+            // needs no data migration. Unknown stored values degrade to
+            // Spending rather than dropping the row.
+            let overridden: i64 = r.get(15)?;
+            if overridden != 0 {
+                let f: String = r.get(11)?;
+                TxnFlag::from_str(&f).unwrap_or(TxnFlag::Spending)
+            } else {
+                let p: Option<String> = r.get(13)?;
+                let d: Option<String> = r.get(14)?;
+                crate::plaid::flag_from_pfc(p.as_deref(), d.as_deref())
+            }
         },
         source: r.get(12)?,
+        pfc_primary: r.get(13)?,
+        pfc_detailed: r.get(14)?,
     })
 }
 
@@ -38,7 +49,8 @@ fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
 // `row_to_txn` indices and the `upsert_transactions` INSERT. New columns are
 // APPENDED, never inserted mid-list.
 const TXN_COLUMNS: &str = "id, account_id, posted, amount_cents, description, payee, \
-     category, category_source, pending, raw, transacted_at, flag, source";
+     category, category_source, pending, raw, transacted_at, flag, source, \
+     pfc_primary, pfc_detailed, flag_overridden";
 
 pub struct Store {
     conn: Connection,
@@ -234,21 +246,29 @@ fn insert_txn_batch(conn: &Connection, txns: &[Transaction]) -> rusqlite::Result
 
     for t in txns {
         let cat_src = t.category_source.map(|c| c.as_str());
-        // `flag` is intentionally absent from the conflict-update: a re-pull
-        // must not reset a manually-applied Transfer/CardPayment flag back to
-        // 'spending'. `transacted_at` IS updated so a later pull can fill it
-        // in if the bank starts supplying it.
+        // A new row counts as overridden when its flag isn't the one its
+        // Plaid category gives (fixture or test rows carrying their own flag),
+        // so what goes in is what reads back. On conflict the override marker
+        // is never touched and an overridden `flag` is kept: a re-pull must
+        // not reset a user's Transfer/CardPayment. The PFC columns are
+        // provider data and refresh; a row without an override follows them.
+        // `transacted_at` IS updated so a later pull can fill it in.
+        let overridden = t.flag
+            != crate::plaid::flag_from_pfc(t.pfc_primary.as_deref(), t.pfc_detailed.as_deref());
         conn.execute(
             "INSERT INTO transactions
-                (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw, transacted_at, flag, source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                (id, account_id, posted, amount_cents, description, payee, category, category_source, pending, raw, transacted_at, flag, source,
+                 pfc_primary, pfc_detailed, flag_overridden)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT(id) DO UPDATE SET
                 account_id=excluded.account_id, posted=excluded.posted,
                 amount_cents=excluded.amount_cents, description=excluded.description,
                 payee=excluded.payee, category=excluded.category,
                 category_source=excluded.category_source, pending=excluded.pending,
                 raw=excluded.raw, transacted_at=excluded.transacted_at,
-                source=excluded.source",
+                source=excluded.source,
+                pfc_primary=excluded.pfc_primary, pfc_detailed=excluded.pfc_detailed,
+                flag=CASE WHEN flag_overridden = 0 THEN excluded.flag ELSE flag END",
             params![
                 t.id,
                 t.account_id,
@@ -262,7 +282,10 @@ fn insert_txn_batch(conn: &Connection, txns: &[Transaction]) -> rusqlite::Result
                 t.raw,
                 t.transacted_at,
                 t.flag.as_str(),
-                t.source
+                t.source,
+                t.pfc_primary,
+                t.pfc_detailed,
+                overridden as i64
             ],
         )?;
         if t.pending {
@@ -333,7 +356,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     raw TEXT NOT NULL,
     transacted_at INTEGER,
     flag TEXT NOT NULL DEFAULT 'spending',
-    source TEXT NOT NULL DEFAULT 'plaid'
+    source TEXT NOT NULL DEFAULT 'plaid',
+    pfc_primary TEXT,
+    pfc_detailed TEXT,
+    flag_overridden INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_txn_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_txn_posted ON transactions(posted);
@@ -461,7 +487,9 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// seeded as `transfer` are re-flagged once (see `reflag_loan_payments`).
 /// v11: data-only — `transfer` rows split into the finer Moved groups (invest,
 /// save, loan_paydown) from their stored Plaid category (see `split_moved_groups`).
-const SCHEMA_VERSION: i64 = 11;
+/// v12: transactions.pfc_primary/pfc_detailed/flag_overridden, backfilled from
+/// `raw` once (see `backfill_pfc_columns`); the flag is an override from here.
+const SCHEMA_VERSION: i64 = 12;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -559,6 +587,16 @@ impl Store {
         if version < 11 {
             self.split_moved_groups()?;
         }
+        if version < 12 {
+            self.add_column_if_missing("transactions", "pfc_primary", "TEXT")?;
+            self.add_column_if_missing("transactions", "pfc_detailed", "TEXT")?;
+            self.add_column_if_missing(
+                "transactions",
+                "flag_overridden",
+                "INTEGER NOT NULL DEFAULT 0",
+            )?;
+            self.backfill_pfc_columns()?;
+        }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -630,6 +668,44 @@ impl Store {
                 )?;
                 n += 1;
             }
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// One-time v12 backfill: copy Plaid's category out of `raw` into the
+    /// PFC columns, and mark a row overridden when its stored flag isn't the
+    /// one that category gives (a user, rule or match decision). Every row's
+    /// effective flag is unchanged. Rows whose `raw` doesn't parse, or has no
+    /// category, get NULL columns. Pure Rust over `raw`, like v10.
+    fn backfill_pfc_columns(&self) -> rusqlite::Result<usize> {
+        let rows: Vec<(String, String, String)> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id, raw, flag FROM transactions")?;
+            let it = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            it.collect::<rusqlite::Result<_>>()?
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        for (id, raw, stored) in rows {
+            let v = serde_json::from_str::<serde_json::Value>(&raw).ok();
+            let pfc = v.as_ref().and_then(|v| v.get("personal_finance_category"));
+            let field = |k: &str| {
+                pfc.and_then(|p| p.get(k))
+                    .and_then(|x| x.as_str())
+                    .filter(|s| !s.is_empty())
+            };
+            let (primary, detailed) = (field("primary"), field("detailed"));
+            let seeded = crate::plaid::flag_from_pfc(primary, detailed);
+            let stored = TxnFlag::from_str(&stored).unwrap_or(TxnFlag::Spending);
+            let overridden = stored != seeded;
+            tx.execute(
+                "UPDATE transactions SET pfc_primary = ?1, pfc_detailed = ?2,
+                    flag_overridden = ?3 WHERE id = ?4",
+                params![primary, detailed, overridden as i64, id],
+            )?;
+            n += overridden as usize;
         }
         tx.commit()?;
         Ok(n)
@@ -974,9 +1050,9 @@ impl Store {
         rows.collect()
     }
 
-    /// Set a transaction's flag; when `learn`, also write an exact flag rule on
-    /// its normalized merchant so siblings pick up the flag on the next
-    /// `apply_flags` pass. Mirrors `set_manual_category`.
+    /// Override a transaction's flag; when `learn`, also write an exact flag
+    /// rule on its normalized merchant so siblings pick up the flag on the
+    /// next `apply_flags` pass. Mirrors `set_manual_category`.
     pub fn set_flag(
         &self,
         txn_id: &str,
@@ -985,7 +1061,7 @@ impl Store {
     ) -> rusqlite::Result<Option<i64>> {
         let existing = self.transaction(txn_id)?;
         self.conn.execute(
-            "UPDATE transactions SET flag = ?1 WHERE id = ?2",
+            "UPDATE transactions SET flag = ?1, flag_overridden = 1 WHERE id = ?2",
             params![flag.as_str(), txn_id],
         )?;
         if learn {
@@ -998,6 +1074,22 @@ impl Store {
             }
         }
         Ok(None)
+    }
+
+    /// Drop a transaction's flag override: it goes back to the flag Plaid's
+    /// category gives (Spending when there is none). Used when undoing an
+    /// accepted card-payment match.
+    pub fn clear_flag(&self, txn_id: &str) -> rusqlite::Result<()> {
+        let Some(t) = self.transaction(txn_id)? else {
+            return Ok(());
+        };
+        let seeded =
+            crate::plaid::flag_from_pfc(t.pfc_primary.as_deref(), t.pfc_detailed.as_deref());
+        self.conn.execute(
+            "UPDATE transactions SET flag = ?1, flag_overridden = 0 WHERE id = ?2",
+            params![seeded.as_str(), txn_id],
+        )?;
+        Ok(())
     }
 
     /// Set (or clear) an account's nickname. Empty/whitespace-only clears it to
@@ -1313,7 +1405,7 @@ impl Store {
                 let downgrade = r.flag == TxnFlag::Transfer && t.flag.is_saving();
                 if t.flag != r.flag && !downgrade {
                     tx.execute(
-                        "UPDATE transactions SET flag = ?1 WHERE id = ?2",
+                        "UPDATE transactions SET flag = ?1, flag_overridden = 1 WHERE id = ?2",
                         params![r.flag.as_str(), t.id],
                     )?;
                     n += 1;
@@ -1647,6 +1739,8 @@ mod tests {
             transacted_at: None,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: default_source(),
         }
     }
@@ -2456,6 +2550,203 @@ mod tests {
         assert_eq!(flag("mortgage"), TxnFlag::Spending);
     }
 
+    fn pfc_raw(primary: &str, detailed: &str) -> String {
+        format!(
+            r#"{{"personal_finance_category":{{"primary":"{primary}","detailed":"{detailed}"}}}}"#
+        )
+    }
+
+    #[test]
+    fn v12_backfills_pfc_columns_and_keeps_every_flag() {
+        // A real v11 file: the three columns don't exist yet.
+        let mut p = std::env::temp_dir();
+        p.push(format!("outflow-migrate-v11-{}.db", std::process::id()));
+        let path = p.to_string_lossy().into_owned();
+        let _ = std::fs::remove_file(&path);
+        {
+            let s = Store::open(&path).unwrap();
+            s.conn
+                .execute_batch(
+                    "ALTER TABLE transactions DROP COLUMN pfc_primary;
+                     ALTER TABLE transactions DROP COLUMN pfc_detailed;
+                     ALTER TABLE transactions DROP COLUMN flag_overridden;
+                     PRAGMA user_version = 11;",
+                )
+                .unwrap();
+            let ins = |id: &str, flag: &str, raw: &str, source: &str| {
+                s.conn
+                    .execute(
+                        "INSERT INTO transactions (id, account_id, posted, amount_cents,
+                            description, pending, raw, flag, source)
+                         VALUES (?1, 'chk', 0, -100, 'x', 0, ?2, ?3, ?4)",
+                        params![id, raw, flag, source],
+                    )
+                    .unwrap();
+            };
+            // Seeded by Plaid and untouched.
+            ins(
+                "coffee",
+                "spending",
+                &pfc_raw("FOOD_AND_DRINK", "FOOD_AND_DRINK_COFFEE"),
+                "plaid",
+            );
+            ins(
+                "ira",
+                "invest",
+                &pfc_raw(
+                    "TRANSFER_OUT",
+                    "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS",
+                ),
+                "plaid",
+            );
+            // The user said this savings transfer is spending.
+            ins(
+                "mine",
+                "spending",
+                &pfc_raw("TRANSFER_OUT", "TRANSFER_OUT_SAVINGS"),
+                "plaid",
+            );
+            // An accepted match on a row Plaid had as plain spending.
+            ins(
+                "pay",
+                "card_payment",
+                &pfc_raw("GENERAL_MERCHANDISE", "GENERAL_MERCHANDISE_OTHER"),
+                "plaid",
+            );
+            // Old SimpleFIN row with a rule's flag and no Plaid category.
+            ins("old", "transfer", r#"{"memo":"x"}"#, "simplefin");
+            ins("junk", "spending", "not json", "plaid");
+        }
+
+        let s = Store::open(&path).unwrap();
+        let v: i64 = s
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        let t = |id: &str| s.transaction(id).unwrap().unwrap();
+        let overridden = |id: &str| -> i64 {
+            s.conn
+                .query_row(
+                    "SELECT flag_overridden FROM transactions WHERE id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert_eq!(t("coffee").pfc_primary.as_deref(), Some("FOOD_AND_DRINK"));
+        assert_eq!(
+            t("coffee").pfc_detailed.as_deref(),
+            Some("FOOD_AND_DRINK_COFFEE")
+        );
+        assert_eq!(t("old").pfc_primary, None);
+        assert_eq!(t("junk").pfc_detailed, None);
+        // Every effective flag is what it was at v11.
+        assert_eq!(t("coffee").flag, TxnFlag::Spending);
+        assert_eq!(t("ira").flag, TxnFlag::Invest);
+        assert_eq!(t("mine").flag, TxnFlag::Spending);
+        assert_eq!(t("pay").flag, TxnFlag::CardPayment);
+        assert_eq!(t("old").flag, TxnFlag::Transfer);
+        assert_eq!(t("junk").flag, TxnFlag::Spending);
+        // Only the rows whose flag differs from Plaid's are overrides.
+        for (id, want) in [
+            ("coffee", 0),
+            ("ira", 0),
+            ("mine", 1),
+            ("pay", 1),
+            ("old", 1),
+            ("junk", 0),
+        ] {
+            assert_eq!(overridden(id), want, "{id}");
+        }
+        drop(s);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn pfc_txn(id: &str, primary: &str, detailed: &str) -> Transaction {
+        let mut t = txn(id, "chk", 100, -500, false);
+        t.raw = pfc_raw(primary, detailed);
+        t.pfc_primary = Some(primary.into());
+        t.pfc_detailed = Some(detailed.into());
+        t.flag = crate::plaid::flag_from_pfc(Some(primary), Some(detailed));
+        t
+    }
+
+    #[test]
+    fn resync_reclassifies_only_rows_without_an_override() {
+        let s = Store::open_in_memory().unwrap();
+        let a = pfc_txn("a", "GENERAL_MERCHANDISE", "GENERAL_MERCHANDISE_OTHER");
+        let b = pfc_txn("b", "GENERAL_MERCHANDISE", "GENERAL_MERCHANDISE_OTHER");
+        s.upsert_transactions(&[a, b]).unwrap();
+        s.set_flag("b", TxnFlag::Spending, false).unwrap(); // user's call
+                                                            // Plaid later says both were transfers to savings.
+        let a2 = pfc_txn("a", "TRANSFER_OUT", "TRANSFER_OUT_SAVINGS");
+        let b2 = pfc_txn("b", "TRANSFER_OUT", "TRANSFER_OUT_SAVINGS");
+        s.upsert_transactions(&[a2, b2]).unwrap();
+        let a = s.transaction("a").unwrap().unwrap();
+        let b = s.transaction("b").unwrap().unwrap();
+        assert_eq!(a.pfc_detailed.as_deref(), Some("TRANSFER_OUT_SAVINGS"));
+        assert_eq!(b.pfc_detailed.as_deref(), Some("TRANSFER_OUT_SAVINGS"));
+        assert_eq!(a.flag, TxnFlag::Save);
+        assert_eq!(b.flag, TxnFlag::Spending);
+    }
+
+    #[test]
+    fn inserted_flag_reads_back_even_without_a_category() {
+        let s = Store::open_in_memory().unwrap();
+        let mut t = txn("t", "chk", 100, -500, false);
+        t.flag = TxnFlag::Transfer;
+        s.upsert_transactions(&[t]).unwrap();
+        assert_eq!(s.transaction("t").unwrap().unwrap().flag, TxnFlag::Transfer);
+    }
+
+    #[test]
+    fn clear_flag_returns_to_plaids_classification() {
+        let s = Store::open_in_memory().unwrap();
+        let seeded = pfc_txn("pay", "LOAN_PAYMENTS", "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT");
+        let plain = txn("plain", "chk", 100, -500, false);
+        s.upsert_transactions(&[seeded, plain]).unwrap();
+        s.set_flag("pay", TxnFlag::Spending, false).unwrap();
+        s.set_flag("plain", TxnFlag::CardPayment, false).unwrap();
+        s.clear_flag("pay").unwrap();
+        s.clear_flag("plain").unwrap();
+        let flag = |id: &str| s.transaction(id).unwrap().unwrap().flag;
+        assert_eq!(flag("pay"), TxnFlag::CardPayment);
+        assert_eq!(flag("plain"), TxnFlag::Spending);
+    }
+
+    #[test]
+    fn apply_flags_marks_its_changes_as_overrides() {
+        let s = Store::open_in_memory().unwrap();
+        let mut t = pfc_txn("t", "GENERAL_MERCHANDISE", "GENERAL_MERCHANDISE_OTHER");
+        t.payee = Some("Example Brokerage".into());
+        s.upsert_transactions(&[t.clone()]).unwrap();
+        let key = normalize_payee("Example Brokerage");
+        s.add_flag_rule(MatchType::Exact, &key, TxnFlag::Invest)
+            .unwrap();
+        assert_eq!(s.apply_flags().unwrap(), 1);
+        // A re-sync with the same category keeps the rule's flag.
+        s.upsert_transactions(&[t]).unwrap();
+        assert_eq!(s.transaction("t").unwrap().unwrap().flag, TxnFlag::Invest);
+    }
+
+    /// The Plaid category is read from its columns, never by searching the
+    /// stored JSON (ho-2mj.8.3). Test modules are skipped.
+    #[test]
+    fn no_production_code_searches_raw() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let src = std::fs::read_to_string(&path).unwrap();
+            let prod = src.split("#[cfg(test)]").next().unwrap();
+            assert!(
+                !prod.contains(".raw.contains("),
+                "{} searches raw",
+                path.display()
+            );
+        }
+    }
+
     #[test]
     fn v7_db_gains_holding_detail_columns() {
         let mut p = std::env::temp_dir();
@@ -2766,6 +3057,8 @@ mod categorize_tests {
             transacted_at: None,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: default_source(),
         }
     }
@@ -2838,6 +3131,8 @@ mod encryption_tests {
             transacted_at: None,
             flag: TxnFlag::Spending,
             raw: "{}".into(),
+            pfc_primary: None,
+            pfc_detailed: None,
             source: default_source(),
         }
     }

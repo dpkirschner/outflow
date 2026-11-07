@@ -56,15 +56,19 @@ data integrity or the domain contract — treat them as load-bearing.
    reader of every flag: it reports non-Spending rows in the Moved lane,
    never in In or Out. (`query`)
 
-10. **User edits survive re-sync.** The upsert conflict-updates omit any
-    user-owned column: transactions omit `flag`, accounts omit `nickname`
-    (and never write `hidden` at all — new accounts default visible). A
-    re-pull carries neither (it binds `flag`'s parse-time seed / a NULL nickname
-    on *insert* only), so a stored value is never clobbered on *conflict*.
-    Likewise `apply_flags` only ever assigns a rule's flag, never resets to
-    `Spending`; Plaid `personal_finance_category` hints seed flags at parse time
-    only. The one exception was the one-time v10 migration, which re-flagged
-    loan payments still at `spending` (never rows a user had moved off it). Card-payment suppression is only correct when the card account is
+10. **User edits survive re-sync.** The upsert conflict-updates never touch a
+    user-owned value: accounts omit `nickname` (and never write `hidden` at
+    all — new accounts default visible); transactions never write
+    `flag_overridden` on conflict and keep an overridden `flag`. A transaction's
+    flag is Plaid's classification (`flag_from_pfc` over `pfc_primary`/
+    `pfc_detailed`, worked out on read) unless overridden by a user, a flag
+    rule or an accepted match; the PFC columns are provider data and refresh
+    on re-sync, so only un-overridden rows follow a Plaid reclassification.
+    `apply_flags` only ever assigns a rule's flag, never resets to `Spending`.
+    Plaid's category is read from its columns, never by searching `raw`.
+    The v10/v11 migrations re-flagged rows once (never rows a user had moved
+    off spending); v12 marked every row whose flag differed from its category
+    as an override, so no effective flag changed. Card-payment suppression is only correct when the card account is
     ingested — warn via `Store::has_credit_account`. (`store`, `plaid`)
 
 11. **Existing DBs migrate through `PRAGMA user_version`.** New columns on an

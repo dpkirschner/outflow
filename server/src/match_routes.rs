@@ -105,13 +105,14 @@ async fn reject(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult
             .match_by_id(id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("no match {id}"))?;
-        // Undoing an accept restores both legs to Spending.
+        // Undoing an accept drops both legs' overrides: each goes back to
+        // the flag Plaid's category gives.
         if m.status == MatchStatus::Accepted {
             store
-                .set_flag(&m.bank_txn_id, TxnFlag::Spending, false)
+                .clear_flag(&m.bank_txn_id)
                 .map_err(|e| e.to_string())?;
             store
-                .set_flag(&m.card_txn_id, TxnFlag::Spending, false)
+                .clear_flag(&m.card_txn_id)
                 .map_err(|e| e.to_string())?;
         }
         store

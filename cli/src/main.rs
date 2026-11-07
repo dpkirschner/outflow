@@ -1045,10 +1045,10 @@ fn cmd_matches(store: &Store, action: &MatchCmd, json: bool) -> Result<(), Strin
                 .ok_or_else(|| format!("no match {id}"))?;
             if m.status == MatchStatus::Accepted {
                 store
-                    .set_flag(&m.bank_txn_id, TxnFlag::Spending, false)
+                    .clear_flag(&m.bank_txn_id)
                     .map_err(|e| format!("{e}"))?;
                 store
-                    .set_flag(&m.card_txn_id, TxnFlag::Spending, false)
+                    .clear_flag(&m.card_txn_id)
                     .map_err(|e| format!("{e}"))?;
             }
             store

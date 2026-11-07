@@ -1,4 +1,4 @@
-use crate::model::{Transaction, TxnFlag};
+use crate::model::{AccountKind, Transaction, TxnFlag};
 use crate::store::Store;
 use crate::subscriptions::normalize_payee;
 use chrono::{Datelike, Local, TimeZone};
@@ -234,6 +234,7 @@ pub struct MerchantSpend {
 
 pub fn spend_by_category(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<CategorySpend>> {
     let txns = store.all_transactions()?;
+    let kind = account_kinds(store)?;
     let mut map: HashMap<Option<String>, (i64, usize)> = HashMap::new();
     for t in &txns {
         if !passes(t, f) {
@@ -245,7 +246,7 @@ pub fn spend_by_category(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<C
             let e = map.entry(t.category.clone()).or_insert((0, 0));
             e.0 += t.amount.cents().abs();
             e.1 += 1;
-        } else if t.flag == TxnFlag::Spending && is_refund(t) {
+        } else if t.flag == TxnFlag::Spending && is_refund(t, kind(&t.account_id)) {
             map.entry(t.category.clone()).or_insert((0, 0)).0 -= t.amount.cents();
         }
     }
@@ -293,16 +294,33 @@ pub fn top_merchants(
     Ok(out)
 }
 
-/// The category that marks a positive Spending transaction as In (income)
-/// rather than a refund. Plaid's INCOME seeds it; recategorizing fixes a miss.
-pub const INCOME_CATEGORY: &str = "Income";
+/// Which Flow lane a positive Spending transaction belongs to, from provider
+/// data and account kind only; the user's category never moves a row between
+/// In and Out (ADR 0001, amendment 2026-11-07). In: Plaid says INCOME, or
+/// TRANSFER_IN that the user re-flagged as Spending (a deposit they said is not
+/// a move). Refund: any other Plaid category, netted against Out (GLOSSARY: a
+/// refund is not In). With no Plaid category, a cash-side deposit is In so an
+/// unknown deposit never silently shrinks Out, and a credit on a card is a
+/// refund (add loans here when the loan kind lands, ho-2mj.4.1).
+fn is_refund(t: &Transaction, kind: AccountKind) -> bool {
+    if t.amount.is_outflow() {
+        return false;
+    }
+    match t.pfc_primary.as_deref() {
+        Some("INCOME") | Some("TRANSFER_IN") => false,
+        Some(_) => true,
+        None => kind == AccountKind::Credit,
+    }
+}
 
-/// Which Flow lane a positive Spending transaction belongs to. In: income-type
-/// money (category Income) or not yet categorized, so an unknown deposit
-/// never silently shrinks Out. Refund: a positive carrying a spending
-/// category, netted against Out (GLOSSARY: a refund is not In).
-fn is_refund(t: &Transaction) -> bool {
-    !t.amount.is_outflow() && t.category.as_deref().is_some_and(|c| c != INCOME_CATEGORY)
+/// Account kind by id; an unknown account reads as `Other`.
+fn account_kinds(store: &Store) -> rusqlite::Result<impl Fn(&str) -> AccountKind> {
+    let kinds: HashMap<String, AccountKind> = store
+        .accounts()?
+        .into_iter()
+        .map(|a| (a.id, a.kind))
+        .collect();
+    Ok(move |id: &str| kinds.get(id).copied().unwrap_or(AccountKind::Other))
 }
 
 /// One Moved group's money, seen from the spending-side accounts (checking
@@ -371,13 +389,7 @@ pub struct FlowMonth {
 /// Uses the filter's date range and pending setting; `include_non_spending` is
 /// ignored because every lane is reported.
 pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMonth>> {
-    use crate::model::AccountKind;
-    let kinds: HashMap<String, AccountKind> = store
-        .accounts()?
-        .into_iter()
-        .map(|a| (a.id, a.kind))
-        .collect();
-    let kind = |id: &str| kinds.get(id).copied().unwrap_or(AccountKind::Other);
+    let kind = account_kinds(store)?;
     let spending_side = |id: &str| matches!(kind(id), AccountKind::Checking | AccountKind::Credit);
 
     let all = TxnFilter {
@@ -402,7 +414,7 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
         let cents = t.amount.cents();
         match t.flag {
             TxnFlag::Spending if t.amount.is_outflow() => m.out_cents += -cents,
-            TxnFlag::Spending if is_refund(t) => {
+            TxnFlag::Spending if is_refund(t, kind(&t.account_id)) => {
                 m.out_cents -= cents;
                 m.refunds_cents += cents;
             }
@@ -730,6 +742,66 @@ mod tests {
             .unwrap();
         assert_eq!((groc.total_cents, groc.count), (4000, 1));
         assert!(cats.iter().all(|c| c.category.as_deref() != Some("Income")));
+    }
+
+    /// In and refunds come from Plaid's category and the account kind, never
+    /// the user's category (synthetic rows, invented amounts).
+    #[test]
+    fn in_lane_follows_pfc_and_account_kind_not_category() {
+        use crate::model::AccountKind::{Checking, Credit};
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("chk", Checking), account("card", Credit)])
+            .unwrap();
+        let on = |acct: &str, id: &str, cents: i64, cat: Option<&str>, pfc: Option<&str>| {
+            let mut x = t(id, JAN15, cents, id, cat, false);
+            x.account_id = acct.into();
+            x.pfc_primary = pfc.map(Into::into);
+            x
+        };
+        let mut side_gig = on("chk", "zelle", 20000, None, Some("TRANSFER_IN"));
+        side_gig.flag = TxnFlag::Spending; // user re-flagged a Transfer
+        s.upsert_transactions(&[
+            on(
+                "chk",
+                "groc",
+                -9000,
+                Some("Groceries"),
+                Some("FOOD_AND_DRINK"),
+            ),
+            // Uncategorized paycheck: In.
+            on("chk", "pay1", 300000, None, Some("INCOME")),
+            // A rule miscategorized the paycheck: still In.
+            on("chk", "pay2", 100000, Some("Groceries"), Some("INCOME")),
+            on("chk", "int", 500, None, None), // no PFC on cash side: In
+            side_gig,
+            // Uncategorized refund to checking: nets Out, under no category.
+            on("chk", "ret", 2000, None, Some("GENERAL_MERCHANDISE")),
+            // Categorized refund: nets Out in its category.
+            on(
+                "chk",
+                "ref",
+                1000,
+                Some("Groceries"),
+                Some("FOOD_AND_DRINK"),
+            ),
+            // A card credit with nothing to go on: a refund, not In.
+            on("card", "credit", 1500, None, None),
+        ])
+        .unwrap();
+        let m = &flow_lanes(&s, &TxnFilter::all()).unwrap()[0];
+        assert_eq!(m.in_cents, 300000 + 100000 + 500 + 20000);
+        assert_eq!(m.refunds_cents, 2000 + 1000 + 1500);
+        assert_eq!(m.out_cents, 9000 - 4500);
+
+        let cats = spend_by_category(&s, &TxnFilter::all()).unwrap();
+        let total = |c: Option<&str>| {
+            cats.iter()
+                .find(|x| x.category.as_deref() == c)
+                .map(|x| x.total_cents)
+        };
+        assert_eq!(total(Some("Groceries")), Some(8000));
+        assert_eq!(total(None), Some(-3500));
+        assert_eq!(cats.iter().map(|c| c.total_cents).sum::<i64>(), m.out_cents);
     }
 
     #[test]

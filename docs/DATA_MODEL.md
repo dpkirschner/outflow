@@ -173,9 +173,12 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
 - `top_merchants` — sum of **outflows only**, grouped by `normalize_payee`.
 - `flow_lanes` — the Flow lanes per month (GLOSSARY), bucketed on
   `effective_date()` in local time:
-  - **In**: positive Spending rows with category `Income` or no category yet.
-  - **Out**: Spending outflows minus **refunds** (positive Spending rows with
-    any other category), netted in their category.
+  - **In**: positive Spending rows whose `pfc_primary` is `INCOME`, or
+    `TRANSFER_IN` re-flagged as Spending by the user; with no PFC, a positive
+    on any account but credit. The user's `category` never decides the lane.
+  - **Out**: Spending outflows minus **refunds** (every other positive
+    Spending row: any other PFC, or no PFC on a credit account), netted in
+    their category (uncategorized under `None`).
   - **Moved** by group, from the **spending-side** accounts (checking +
     credit) only: the far leg of a move on a savings/investment/loan account
     isn't summed, so a move counts once whether or not the far account is

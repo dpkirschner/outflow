@@ -16,3 +16,4 @@ agent.md
 
 # graphify knowledge graph (generated locally, refreshed by git hooks)
 graphify-out/
+.impeccable/critique/

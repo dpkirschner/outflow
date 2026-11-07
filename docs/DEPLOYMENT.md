@@ -21,7 +21,7 @@ read-only token.
 4. Products: enable **Transactions**, plus **Investments** if you want
    brokerage/retirement holdings and investment transactions (it's billed per
    item). Items linked before Investments was enabled need "Allow holdings"
-   (update-mode re-consent) in the Connections tab. Providers that hold only
+   (update-mode re-consent) in Settings → Connections. Providers that hold only
    investment/HSA accounts and don't support Transactions can be linked with
    **Connect investments only**.
 5. Dashboard → Developers → API → **Allowed redirect URIs**: add exactly

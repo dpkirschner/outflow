@@ -1,10 +1,11 @@
+use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
     account_display_label, activity, balance_history, detect, evaluate_perks, flow_lanes,
     load_offers, parse_fixture, position_history, positions, search_transactions,
-    spend_by_category, summarize_balances, top_merchants, ActivityFilter, Cap, CategorySource,
-    FindingKind, MatchStatus, Money, Offer, PerkOptions, PositionFilter, Reward, SortKey, Store,
-    TxnFilter, TxnFlag, TxnQuery,
+    spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
+    CategorySource, FindingKind, MatchStatus, Money, Offer, Period, PerkOptions, PositionFilter,
+    Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -27,6 +28,53 @@ struct Cli {
     cmd: Cmd,
 }
 
+/// The one date range every date-filtered subcommand takes. Give `--period`,
+/// or `--since`/`--until`, not both; none means all of history.
+#[derive(Args, Default)]
+pub(crate) struct PeriodArgs {
+    /// A calendar period: 2026-11 (month), 2026-W45 (ISO week), 2026-Q4,
+    /// 2026 (year), or this-/last- week|month|quarter|year
+    /// (e.g. last-month). Local-time days.
+    #[arg(long, value_name = "P")]
+    pub period: Option<String>,
+    /// First day, YYYY-MM-DD (inclusive). Alone: through today.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub since: Option<String>,
+    /// Last day, YYYY-MM-DD (inclusive). Alone: from the start of history.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    pub until: Option<String>,
+}
+
+impl PeriodArgs {
+    /// The resolved range, anchored on today's local date.
+    pub(crate) fn resolve(&self) -> Result<Option<Period>, String> {
+        self.resolve_at(today_local())
+    }
+
+    pub(crate) fn resolve_at(&self, today: NaiveDate) -> Result<Option<Period>, String> {
+        Period::resolve(
+            self.period.as_deref(),
+            self.since.as_deref(),
+            self.until.as_deref(),
+            today,
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+
+/// For `balances` / `holdings`, whose range only applies to `--history`.
+pub(crate) fn history_period(
+    history: bool,
+    p: &PeriodArgs,
+    today: NaiveDate,
+) -> Result<Option<Period>, String> {
+    let period = p.resolve_at(today)?;
+    if period.is_some() && !history {
+        return Err("--period/--since/--until apply to --history only".into());
+    }
+    Ok(period)
+}
+
 #[derive(Args)]
 pub(crate) struct HoldingsArgs {
     /// Account id, or part of its name/nickname (case-insensitive).
@@ -38,9 +86,9 @@ pub(crate) struct HoldingsArgs {
     /// Per-sync position history instead of current positions.
     #[arg(long)]
     history: bool,
-    /// With --history: only snapshots on/after this date (YYYY-MM-DD).
-    #[arg(long, requires = "history")]
-    since: Option<String>,
+    /// With --history: the snapshot range.
+    #[command(flatten)]
+    period: PeriodArgs,
 }
 
 #[derive(Args)]
@@ -54,41 +102,22 @@ pub(crate) struct ActivityArgs {
     /// Plaid type or subtype: buy, sell, dividend, contribution, fee, ...
     #[arg(long = "type")]
     kind: Option<String>,
-    /// Only on/after this date (YYYY-MM-DD).
-    #[arg(long)]
-    since: Option<String>,
-    /// Only on/before this date (YYYY-MM-DD).
-    #[arg(long)]
-    until: Option<String>,
+    #[command(flatten)]
+    period: PeriodArgs,
 }
 
 impl ActivityArgs {
-    /// Dates normalized to zero-padded `YYYY-MM-DD` (they compare as text).
-    pub(crate) fn filter(&self) -> Result<ActivityFilter, String> {
-        let date = |o: &Option<String>, flag: &str| -> Result<Option<String>, String> {
-            o.as_deref()
-                .map(|s| iso_date(s).ok_or_else(|| format!("bad --{flag} date: {s}")))
-                .transpose()
-        };
-        Ok(ActivityFilter {
+    /// Core's filter takes inclusive `YYYY-MM-DD` bounds: the period's first
+    /// and last day.
+    fn filter(&self, period: Option<Period>) -> ActivityFilter {
+        ActivityFilter {
             account: self.account.clone(),
             ticker: self.ticker.clone(),
             kind: self.kind.clone(),
-            since: date(&self.since, "since")?,
-            until: date(&self.until, "until")?,
-        })
+            since: period.map(|p| p.start.to_string()),
+            until: period.map(|p| p.last_day().to_string()),
+        }
     }
-}
-
-/// `Y-M-D` → zero-padded `YYYY-MM-DD`, or None if it isn't a date shape.
-fn iso_date(s: &str) -> Option<String> {
-    parse_date(s)?;
-    let mut it = s.split('-').map(|p| p.parse::<u32>());
-    let (y, m, d) = (it.next()?.ok()?, it.next()?.ok()?, it.next()?.ok()?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
-        return None;
-    }
-    Some(format!("{y:04}-{m:02}-{d:02}"))
 }
 
 #[derive(Subcommand)]
@@ -110,10 +139,8 @@ pub(crate) enum Cmd {
         by: By,
         #[arg(long, default_value_t = 15)]
         top: usize,
-        #[arg(long)]
-        since: Option<String>,
-        #[arg(long)]
-        until: Option<String>,
+        #[command(flatten)]
+        period: PeriodArgs,
         #[arg(long)]
         posted_only: bool,
     },
@@ -139,6 +166,9 @@ pub(crate) enum Cmd {
     Balances {
         #[arg(long)]
         history: bool,
+        /// With --history: the day range.
+        #[command(flatten)]
+        period: PeriodArgs,
     },
     /// Every investment position, one row each: quantity, institution price
     /// (+ as-of date), Plaid close price, value, cost basis, unit cost, gain.
@@ -191,10 +221,8 @@ pub(crate) struct TxnsArgs {
     /// Keep only this flag (transfer/card-payment imply --show-excluded).
     #[arg(long, value_enum)]
     pub flag: Option<FlagArg>,
-    #[arg(long)]
-    pub since: Option<String>,
-    #[arg(long)]
-    pub until: Option<String>,
+    #[command(flatten)]
+    pub period: PeriodArgs,
     #[arg(long)]
     pub posted_only: bool,
     /// Include Transfer/CardPayment rows.
@@ -303,39 +331,18 @@ fn dollars(cents: i64) -> String {
     format!("${}", Money::from_cents(cents).to_display())
 }
 
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = (if y >= 0 { y } else { y - 399 }) / 400;
-    let yoe = y - era * 400;
-    let mp = if m > 2 { m - 3 } else { m + 9 };
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
-}
-
-pub(crate) fn parse_date(s: &str) -> Option<i64> {
-    let mut it = s.split('-');
-    let y: i64 = it.next()?.parse().ok()?;
-    let m: i64 = it.next()?.parse().ok()?;
-    let d: i64 = it.next()?.parse().ok()?;
-    if it.next().is_some() {
-        return None;
+/// Epoch bounds `(since, until)` of a period at local midnight, until
+/// exclusive; `(None, None)` for all of history.
+fn epoch_bounds(period: Option<Period>) -> (Option<i64>, Option<i64>) {
+    match period.map(|p| p.bounds()) {
+        Some((s, u)) => (Some(s), Some(u)),
+        None => (None, None),
     }
-    Some(days_from_civil(y, m, d) * 86400)
 }
 
-fn build_filter(
-    since: &Option<String>,
-    until: &Option<String>,
-    posted_only: bool,
-) -> Result<TxnFilter, String> {
+fn build_filter(period: &PeriodArgs, posted_only: bool) -> Result<TxnFilter, String> {
     let mut f = TxnFilter::all();
-    if let Some(s) = since {
-        f.since = Some(parse_date(s).ok_or_else(|| format!("bad --since date: {s}"))?);
-    }
-    if let Some(u) = until {
-        f.until = Some(parse_date(u).ok_or_else(|| format!("bad --until date: {u}"))?);
-    }
+    (f.since, f.until) = epoch_bounds(period.resolve()?);
     f.include_pending = !posted_only;
     Ok(f)
 }
@@ -569,7 +576,7 @@ fn json_out<T: serde::Serialize>(v: &T) -> Result<(), String> {
 }
 
 fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
-    let mut filter = build_filter(&a.since, &a.until, a.posted_only)?;
+    let mut filter = build_filter(&a.period, a.posted_only)?;
     filter.include_non_spending = a.show_excluded || a.flag.is_some_and(|f| f.to_flag().is_moved());
     let q = TxnQuery {
         filter,
@@ -786,12 +793,19 @@ fn pct(bp: i64) -> String {
     format!("{sign}{}.{}%", bp / 100, (bp % 100) / 10)
 }
 
-fn cmd_balances(store: &Store, history: bool, json: bool) -> Result<(), String> {
+fn cmd_balances(
+    store: &Store,
+    history: bool,
+    period: &PeriodArgs,
+    json: bool,
+) -> Result<(), String> {
+    let range = history_period(history, period, today_local())?;
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     if history {
         let kinds = accounts.iter().map(|a| (a.id.clone(), a.kind)).collect();
+        let (since, until) = epoch_bounds(range);
         let snaps = store
-            .balance_snapshots(None, None)
+            .balance_snapshots(since, until)
             .map_err(|e| format!("{e}"))?;
         let days = balance_history(&snaps, &kinds);
         if json {
@@ -866,15 +880,13 @@ fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), Strin
         account: a.account.clone(),
         ticker: a.ticker.clone(),
     };
+    let range = history_period(a.history, &a.period, today_local())?;
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     let securities = store.securities().map_err(|e| format!("{e}"))?;
     if a.history {
-        let since = match &a.since {
-            Some(s) => Some(parse_date(s).ok_or_else(|| format!("bad --since date: {s}"))?),
-            None => None,
-        };
+        let (since, until) = epoch_bounds(range);
         let snaps = store
-            .holding_snapshots(since, None)
+            .holding_snapshots(since, until)
             .map_err(|e| format!("{e}"))?;
         let points = position_history(&snaps, &accounts, &securities, &filter);
         if json {
@@ -927,7 +939,7 @@ fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), Strin
 }
 
 fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> Result<(), String> {
-    let filter = a.filter()?;
+    let filter = a.filter(a.period.resolve()?);
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     let securities = store.securities().map_err(|e| format!("{e}"))?;
     let txns = store.investment_txns().map_err(|e| format!("{e}"))?;
@@ -1075,11 +1087,10 @@ fn run() -> Result<(), String> {
         Cmd::Report {
             by,
             top,
-            since,
-            until,
+            period,
             posted_only,
         } => {
-            let f = build_filter(&since, &until, posted_only)?;
+            let f = build_filter(&period, posted_only)?;
             if cli.json {
                 return report_json(&store, by, top, &f);
             }
@@ -1099,7 +1110,7 @@ fn run() -> Result<(), String> {
         } => cmd_fix(&store, txn_id, category, no_learn),
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
-        Cmd::Balances { history } => cmd_balances(&store, history, cli.json),
+        Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
@@ -1126,6 +1137,112 @@ fn main() -> ExitCode {
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Invented "today" so relative periods are stable.
+    fn today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, 7).unwrap()
+    }
+
+    fn day(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    fn args(period: Option<&str>, since: Option<&str>, until: Option<&str>) -> PeriodArgs {
+        PeriodArgs {
+            period: period.map(Into::into),
+            since: since.map(Into::into),
+            until: until.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn none_means_all_of_history() {
+        assert_eq!(PeriodArgs::default().resolve_at(today()), Ok(None));
+    }
+
+    #[test]
+    fn period_spellings_resolve() {
+        let p = args(Some("2026-02"), None, None)
+            .resolve_at(today())
+            .unwrap()
+            .unwrap();
+        assert_eq!((p.start, p.last_day()), (day(2026, 2, 1), day(2026, 2, 28)));
+        let p = args(Some("last-quarter"), None, None)
+            .resolve_at(today())
+            .unwrap()
+            .unwrap();
+        assert_eq!((p.start, p.end), (day(2026, 7, 1), day(2026, 10, 1)));
+    }
+
+    #[test]
+    fn since_until_are_both_inclusive() {
+        let p = args(None, Some("2026-03-10"), Some("2026-03-12"))
+            .resolve_at(today())
+            .unwrap()
+            .unwrap();
+        assert_eq!(p.start, day(2026, 3, 10));
+        assert_eq!(p.last_day(), day(2026, 3, 12));
+        assert_eq!(p.end, day(2026, 3, 13));
+        // The activity filter gets the first and last day as text.
+        let a = ActivityArgs {
+            account: None,
+            ticker: None,
+            kind: None,
+            period: PeriodArgs::default(),
+        };
+        let f = a.filter(Some(p));
+        assert_eq!(f.since.as_deref(), Some("2026-03-10"));
+        assert_eq!(f.until.as_deref(), Some("2026-03-12"));
+    }
+
+    #[test]
+    fn period_with_since_is_rejected() {
+        let e = args(Some("2026-11"), Some("2026-11-01"), None)
+            .resolve_at(today())
+            .unwrap_err();
+        assert!(e.contains("not both"), "{e}");
+    }
+
+    #[test]
+    fn bad_spelling_lists_the_accepted_forms() {
+        let e = args(Some("november"), None, None)
+            .resolve_at(today())
+            .unwrap_err();
+        assert!(e.contains("2026-W45") && e.contains("this-/last-"), "{e}");
+        let e = args(None, Some("2026/11/01"), None)
+            .resolve_at(today())
+            .unwrap_err();
+        assert!(e.contains("YYYY-MM-DD"), "{e}");
+    }
+
+    #[test]
+    fn range_needs_history_on_snapshot_commands() {
+        let p = args(Some("this-year"), None, None);
+        assert!(history_period(false, &p, today()).is_err());
+        assert!(history_period(true, &p, today()).unwrap().is_some());
+        assert_eq!(
+            history_period(false, &PeriodArgs::default(), today()),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn flattened_flags_parse_on_every_dated_subcommand() {
+        for argv in [
+            &["outflow", "report", "--period", "2026-11"][..],
+            &["outflow", "txns", "--since", "2026-11-01"],
+            &["outflow", "activity", "--until", "2026-11-01"],
+            &["outflow", "holdings", "--history", "--period", "2026"],
+            &["outflow", "balances", "--history", "--period", "this-year"],
+        ] {
+            assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
         }
     }
 }

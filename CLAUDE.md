@@ -36,19 +36,29 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/pl
 
 Subcommands: `pull --from-file P` (offline fixture; live syncs run on the
 server), `categorize [--llm]`,
-`report --by category|merchant|monthly [--top --since --until --posted-only]`
+`report --by category|merchant|monthly [--top --posted-only]
+[--period P | --since D --until D]`
 (monthly = Flow lanes: in / out / earned − spent / saved / Moved groups),
 `subs`, `fix <id> <category> [--no-learn]`,
 `perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
-vs spending; file from `--file`/`OUTFLOW_PERKS`), `balances [--history]`
+vs spending; file from `--file`/`OUTFLOW_PERKS`),
+`balances [--history [--period P | --since D --until D]]`
 (current state incl. holdings + idle cash; daily trend from per-sync snapshots),
-`holdings [--account A --ticker T --history --since D]` (flat per-position
+`holdings [--account A --ticker T]
+[--history [--period P | --since D --until D]]` (flat per-position
 rows: qty, price + as-of, close price, basis, unit cost, gain; an
 investment account's uninvested cash is a synthetic `cash:uninvested`
-row), `activity [--account --ticker --type --since --until]` (investment
-transactions: buys, sells, dividends, contributions; amount = cash effect),
-plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`): `txns`, `accounts`, `matches`, `status`.
+row), `activity [--account --ticker --type] [--period P | --since D --until D]`
+(investment transactions: buys, sells, dividends, contributions; amount = cash
+effect), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`):
+`txns [... --period P | --since D --until D]`, `accounts`, `matches`, `status`.
 DB path from `--db` or `OUTFLOW_DB`.
+
+One date group everywhere (`core::period`): `--period` takes `2026-11`,
+`2026-W45`, `2026-Q4`, `2026`, or `this-`/`last-` `week|month|quarter|year`;
+`--since`/`--until` are `YYYY-MM-DD`, both inclusive; not both forms at once.
+Days are local time. Server mode sends the same spelling (`period=` or
+`since=&until=`) to the API.
 
 Server + web client:
 

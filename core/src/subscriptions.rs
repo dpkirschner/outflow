@@ -140,6 +140,7 @@ pub fn detect(txns: &[Transaction]) -> Vec<Subscription> {
 /// interval. Distinct from `Cadence` (Monthly/Yearly, used by `detect`) — a
 /// stream can be daily or weekly. The UI maps each variant to a badge label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum StreamCadence {
     Daily,       // "~daily"
     FewPerWeek,  // "~3×/wk"
@@ -156,6 +157,7 @@ pub enum StreamCadence {
 /// Direction of a stream's monthly-rate change, derived from `trend_pct` for
 /// coloring (Rising = spending more).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum Trend {
     Rising,
     Falling,
@@ -165,6 +167,7 @@ pub enum Trend {
 /// A recurring merchant surfaced as a time series (the rhythm-ledger row). The
 /// data contract the stream row and slide-over render directly.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct RhythmEntry {
     pub merchant: String,
     pub cadence: StreamCadence,

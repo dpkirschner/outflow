@@ -82,10 +82,66 @@ fn render() -> String {
     }
 
     // --- core::ledger ---
+    {
+        use outflow_core::ledger::*;
+        use outflow_core::subscriptions::{RhythmEntry, StreamCadence, Trend};
+        decls!(
+            &cfg,
+            out,
+            [
+                StreamCadence,
+                Trend,
+                RhythmEntry,
+                Source,
+                Stream,
+                LineItem,
+                TransferGroup,
+                LedgerStats,
+                Coverage,
+                LedgerView
+            ]
+        );
+    }
 
     // --- core::balances, core::activity ---
+    {
+        use outflow_core::activity::ActivityRow;
+        use outflow_core::balances::*;
+        decls!(
+            &cfg,
+            out,
+            [
+                Group,
+                HoldingRow,
+                AccountBalance,
+                GroupBalance,
+                Totals,
+                BalancesView,
+                DayTotals,
+                PositionRow,
+                PositionPoint,
+                ActivityRow
+            ]
+        );
+    }
 
     // --- core::perks ---
+    {
+        use outflow_core::perks::*;
+        decls!(
+            &cfg,
+            out,
+            [
+                Reward,
+                Cap,
+                Offer,
+                FindingKind,
+                Finding,
+                CardStatus,
+                PerksReport
+            ]
+        );
+    }
 
     // --- server ---
 

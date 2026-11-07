@@ -8,10 +8,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
     activity, balance_history, detect, flow_lanes, position_history, positions, spend_by_category,
-    summarize_balances, top_merchants, Account, AccountKind, ActivityFilter, ActivityRow,
-    BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, LedgerView, Mark,
-    MerchantSpend, PositionFilter, PositionPoint, PositionRow, Subscription, SyncEntry,
-    Transaction, TxnFilter, TxnFlag,
+    summarize_balances, today_local, top_merchants, Account, AccountKind, ActivityFilter,
+    ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, LedgerView,
+    Mark, MerchantSpend, Period, PositionFilter, PositionPoint, PositionRow, Subscription,
+    SyncEntry, Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,13 +29,79 @@ pub fn window_since(window: &str, now: i64) -> Option<i64> {
     }
 }
 
-/// Date/pending filter from query params. Epoch **seconds**. A missing param
-/// set means "everything" (include pending) — mirrors the old `to_filter`
-/// guard against the derived-Default trap.
+/// `None` for a missing or blank query value.
+fn blank(o: Option<&str>) -> Option<&str> {
+    o.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// A bare integer (optional leading `-`): the legacy epoch-seconds form.
+fn is_epoch(s: &str) -> bool {
+    let digits = s.strip_prefix('-').unwrap_or(s);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The shared date range on the read endpoints, as epoch seconds
+/// `[since, until)`. Two forms:
+///
+/// - `period=2026-11` (any [`Period::parse`] spelling) or
+///   `since=YYYY-MM-DD&until=YYYY-MM-DD` with `until` inclusive, resolved by
+///   [`Period::resolve`] to local-midnight bounds. Neither means all history.
+/// - Legacy: `since` / `until` as bare epoch seconds (since inclusive, until
+///   exclusive), passed through unchanged. Both given values must then be
+///   integers, and `period` must be absent.
+fn resolve_range(
+    period: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<(Option<i64>, Option<i64>), ApiError> {
+    let (period, since, until) = (blank(period), blank(since), blank(until));
+    if since.is_some_and(is_epoch) || until.is_some_and(is_epoch) {
+        if period.is_some() {
+            return Err(ApiError::bad_request(outflow_core::PeriodError::Ambiguous));
+        }
+        let epoch = |o: Option<&str>| -> Result<Option<i64>, ApiError> {
+            o.map(|s| {
+                s.parse::<i64>()
+                    .ok()
+                    .filter(|_| is_epoch(s))
+                    .ok_or_else(|| {
+                        ApiError::bad_request(format!(
+                            "bad bound {s:?}: give since and until both as epoch seconds \
+                         or both as YYYY-MM-DD"
+                        ))
+                    })
+            })
+            .transpose()
+        };
+        return Ok((epoch(since)?, epoch(until)?));
+    }
+    Ok(match resolve_period(period, since, until)? {
+        Some(p) => {
+            let (start, end) = p.bounds();
+            (Some(start), Some(end))
+        }
+        None => (None, None),
+    })
+}
+
+/// [`Period::resolve`] against today, with errors as 400s.
+fn resolve_period(
+    period: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<Option<Period>, ApiError> {
+    Period::resolve(period, since, until, today_local()).map_err(ApiError::bad_request)
+}
+
+/// Date/pending filter from query params: `period` or `since`/`until` (see
+/// [`resolve_range`]). A missing param set means "everything" (include
+/// pending) — mirrors the old `to_filter` guard against the derived-Default
+/// trap.
 #[derive(Debug, Default, Deserialize)]
 pub struct FilterParams {
-    pub since: Option<i64>,
-    pub until: Option<i64>,
+    pub period: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
     /// Include pending rows (default true).
     pub pending: Option<bool>,
     /// Include Transfer/CardPayment rows in aggregations (default false).
@@ -43,13 +109,18 @@ pub struct FilterParams {
 }
 
 impl FilterParams {
-    pub fn to_filter(&self) -> TxnFilter {
-        TxnFilter {
-            since: self.since,
-            until: self.until,
+    pub fn to_filter(&self) -> Result<TxnFilter, ApiError> {
+        let (since, until) = resolve_range(
+            self.period.as_deref(),
+            self.since.as_deref(),
+            self.until.as_deref(),
+        )?;
+        Ok(TxnFilter {
+            since,
+            until,
             include_pending: self.pending.unwrap_or(true),
             include_non_spending: self.transfers.unwrap_or(false),
-        }
+        })
     }
 }
 
@@ -96,8 +167,11 @@ async fn balances(State(state): State<AppState>) -> ApiResult<BalancesView> {
 
 #[derive(Deserialize)]
 struct HistoryParams {
-    /// Epoch seconds; omit for the full history.
-    since: Option<i64>,
+    /// `period` or `since`/`until` (see [`resolve_range`]); omit for the full
+    /// history.
+    period: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -106,8 +180,11 @@ struct HoldingsParams {
     account: Option<String>,
     /// Ticker or security id.
     ticker: Option<String>,
-    /// Epoch seconds; `/holdings/history` only.
-    since: Option<i64>,
+    /// `period` or `since`/`until` (see [`resolve_range`]);
+    /// `/holdings/history` only.
+    period: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
 }
 
 impl HoldingsParams {
@@ -142,7 +219,8 @@ struct ActivityParams {
     /// Plaid type or subtype (buy, sell, dividend, contribution, fee, ...).
     #[serde(rename = "type")]
     kind: Option<String>,
-    /// Inclusive `YYYY-MM-DD` bounds.
+    /// `period`, or inclusive `YYYY-MM-DD` `since`/`until` bounds.
+    period: Option<String>,
     since: Option<String>,
     until: Option<String>,
 }
@@ -153,12 +231,13 @@ async fn investment_activity(
     Query(p): Query<ActivityParams>,
 ) -> ApiResult<Vec<ActivityRow>> {
     let nonempty = |o: Option<String>| o.filter(|s| !s.is_empty());
+    let range = resolve_period(p.period.as_deref(), p.since.as_deref(), p.until.as_deref())?;
     let f = ActivityFilter {
         account: nonempty(p.account),
         ticker: nonempty(p.ticker),
         kind: nonempty(p.kind),
-        since: nonempty(p.since),
-        until: nonempty(p.until),
+        since: range.map(|r| r.start.format("%Y-%m-%d").to_string()),
+        until: range.map(|r| r.last_day().format("%Y-%m-%d").to_string()),
     };
     with_store(&state, move |s| {
         let accounts = s.accounts().map_err(|e| e.to_string())?;
@@ -175,11 +254,13 @@ async fn holdings_history(
     State(state): State<AppState>,
     Query(p): Query<HoldingsParams>,
 ) -> ApiResult<Vec<PositionPoint>> {
+    let (since, until) =
+        resolve_range(p.period.as_deref(), p.since.as_deref(), p.until.as_deref())?;
     with_store(&state, move |s| {
         let accounts = s.accounts().map_err(|e| e.to_string())?;
         let securities = s.securities().map_err(|e| e.to_string())?;
         let snaps = s
-            .holding_snapshots(p.since, None)
+            .holding_snapshots(since, until)
             .map_err(|e| e.to_string())?;
         Ok(position_history(
             &snaps,
@@ -197,6 +278,8 @@ async fn balances_history(
     State(state): State<AppState>,
     Query(p): Query<HistoryParams>,
 ) -> ApiResult<Vec<DayTotals>> {
+    let (since, until) =
+        resolve_range(p.period.as_deref(), p.since.as_deref(), p.until.as_deref())?;
     with_store(&state, move |s| {
         let kinds: std::collections::HashMap<String, AccountKind> = s
             .accounts()
@@ -205,7 +288,7 @@ async fn balances_history(
             .map(|a| (a.id, a.kind))
             .collect();
         let snaps = s
-            .balance_snapshots(p.since, None)
+            .balance_snapshots(since, until)
             .map_err(|e| e.to_string())?;
         Ok(balance_history(&snaps, &kinds))
     })
@@ -248,12 +331,13 @@ async fn set_account_hidden(
 // Query uses serde_urlencoded, whose flatten support buffers every value as a
 // string and then can't coerce it back to i64/bool — a flattened `since=...`
 // makes the whole query fail to deserialize (a 400 the SPA sees as broken
-// JSON). Inline fields deserialize directly. Keep the four names in sync with
+// JSON). Inline fields deserialize directly. Keep the five names in sync with
 // FilterParams; `to_filter()` below reuses its single default-guard.
 #[derive(Debug, Default, Deserialize)]
 struct TxnQueryParams {
-    since: Option<i64>,
-    until: Option<i64>,
+    period: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     pending: Option<bool>,
     transfers: Option<bool>,
     q: Option<String>,
@@ -271,10 +355,11 @@ struct TxnQueryParams {
 }
 
 impl TxnQueryParams {
-    fn to_filter(&self) -> TxnFilter {
+    fn to_filter(&self) -> Result<TxnFilter, ApiError> {
         FilterParams {
-            since: self.since,
-            until: self.until,
+            period: self.period.clone(),
+            since: self.since.clone(),
+            until: self.until.clone(),
             pending: self.pending,
             transfers: self.transfers,
         }
@@ -291,7 +376,7 @@ async fn transactions(
         Some(s) => outflow_core::SortKey::from_str(s)
             .ok_or_else(|| ApiError::bad_request(format!("bad sort key {s:?}")))?,
     };
-    let mut filter = p.to_filter();
+    let mut filter = p.to_filter()?;
     // Filtering BY a suppressed flag only makes sense with those rows visible.
     if p.flag.is_some_and(TxnFlag::is_moved) {
         filter.include_non_spending = true;
@@ -334,7 +419,7 @@ async fn spend_categories(
     State(state): State<AppState>,
     Query(params): Query<FilterParams>,
 ) -> ApiResult<Vec<CategorySpend>> {
-    let f = params.to_filter();
+    let f = params.to_filter()?;
     with_store(&state, move |s| {
         spend_by_category(s, &f).map_err(|e| e.to_string())
     })
@@ -345,8 +430,9 @@ async fn spend_categories(
 // Inlined filter fields, not flatten — see the note on TxnQueryParams.
 #[derive(Deserialize)]
 struct MerchantParams {
-    since: Option<i64>,
-    until: Option<i64>,
+    period: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
     pending: Option<bool>,
     transfers: Option<bool>,
     limit: Option<usize>,
@@ -357,12 +443,13 @@ async fn merchants(
     Query(params): Query<MerchantParams>,
 ) -> ApiResult<Vec<MerchantSpend>> {
     let f = FilterParams {
+        period: params.period,
         since: params.since,
         until: params.until,
         pending: params.pending,
         transfers: params.transfers,
     }
-    .to_filter();
+    .to_filter()?;
     let limit = params.limit.unwrap_or(15);
     with_store(&state, move |s| {
         top_merchants(s, &f, limit).map_err(|e| e.to_string())
@@ -377,7 +464,7 @@ async fn flow(
     State(state): State<AppState>,
     Query(params): Query<FilterParams>,
 ) -> ApiResult<Vec<FlowMonth>> {
-    let f = params.to_filter();
+    let f = params.to_filter()?;
     with_store(&state, move |s| {
         flow_lanes(s, &f).map_err(|e| e.to_string())
     })
@@ -1159,6 +1246,236 @@ mod tests {
         assert_eq!(body["merchant"], "uber");
         assert_eq!(body["occurrence_count"], 3);
         assert!(body["cadence"].is_string());
+    }
+
+    /// Local noon on `day` (YYYY-MM-DD), as epoch seconds.
+    fn noon(day: &str) -> i64 {
+        use chrono::TimeZone;
+        let d = chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").unwrap();
+        chrono::Local
+            .from_local_datetime(&d.and_hms_opt(12, 0, 0).unwrap())
+            .single()
+            .unwrap()
+            .timestamp()
+    }
+
+    fn txn_on(id: &str, day: &str) -> Transaction {
+        let mut t = txn(id, -1000, "Corner Cafe");
+        t.posted = noon(day);
+        t.transacted_at = Some(t.posted);
+        t
+    }
+
+    async fn txn_ids(app: Router, uri: &str) -> Vec<String> {
+        let (status, body) = get_json(app, uri).await;
+        assert_eq!(status, StatusCode::OK, "{uri}: {body}");
+        let mut ids: Vec<String> = body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_owned())
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn period_app() -> Router {
+        app_with_txns(&[
+            txn_on("sep30", "2026-09-30"),
+            txn_on("oct01", "2026-10-01"),
+            txn_on("oct15", "2026-10-15"),
+            txn_on("oct31", "2026-10-31"),
+            txn_on("nov01", "2026-11-01"),
+        ])
+    }
+
+    #[tokio::test]
+    async fn period_picks_one_month() {
+        let ids = txn_ids(period_app(), "/transactions?period=2026-10").await;
+        assert_eq!(ids, ["oct01", "oct15", "oct31"]);
+        // Same resolver on the aggregates.
+        let (status, v) = get_json(period_app(), "/spend/categories?period=2026-10").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v[0]["total_cents"].as_i64().unwrap().abs(), 3000);
+        let (status, _) = get_json(period_app(), "/merchants?period=2026-Q4").await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = get_json(period_app(), "/flow?period=last-month").await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn since_until_dates_include_the_until_day() {
+        let ids = txn_ids(
+            period_app(),
+            "/transactions?since=2026-09-30&until=2026-10-15",
+        )
+        .await;
+        assert_eq!(ids, ["oct01", "oct15", "sep30"]);
+    }
+
+    #[tokio::test]
+    async fn legacy_epoch_since_until_unchanged() {
+        // until is exclusive in epoch mode: a row exactly at `until` drops.
+        let uri = format!(
+            "/transactions?since={}&until={}",
+            noon("2026-10-01"),
+            noon("2026-10-31")
+        );
+        let ids = txn_ids(period_app(), &uri).await;
+        assert_eq!(ids, ["oct01", "oct15"]);
+        // since alone stays open-ended.
+        let uri = format!("/transactions?since={}", noon("2026-10-31"));
+        assert_eq!(txn_ids(period_app(), &uri).await, ["nov01", "oct31"]);
+    }
+
+    #[tokio::test]
+    async fn bad_range_params_are_400s() {
+        let cases = [
+            ("/transactions?period=2026-10&since=2026-10-01", "not both"),
+            ("/transactions?period=2026-10&since=1790000000", "not both"),
+            ("/transactions?period=Octember", "bad period"),
+            ("/flow?since=1790000000&until=2026-10-01", "epoch seconds"),
+            (
+                "/merchants?since=2026-10-01&until=1790000000",
+                "epoch seconds",
+            ),
+            (
+                "/spend/categories?since=2026-10-31&until=2026-10-01",
+                "after",
+            ),
+            ("/activity?period=2026-13", "bad period"),
+            ("/balances/history?since=10/01/2026", "bad date"),
+        ];
+        for (uri, needle) in cases {
+            let (status, body) = get_json(period_app(), uri).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+            let msg = body["error"].as_str().unwrap();
+            assert!(msg.contains(needle), "{uri}: {msg}");
+        }
+    }
+
+    #[tokio::test]
+    async fn balance_and_holding_history_honor_until() {
+        use outflow_core::{AccountKind, Holding, Security};
+        let store = Store::open_in_memory().unwrap();
+        let accounts = [Account {
+            id: "brk".into(),
+            org: "Broker".into(),
+            name: "Brokerage (0000)".into(),
+            kind: AccountKind::Investment,
+            balance: Money::from_cents(1_000_00),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: "plaid".into(),
+            nickname: None,
+            hidden: false,
+        }];
+        store.upsert_accounts(&accounts).unwrap();
+        let secs = [Security {
+            security_id: "vti".into(),
+            ticker: Some("VTI".into()),
+            name: "Total Market".into(),
+            sec_type: "etf".into(),
+            is_cash: false,
+            cusip: None,
+            isin: None,
+            close_price: None,
+            close_price_as_of: None,
+        }];
+        let holds = [Holding {
+            account_id: "brk".into(),
+            security_id: "vti".into(),
+            quantity: "1".into(),
+            price: "1000".into(),
+            value: Money::from_cents(1_000_00),
+            cost_basis: None,
+            price_as_of: None,
+            currency: None,
+        }];
+        for day in ["2026-10-01", "2026-10-05"] {
+            store
+                .record_item_snapshot(&accounts, Some((&secs, &holds)), noon(day))
+                .unwrap();
+        }
+        let app = app_with_store(store);
+
+        let (_, all) = get_json(app.clone(), "/balances/history").await;
+        assert!(all.as_array().unwrap().len() > 1);
+        let (status, h) = get_json(app.clone(), "/balances/history?until=2026-10-02").await;
+        assert_eq!(status, StatusCode::OK, "{h}");
+        assert_eq!(h.as_array().unwrap().len(), 1);
+        let (_, h) = get_json(app.clone(), "/balances/history?period=2026-W41").await;
+        assert_eq!(h.as_array().unwrap().len(), 1); // Oct 5-11: the later sync only
+
+        let (_, h) = get_json(app.clone(), "/holdings/history").await;
+        assert_eq!(h.as_array().unwrap().len(), 2);
+        let uri = format!("/holdings/history?until={}", noon("2026-10-05"));
+        let (status, h) = get_json(app, &uri).await;
+        assert_eq!(status, StatusCode::OK, "{h}");
+        assert_eq!(h.as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn activity_takes_a_period() {
+        use outflow_core::{AccountKind, InvestmentTxn};
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_accounts(&[Account {
+                id: "brk".into(),
+                org: "Broker".into(),
+                name: "Brokerage (0000)".into(),
+                kind: AccountKind::Investment,
+                balance: Money::from_cents(0),
+                currency: "USD".into(),
+                last_synced: 0,
+                source: "plaid".into(),
+                nickname: None,
+                hidden: false,
+            }])
+            .unwrap();
+        let t = |id: &str, date: &str| InvestmentTxn {
+            id: id.into(),
+            account_id: "brk".into(),
+            security_id: None,
+            date: date.into(),
+            name: "CONTRIBUTION".into(),
+            txn_type: "cash".into(),
+            subtype: "contribution".into(),
+            quantity: "0".into(),
+            price: "0".into(),
+            amount: Money::from_cents(100_00),
+            fees: None,
+            currency: Some("USD".into()),
+            cancel_txn_id: None,
+        };
+        store
+            .upsert_investment_txns(
+                &[],
+                &[
+                    t("a", "2026-09-30"),
+                    t("b", "2026-10-01"),
+                    t("c", "2026-10-31"),
+                    t("d", "2026-11-01"),
+                ],
+                1,
+            )
+            .unwrap();
+        let app = app_with_store(store);
+        let ids = |v: serde_json::Value| -> Vec<String> {
+            let mut ids: Vec<String> = v
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["id"].as_str().unwrap().to_owned())
+                .collect();
+            ids.sort();
+            ids
+        };
+        let (status, v) = get_json(app.clone(), "/activity?period=2026-10").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(ids(v), ["b", "c"]);
+        let (_, v) = get_json(app, "/activity?since=2026-09-30&until=2026-10-01").await;
+        assert_eq!(ids(v), ["a", "b"]);
     }
 
     // Unknown merchant → null (JSON `null`, a 200), not an error.

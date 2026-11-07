@@ -25,6 +25,7 @@ use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, Mo
 use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
 use outflow_core::stock::{
     AccountChange, ChangeReason, ContributedPoint, ExcludedAccount, GainReason, NetWorthChange,
+    PositionChange,
 };
 use outflow_core::subscriptions::StreamCadence;
 use outflow_core::{ActivityRow, Money};
@@ -371,6 +372,35 @@ fn net_worth_change() -> NetWorthChange {
     }
 }
 
+fn position_change() -> PositionChange {
+    PositionChange {
+        account_ids: vec!["acct-brokerage".into(), "acct-ira".into()],
+        account: "Demo Brokerage (0000), Demo IRA (1111)".into(),
+        security_id: "sec-vti".into(),
+        ticker: Some("VTI".into()),
+        label: "VTI".into(),
+        name: "Demo Total Market ETF".into(),
+        is_cash: false,
+        start_quantity: "14".into(),
+        end_quantity: "14.5".into(),
+        price: Some("260".into()),
+        priced_at: Some(T0 + 30 * DAY),
+        price_as_of: Some("2026-02-13".into()),
+        start_value: m(350_000),
+        end_value: m(377_000),
+        contributions: Some(m(12_500)),
+        gain: Some(m(14_500)),
+        gain_bp: Some(400),
+        gain_reason: None,
+        change_reason: None,
+        partial_start: false,
+        sold: false,
+        cost_basis: None,
+        unrealized_gain: None,
+        unrealized_bp: None,
+    }
+}
+
 fn day_totals_breakdown() -> Totals {
     Totals {
         net_worth: m(393_905),
@@ -630,6 +660,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("BalancesView", j(balances_view())),
         ("DayTotals", j(day_totals())),
         ("NetWorthChange", j(net_worth_change())),
+        ("PositionChange", j(position_change())),
         ("PositionRow", j(position_row())),
         ("PositionPoint", j(position_point())),
         ("ActivityRow", j(activity_row())),

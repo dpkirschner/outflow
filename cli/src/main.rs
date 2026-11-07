@@ -2,10 +2,11 @@ use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
     account_display_label, activity, balance_history, evaluate_perks, flow_lanes, load_offers,
-    net_worth_change, parse_fixture, position_history, positions, search_transactions,
-    spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
-    CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions,
-    PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    net_worth_change, parse_fixture, position_change, position_history, positions,
+    search_transactions, spend_by_category, summarize_balances, today_local, top_merchants,
+    ActivityFilter, Cap, CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer,
+    Period, PerkOptions, PositionFilter, PositionLens, Reward, SortKey, Store, TxnFilter, TxnFlag,
+    TxnQuery,
 };
 use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
@@ -87,9 +88,70 @@ pub(crate) struct HoldingsArgs {
     /// Per-sync position history instead of current positions.
     #[arg(long)]
     history: bool,
-    /// With --history: the snapshot range.
+    /// `position` combines a security across accounts (keyed on ticker).
+    /// Implies the period view.
+    #[arg(long, value_enum)]
+    by: Option<ByArg>,
+    /// Without --history: the period to show position gain over (default
+    /// this month when --by is given). With --history: the snapshot range.
     #[command(flatten)]
     period: PeriodArgs,
+}
+
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq, Debug)]
+pub(crate) enum ByArg {
+    Account,
+    Position,
+}
+
+impl ByArg {
+    pub(crate) fn lens(self) -> PositionLens {
+        match self {
+            ByArg::Account => PositionLens::Account,
+            ByArg::Position => PositionLens::Position,
+        }
+    }
+
+    /// Wire spelling (server mode).
+    #[cfg_attr(not(feature = "client"), allow(dead_code))]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ByArg::Account => "account",
+            ByArg::Position => "position",
+        }
+    }
+}
+
+/// What `holdings` shows.
+#[derive(Debug, PartialEq)]
+pub(crate) enum HoldingsView {
+    /// Current positions (no period, no --by).
+    Current,
+    /// Per-sync snapshots (--history), over an optional range.
+    History(Option<Period>),
+    /// Position gain over a period (a period or --by given).
+    Change(Period, PositionLens),
+}
+
+pub(crate) fn holdings_view(a: &HoldingsArgs, today: NaiveDate) -> Result<HoldingsView, String> {
+    let period = a.period.resolve_at(today)?;
+    if a.history {
+        if a.by.is_some() {
+            return Err("--by applies to the period view, not --history".into());
+        }
+        return Ok(HoldingsView::History(period));
+    }
+    if period.is_none() && a.by.is_none() {
+        return Ok(HoldingsView::Current);
+    }
+    let period = match period {
+        Some(p) => p,
+        None => Period::parse("this-month", today).map_err(|e| e.to_string())?,
+    };
+    Ok(HoldingsView::Change(
+        period,
+        a.by.map_or(PositionLens::Account, ByArg::lens),
+    ))
 }
 
 #[derive(Args)]
@@ -951,6 +1013,11 @@ pub(crate) fn change_period(p: &PeriodArgs, today: NaiveDate) -> Result<Period, 
     }
 }
 
+/// `+1.2%` / `-1.2%`: a change in percent always carries its sign.
+fn signed_pct(bp: i64) -> String {
+    format!("{}{}", if bp > 0 { "+" } else { "" }, pct(bp))
+}
+
 /// `+$1.00` / `-$1.00`: a change always carries its sign.
 fn signed(cents: i64) -> String {
     let sign = if cents < 0 { '-' } else { '+' };
@@ -997,7 +1064,7 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
         dollars(c.end.net_worth.cents()),
         signed(change.cents()),
         c.change_bp
-            .map(|bp| format!(" ({}{})", if bp > 0 { "+" } else { "" }, pct(bp)))
+            .map(|bp| format!(" ({})", signed_pct(bp)))
             .unwrap_or_default(),
         if c.partial_start {
             "   (partial start: some accounts begin mid-period)"
@@ -1134,10 +1201,13 @@ fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), Strin
         account: a.account.clone(),
         ticker: a.ticker.clone(),
     };
-    let range = history_period(a.history, &a.period, today_local())?;
+    let view = holdings_view(a, today_local())?;
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     let securities = store.securities().map_err(|e| format!("{e}"))?;
-    if a.history {
+    if let HoldingsView::Change(p, lens) = view {
+        return holdings_change(store, &accounts, &securities, &filter, p, lens, json);
+    }
+    if let HoldingsView::History(range) = view {
         let (since, until) = epoch_bounds(range);
         let snaps = store
             .holding_snapshots(since, until)
@@ -1186,8 +1256,94 @@ fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), Strin
             dollars(r.value.cents()),
             r.cost_basis.map(|b| dollars(b.cents())).unwrap_or_default(),
             r.unit_cost.as_deref().unwrap_or(""),
-            r.gain_bp.map(pct).unwrap_or_default()
+            r.gain_bp.map(signed_pct).unwrap_or_default()
         );
+    }
+    Ok(())
+}
+
+/// `holdings --period P [--by position]`: gain over the period per position.
+fn holdings_change(
+    store: &Store,
+    accounts: &[outflow_core::Account],
+    securities: &[outflow_core::Security],
+    filter: &PositionFilter,
+    p: Period,
+    lens: PositionLens,
+    json: bool,
+) -> Result<(), String> {
+    use outflow_core::{ChangeReason, GainReason};
+    let (since, until) = p.bounds();
+    let snaps = store
+        .holding_snapshots(None, Some(until))
+        .map_err(|e| format!("{e}"))?;
+    let current = store
+        .current_holdings_synced()
+        .map_err(|e| format!("{e}"))?;
+    let txns = store.investment_txns().map_err(|e| format!("{e}"))?;
+    let rows = position_change(
+        accounts,
+        securities,
+        &snaps,
+        &current,
+        &txns,
+        Some(since),
+        Some(until),
+        filter,
+        lens,
+    );
+    if json {
+        return json_out(&rows);
+    }
+    println!("{p}  ({} to {})", p.start, p.last_day());
+    println!(
+        "{:<12} {:<28} {:>12} {:>14} {:>13} {:>8} {:>14} {:>13} {:>8}",
+        "holding", "account", "qty", "value", "period gain", "", "basis", "unrealized", ""
+    );
+    for r in &rows {
+        let gain = match (r.gain, r.gain_reason, r.change_reason) {
+            (Some(g), _, _) => signed(g.cents()),
+            (None, Some(GainReason::Cash), _) => "cash".into(),
+            (None, Some(GainReason::ContributionsUnknown), _) => "unknown".into(),
+            (None, _, Some(ChangeReason::OneSnapshot)) => "one snapshot".into(),
+            _ => "-".into(),
+        };
+        let note = [
+            r.sold.then_some("sold"),
+            r.partial_start.then_some("from first snapshot"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ");
+        println!(
+            "{:<12} {:<28} {:>12} {:>14} {:>13} {:>8} {:>14} {:>13} {:>8}{}{}",
+            truncate(&r.label, 12),
+            truncate(&r.account, 28),
+            r.end_quantity,
+            dollars(r.end_value.cents()),
+            gain,
+            r.gain_bp.map(signed_pct).unwrap_or_default(),
+            r.cost_basis
+                .map(|b| dollars(b.cents()))
+                .unwrap_or_else(|| "-".into()),
+            r.unrealized_gain
+                .map(|g| signed(g.cents()))
+                .unwrap_or_default(),
+            r.unrealized_bp.map(signed_pct).unwrap_or_default(),
+            r.price_as_of
+                .as_deref()
+                .map(|d| format!("  priced as of {d}"))
+                .unwrap_or_default(),
+            if note.is_empty() {
+                String::new()
+            } else {
+                format!("  ({note})")
+            }
+        );
+    }
+    if lens == PositionLens::Account && !rows.is_empty() {
+        println!("\nPosition gains don't sum to an account's gain (see `outflow change`).");
     }
     Ok(())
 }
@@ -1487,6 +1643,34 @@ mod tests {
         let line = breakdown_line(&t);
         assert!(line.starts_with("cash $320.00  + invested $141350.00 (incl. $6422.00 uninvested)"));
         assert!(line.ends_with("- credit $410.00  - loans $12400.00  = net worth $128860.00"));
+    }
+
+    #[test]
+    fn holdings_view_picks_current_history_or_change() {
+        let parse = |argv: &[&str]| {
+            let mut v = vec!["outflow", "holdings"];
+            v.extend_from_slice(argv);
+            match Cli::try_parse_from(v).unwrap().cmd {
+                Cmd::Holdings(a) => holdings_view(&a, today()),
+                _ => unreachable!(),
+            }
+        };
+        assert_eq!(parse(&[]), Ok(HoldingsView::Current));
+        assert!(matches!(
+            parse(&["--history"]),
+            Ok(HoldingsView::History(None))
+        ));
+        let nov = Period::parse("2026-11", today()).unwrap();
+        assert_eq!(
+            parse(&["--by", "position"]),
+            Ok(HoldingsView::Change(nov, PositionLens::Position))
+        );
+        let oct = Period::parse("2026-10", today()).unwrap();
+        assert_eq!(
+            parse(&["--period", "last-month"]),
+            Ok(HoldingsView::Change(oct, PositionLens::Account))
+        );
+        assert!(parse(&["--history", "--by", "position"]).is_err());
     }
 
     #[test]

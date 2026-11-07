@@ -333,7 +333,7 @@ pub struct PositionFilter {
 }
 
 impl PositionFilter {
-    fn keeps(
+    pub(crate) fn keeps(
         &self,
         account_id: &str,
         account: &str,

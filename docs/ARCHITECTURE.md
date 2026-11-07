@@ -64,7 +64,8 @@ money            i64-cents type, decimal parse, display
           │                plus a synthetic uninvested-cash row)
           ├ activity       investment transactions → filtered, flat rows
           ├ stock          net worth change over a period: per-account change,
-          │                gain net of contributions, Markets + Added split
+          │                gain net of contributions, Markets + Added split;
+          │                position_change (per position, By position lens)
           ├ categorize     RuleSet, precedence
           ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
           │                flag/category seeding from personal_finance_category)

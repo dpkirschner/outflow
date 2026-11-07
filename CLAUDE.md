@@ -56,7 +56,10 @@ Added = the rest, unmeasured accounts named; per-account change + gain),
 [--history [--period P | --since D --until D]]` (flat per-position
 rows: qty, price + as-of, close price, basis, unit cost, gain; an
 investment account's uninvested cash is a synthetic `cash:uninvested`
-row), `activity [--account --ticker --type] [--period P | --since D --until D]`
+row; with `--period`/`--since`/`--until` or `--by account|position`
+(no `--history`): gain over the period per position, default this month,
+unrealized gain + basis, sold positions kept, `--by position` combines a
+ticker across accounts), `activity [--account --ticker --type] [--period P | --since D --until D]`
 (investment transactions: buys, sells, dividends, contributions; amount = cash
 effect), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`):
 `txns [... --merchant KEY

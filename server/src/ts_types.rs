@@ -132,6 +132,7 @@ fn render() -> String {
                 ExcludedAccount,
                 ContributedPoint,
                 NetWorthChange,
+                PositionChange,
             ]
         );
     }

@@ -276,6 +276,22 @@ change`. Visible accounts only.
   `contributed` = invested on the first day + net contributions through
   that day. `contributed_complete` is false when an account is excluded or
   a contribution couldn't be valued.
+- **Positions over a period** (`position_change`, `GET /api/holdings/change`,
+  `outflow holdings --period P [--by position]`). Per account, start and end
+  are holdings snapshot sets chosen by the same rule. Per position: gain =
+  end value − start value − contributions, where contributions = buys −
+  sells at their cash cost + share transfers at snapshot price (rule D).
+  Cash dividends are not credited to the position, and a reinvestment buy is
+  a contribution. Measurability uses the same quantity check. A position
+  bought mid-period starts at $0; a sold one stays (`sold`). Gain % = gain ÷
+  (start value + net contributions when positive). Unrealized gain = end
+  value − end basis (None without a basis). `by=position` combines a ticker,
+  else a security id (warrants stay apart), across accounts; a sum is None
+  when any part lacks it. Nothing is dropped for being worth $0.
+  **Position gains do not sum to the account's gain**, by design: the
+  reinvested dividend counts as a position contribution but nets to zero at
+  account level, and positions and balance are priced at different moments.
+  The UI must never total position rows under an account.
 - **Activity lag**: Plaid can post investment activity days late, so the
   current month can read `contributions_unknown` and later flip to
   measurable. That's expected; nothing is estimated in between.

@@ -33,7 +33,7 @@ use crate::model::{
 use crate::money::Money;
 use chrono::NaiveDate;
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Share quantities are compared as integers in 1e-8 share units.
 const QTY_SCALE: i128 = 100_000_000;
@@ -1152,5 +1152,828 @@ mod tests {
             Some(3_33)
         );
         assert_eq!(value_cents(qty_units("-2").unwrap(), "1.005"), Some(-2_01));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Positions over a period (ho-2mj.4.2)
+// ---------------------------------------------------------------------------
+
+/// How position rows are keyed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum PositionLens {
+    /// One row per position per account.
+    #[default]
+    Account,
+    /// The same security combined across accounts: keyed on ticker, else
+    /// security id (so un-tickered instruments like warrants stay apart).
+    Position,
+}
+
+/// One position over a period. Values come from holdings snapshots, priced
+/// as of `priced_at`. Position gains do NOT sum to the account's gain: a
+/// reinvested dividend's buy counts as a contribution here, while at account
+/// level it nets to zero (and positions and balance are priced at different
+/// moments).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PositionChange {
+    /// The account ids behind this row (one, unless combined).
+    pub account_ids: Vec<String>,
+    /// Display label(s), comma-joined when combined.
+    pub account: String,
+    pub security_id: String,
+    pub ticker: Option<String>,
+    /// Ticker, else security name, else id.
+    pub label: String,
+    pub name: String,
+    pub is_cash: bool,
+    /// Exact decimal text; "0" when the position wasn't held.
+    pub start_quantity: String,
+    pub end_quantity: String,
+    /// End snapshot price (exact decimal text); None once sold or on
+    /// snapshots without a price.
+    pub price: Option<String>,
+    /// Epoch seconds of the end snapshot the value is priced at.
+    pub priced_at: Option<i64>,
+    /// The institution's own price date, when the end snapshot is the
+    /// current holdings sync (a frozen price shows here). Oldest when
+    /// combined.
+    pub price_as_of: Option<String>,
+    pub start_value: Money,
+    pub end_value: Money,
+    /// Buys - sells + shares transferred in (at snapshot price). None when a
+    /// transfer has no recorded price.
+    pub contributions: Option<Money>,
+    /// Gain net of contributions = end - start - contributions.
+    pub gain: Option<Money>,
+    /// Gain over start value plus net contributions (when positive), in
+    /// basis points.
+    pub gain_bp: Option<i64>,
+    pub gain_reason: Option<GainReason>,
+    /// Start and end are the same snapshot.
+    pub change_reason: Option<ChangeReason>,
+    /// The account's start is its first holdings snapshot inside the period.
+    pub partial_start: bool,
+    /// Held at the start or traded in the period, gone by the end.
+    pub sold: bool,
+    /// End snapshot basis; None when the broker gives none (or any
+    /// combined part lacks one).
+    pub cost_basis: Option<Money>,
+    /// `end_value - cost_basis`.
+    pub unrealized_gain: Option<Money>,
+    pub unrealized_bp: Option<i64>,
+}
+
+type SyncedPriceDate<'a> = (Option<i64>, Option<&'a str>);
+
+/// Every position over `[since, until)` on `accounts` (the visible set),
+/// filtered, largest end value first. `current` is the live holdings table
+/// with sync times (`Store::current_holdings_synced`), used only for the
+/// institution's price date.
+#[allow(clippy::too_many_arguments)]
+pub fn position_change(
+    accounts: &[Account],
+    securities: &[Security],
+    holdings: &[HoldingSnapshot],
+    current: &[(crate::model::Holding, Option<i64>)],
+    activity: &[InvestmentTxn],
+    since: Option<i64>,
+    until: Option<i64>,
+    filter: &crate::balances::PositionFilter,
+    lens: PositionLens,
+) -> Vec<PositionChange> {
+    let since = since.unwrap_or(i64::MIN);
+    let until = until.unwrap_or(i64::MAX);
+    let secs: HashMap<&str, &Security> = securities
+        .iter()
+        .map(|s| (s.security_id.as_str(), s))
+        .collect();
+    let live = live_activity(activity);
+    // (account, security) -> (sync time, institution price date).
+    let as_of: HashMap<(&str, &str), SyncedPriceDate> = current
+        .iter()
+        .map(|(h, synced)| {
+            (
+                (h.account_id.as_str(), h.security_id.as_str()),
+                (*synced, h.price_as_of.as_deref()),
+            )
+        })
+        .collect();
+
+    let mut rows = Vec::new();
+    for a in accounts {
+        let mut mine: Vec<&HoldingSnapshot> = holdings
+            .iter()
+            .filter(|h| h.account_id == a.id && h.taken_at < until)
+            .collect();
+        mine.sort_by_key(|h| h.taken_at);
+        let times: BTreeSet<i64> = mine.iter().map(|h| h.taken_at).collect();
+        let (Some(&first), Some(&end_t)) = (times.first(), times.last()) else {
+            continue;
+        };
+        let before = times.range(..=since).next_back().copied();
+        let partial = before.is_none();
+        let start_t = before.unwrap_or(first);
+        let set_at = |t: i64| -> BTreeMap<&str, &HoldingSnapshot> {
+            mine.iter()
+                .filter(|h| h.taken_at == t)
+                .map(|h| (h.security_id.as_str(), *h))
+                .collect()
+        };
+        let (start, end) = (set_at(start_t), set_at(end_t));
+        let one = start_t == end_t;
+        let window: Vec<(&InvestmentTxn, NaiveDate)> = match (local_day(start_t), local_day(end_t))
+        {
+            (Some(sd), Some(ed)) if !one => live
+                .iter()
+                .filter(|t| t.account_id == a.id)
+                .filter_map(|t| {
+                    let d = NaiveDate::parse_from_str(&t.date, "%Y-%m-%d").ok()?;
+                    (sd < d && d <= ed).then_some((*t, d))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let ids: BTreeSet<&str> = start
+            .keys()
+            .chain(end.keys())
+            .copied()
+            .chain(window.iter().filter_map(|(t, _)| t.security_id.as_deref()))
+            .collect();
+        let label = account_display_label(&a.name, a.nickname.as_deref());
+
+        for id in ids {
+            let sec = secs.get(id).copied();
+            let ticker = sec.and_then(|s| s.ticker.clone());
+            if !filter.keeps(&a.id, &label, id, ticker.as_deref()) {
+                continue;
+            }
+            let (s0, e0) = (start.get(id).copied(), end.get(id).copied());
+            let start_value = s0.map_or(0, |h| h.value.cents());
+            let end_value = e0.map_or(0, |h| h.value.cents());
+            let is_cash = sec.is_some_and(|s| s.is_cash);
+            let rows_for: Vec<&(&InvestmentTxn, NaiveDate)> = window
+                .iter()
+                .filter(|(t, _)| t.security_id.as_deref() == Some(id))
+                .collect();
+
+            let mut contributions = None;
+            let mut gain = None;
+            let mut gain_reason = None;
+            let change_reason = one.then_some(ChangeReason::OneSnapshot);
+            if is_cash {
+                gain_reason = Some(GainReason::Cash);
+            } else if !one {
+                let flows: Option<i64> = rows_for
+                    .iter()
+                    .map(|(t, d)| position_flow(t, *d, &mine))
+                    .sum();
+                let q = |h: Option<&HoldingSnapshot>| h.map_or(Some(0), |h| qty_units(&h.quantity));
+                let moved: Option<i128> =
+                    rows_for.iter().map(|(t, _)| qty_units(&t.quantity)).sum();
+                let explained = match (q(s0), q(e0), moved) {
+                    (Some(a), Some(b), Some(m)) => (b - a - m).abs() <= QTY_TOLERANCE,
+                    _ => false,
+                };
+                contributions = flows;
+                match flows {
+                    Some(f) if explained => gain = Some(end_value - start_value - f),
+                    _ => gain_reason = Some(GainReason::ContributionsUnknown),
+                }
+            }
+            let basis = e0.and_then(|h| h.cost_basis).map(|b| b.cents());
+            let (sold, price, priced_at) = match e0 {
+                Some(h) => (false, h.price.clone(), Some(h.taken_at)),
+                None => (true, None, None),
+            };
+            let price_as_of = match as_of.get(&(a.id.as_str(), id)) {
+                Some((Some(synced), d)) if Some(*synced) == priced_at => d.map(String::from),
+                _ => None,
+            };
+            rows.push(finish(PositionChange {
+                account_ids: vec![a.id.clone()],
+                account: label.clone(),
+                security_id: id.to_string(),
+                label: sec
+                    .and_then(|s| s.ticker.clone())
+                    .or_else(|| sec.map(|s| s.name.clone()))
+                    .unwrap_or_else(|| id.to_string()),
+                ticker,
+                name: sec.map(|s| s.name.clone()).unwrap_or_default(),
+                is_cash,
+                start_quantity: s0.map_or_else(|| "0".into(), |h| h.quantity.clone()),
+                end_quantity: e0.map_or_else(|| "0".into(), |h| h.quantity.clone()),
+                price,
+                priced_at,
+                price_as_of,
+                start_value: Money::from_cents(start_value),
+                end_value: Money::from_cents(end_value),
+                contributions: contributions.map(Money::from_cents),
+                gain: gain.map(Money::from_cents),
+                gain_bp: None,
+                gain_reason,
+                change_reason,
+                partial_start: partial,
+                sold,
+                cost_basis: basis.map(Money::from_cents),
+                unrealized_gain: None,
+                unrealized_bp: None,
+            }));
+        }
+    }
+    if lens == PositionLens::Position {
+        rows = combine(rows);
+    }
+    rows.sort_by(|x, y| {
+        (
+            y.end_value.cents(),
+            y.start_value.cents(),
+            &x.label,
+            &x.account,
+        )
+            .cmp(&(
+                x.end_value.cents(),
+                x.start_value.cents(),
+                &y.label,
+                &y.account,
+            ))
+    });
+    rows
+}
+
+/// A position's money in (positive) or out from one activity row: buys and
+/// sells at their cash cost, share transfers at the first recorded price on
+/// or after the date (rule D). Dividends, fees and the rest: 0. None when a
+/// transfer can't be valued.
+fn position_flow(t: &InvestmentTxn, date: NaiveDate, mine: &[&HoldingSnapshot]) -> Option<i64> {
+    let cash = t.amount.cents();
+    match t.txn_type.as_str() {
+        "buy" | "sell" => Some(-cash),
+        "transfer" if cash != 0 => Some(-cash),
+        "transfer" => match contribution(t, date, mine) {
+            Contribution::Valued(v) => Some(v),
+            Contribution::None => Some(0),
+            Contribution::Unvalued => None,
+        },
+        _ => Some(0),
+    }
+}
+
+/// Fill the derived fields: gain %, unrealized gain.
+fn finish(mut r: PositionChange) -> PositionChange {
+    let start = r.start_value.cents();
+    r.gain_bp = r.gain.and_then(|g| {
+        let base = start + r.contributions.map_or(0, |c| c.cents().max(0));
+        (base > 0).then(|| ((g.cents() as i128 * 10_000) / base as i128) as i64)
+    });
+    r.unrealized_gain = r
+        .cost_basis
+        .map(|b| Money::from_cents(r.end_value.cents() - b.cents()));
+    r.unrealized_bp = match (r.unrealized_gain, r.cost_basis) {
+        (Some(g), Some(b)) if b.cents() > 0 => {
+            Some(((g.cents() as i128 * 10_000) / b.cents() as i128) as i64)
+        }
+        _ => None,
+    };
+    r
+}
+
+/// 1e-8 share units back to plain decimal text, trailing zeros trimmed.
+fn format_units(u: i128) -> String {
+    let sign = if u < 0 { "-" } else { "" };
+    let (int, frac) = (u.abs() / QTY_SCALE, u.abs() % QTY_SCALE);
+    let frac = format!("{frac:08}");
+    let frac = frac.trim_end_matches('0');
+    if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    }
+}
+
+/// The By position lens: one row per ticker (else security id) across
+/// accounts. Sums are only given when every part has them.
+fn combine(rows: Vec<PositionChange>) -> Vec<PositionChange> {
+    let mut groups: BTreeMap<String, Vec<PositionChange>> = BTreeMap::new();
+    for r in rows {
+        let key = r
+            .ticker
+            .clone()
+            .unwrap_or_else(|| format!("id:{}", r.security_id));
+        groups.entry(key).or_default().push(r);
+    }
+    groups
+        .into_values()
+        .map(|mut parts| {
+            if parts.len() == 1 {
+                return parts.pop().unwrap();
+            }
+            let sum = |f: fn(&PositionChange) -> Money| -> Money {
+                Money::from_cents(parts.iter().map(|p| f(p).cents()).sum())
+            };
+            let all = |f: fn(&PositionChange) -> Option<Money>| -> Option<Money> {
+                parts
+                    .iter()
+                    .map(|p| f(p).map(|m| m.cents()))
+                    .sum::<Option<i64>>()
+                    .map(Money::from_cents)
+            };
+            let units = |f: fn(&PositionChange) -> &String| -> String {
+                parts
+                    .iter()
+                    .map(|p| qty_units(f(p)))
+                    .sum::<Option<i128>>()
+                    .map_or_else(|| "?".into(), format_units)
+            };
+            let latest = parts
+                .iter()
+                .filter(|p| p.price.is_some())
+                .max_by_key(|p| p.priced_at);
+            let held: Vec<&PositionChange> = parts.iter().filter(|p| !p.sold).collect();
+            let basis = if held.is_empty() {
+                None
+            } else {
+                held.iter()
+                    .map(|p| p.cost_basis.map(|m| m.cents()))
+                    .sum::<Option<i64>>()
+                    .map(Money::from_cents)
+            };
+            let gain = all(|p| p.gain);
+            let first = &parts[0];
+            finish(PositionChange {
+                account_ids: parts.iter().flat_map(|p| p.account_ids.clone()).collect(),
+                account: parts
+                    .iter()
+                    .map(|p| p.account.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                security_id: first.security_id.clone(),
+                ticker: first.ticker.clone(),
+                label: first.label.clone(),
+                name: first.name.clone(),
+                is_cash: first.is_cash,
+                start_quantity: units(|p| &p.start_quantity),
+                end_quantity: units(|p| &p.end_quantity),
+                price: latest.and_then(|p| p.price.clone()),
+                priced_at: parts.iter().filter_map(|p| p.priced_at).max(),
+                price_as_of: parts.iter().filter_map(|p| p.price_as_of.clone()).min(),
+                start_value: sum(|p| p.start_value),
+                end_value: sum(|p| p.end_value),
+                contributions: all(|p| p.contributions),
+                gain,
+                gain_bp: None,
+                gain_reason: if gain.is_some() {
+                    None
+                } else {
+                    parts.iter().find_map(|p| p.gain_reason)
+                },
+                change_reason: if parts.iter().all(|p| p.change_reason.is_some()) {
+                    first.change_reason
+                } else {
+                    None
+                },
+                partial_start: parts.iter().any(|p| p.partial_start),
+                sold: parts.iter().all(|p| p.sold),
+                cost_basis: basis,
+                unrealized_gain: None,
+                unrealized_bp: None,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+#[allow(clippy::inconsistent_digit_grouping)] // dollars_cents literals
+mod position_tests {
+    use super::*;
+    use crate::balances::PositionFilter;
+    use crate::model::{AccountKind, Holding};
+    use chrono::{Local, TimeZone};
+
+    fn acct(id: &str) -> Account {
+        Account {
+            id: id.into(),
+            org: "Broker".into(),
+            name: format!("{id} (0000)"),
+            kind: AccountKind::Investment,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: "plaid".into(),
+            nickname: None,
+            hidden: false,
+        }
+    }
+
+    fn at(m: u32, d: u32) -> i64 {
+        Local
+            .with_ymd_and_hms(2026, m, d, 12, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp()
+    }
+
+    fn nov() -> (Option<i64>, Option<i64>) {
+        let mid = |m, d| {
+            Local
+                .with_ymd_and_hms(2026, m, d, 0, 0, 0)
+                .earliest()
+                .unwrap()
+                .timestamp()
+        };
+        (Some(mid(11, 1)), Some(mid(12, 1)))
+    }
+
+    fn pos(
+        ts: i64,
+        a: &str,
+        sec: &str,
+        qty: &str,
+        price: &str,
+        cents: i64,
+        basis: Option<i64>,
+    ) -> HoldingSnapshot {
+        HoldingSnapshot {
+            taken_at: ts,
+            account_id: a.into(),
+            security_id: sec.into(),
+            quantity: qty.into(),
+            price: Some(price.into()),
+            value: Money::from_cents(cents),
+            cost_basis: basis.map(Money::from_cents),
+        }
+    }
+
+    fn sec(id: &str, ticker: Option<&str>, is_cash: bool) -> Security {
+        Security {
+            security_id: id.into(),
+            ticker: ticker.map(Into::into),
+            name: format!("{id} name"),
+            sec_type: "etf".into(),
+            is_cash,
+            cusip: None,
+            isin: None,
+            close_price: None,
+            close_price_as_of: None,
+        }
+    }
+
+    fn secs() -> Vec<Security> {
+        vec![
+            sec("vti-a", Some("VTI"), false),
+            sec("vti-b", Some("VTI"), false), // same ticker, another institution's id
+            sec("abc", Some("ABC"), false),
+            sec("wts", None, false), // warrants: no ticker
+            sec("mmf", Some("MMF"), true),
+        ]
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn txn(
+        id: &str,
+        a: &str,
+        sec: &str,
+        date: &str,
+        ty: &str,
+        sub: &str,
+        qty: &str,
+        cents: i64,
+    ) -> InvestmentTxn {
+        InvestmentTxn {
+            id: id.into(),
+            account_id: a.into(),
+            security_id: Some(sec.into()),
+            date: date.into(),
+            name: id.into(),
+            txn_type: ty.into(),
+            subtype: sub.into(),
+            quantity: qty.into(),
+            price: "0".into(),
+            amount: Money::from_cents(cents),
+            fees: None,
+            currency: None,
+            cancel_txn_id: None,
+        }
+    }
+
+    fn run(
+        h: &[HoldingSnapshot],
+        act: &[InvestmentTxn],
+        lens: PositionLens,
+    ) -> Vec<PositionChange> {
+        let (since, until) = nov();
+        position_change(
+            &[acct("brk"), acct("ira")],
+            &secs(),
+            h,
+            &[],
+            act,
+            since,
+            until,
+            &PositionFilter::default(),
+            lens,
+        )
+    }
+
+    fn row<'a>(rows: &'a [PositionChange], a: &str, sec: &str) -> &'a PositionChange {
+        rows.iter()
+            .find(|r| r.account_ids == [a] && r.security_id == sec)
+            .unwrap()
+    }
+
+    fn c(m: Option<Money>) -> Option<i64> {
+        m.map(|m| m.cents())
+    }
+
+    #[test]
+    fn steady_position_gain_and_unrealized() {
+        let h = [
+            pos(
+                at(10, 31),
+                "brk",
+                "vti-a",
+                "10",
+                "250",
+                2_500_00,
+                Some(2_000_00),
+            ),
+            pos(
+                at(11, 30),
+                "brk",
+                "vti-a",
+                "10",
+                "262",
+                2_620_00,
+                Some(2_000_00),
+            ),
+        ];
+        let rows = run(&h, &[], PositionLens::Account);
+        let r = row(&rows, "brk", "vti-a");
+        assert_eq!(c(r.gain), Some(120_00));
+        assert_eq!(r.gain_bp, Some(480)); // 120 / 2,500
+        assert_eq!(c(r.contributions), Some(0));
+        assert_eq!(c(r.unrealized_gain), Some(620_00));
+        assert_eq!(r.unrealized_bp, Some(3_100));
+        assert_eq!(r.price.as_deref(), Some("262"));
+        assert_eq!(r.priced_at, Some(at(11, 30)));
+        assert!(!r.sold && !r.partial_start);
+    }
+
+    /// Bought mid-period: starts at $0, the buy is a contribution.
+    #[test]
+    fn mid_period_buy_starts_at_zero() {
+        let h = [
+            pos(at(10, 31), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 30), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 30), "brk", "abc", "20", "11", 220_00, Some(200_00)),
+        ];
+        let act = [txn(
+            "b1",
+            "brk",
+            "abc",
+            "2026-11-10",
+            "buy",
+            "buy",
+            "20",
+            -200_00,
+        )];
+        let rows = run(&h, &act, PositionLens::Account);
+        let r = row(&rows, "brk", "abc");
+        assert_eq!(r.start_value.cents(), 0);
+        assert_eq!(r.start_quantity, "0");
+        assert_eq!(c(r.contributions), Some(200_00));
+        assert_eq!(c(r.gain), Some(20_00));
+        assert_eq!(r.gain_bp, Some(1_000)); // 20 / (0 + 200)
+    }
+
+    /// Sold in the period: stays in the list, gain from the sale proceeds.
+    #[test]
+    fn sold_position_stays() {
+        let h = [
+            pos(at(10, 31), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(10, 31), "brk", "abc", "20", "10", 200_00, Some(150_00)),
+            pos(at(11, 30), "brk", "vti-a", "10", "250", 2_500_00, None),
+        ];
+        let act = [txn(
+            "s1",
+            "brk",
+            "abc",
+            "2026-11-12",
+            "sell",
+            "sell",
+            "-20",
+            230_00,
+        )];
+        let rows = run(&h, &act, PositionLens::Account);
+        let r = row(&rows, "brk", "abc");
+        assert!(r.sold);
+        assert_eq!(r.end_value.cents(), 0);
+        assert_eq!(c(r.contributions), Some(-230_00));
+        assert_eq!(c(r.gain), Some(30_00));
+        assert_eq!(r.price, None);
+        assert_eq!(r.cost_basis, None);
+    }
+
+    /// Shares that appear with no activity: unknown, never estimated.
+    #[test]
+    fn unexplained_quantity_is_unknown() {
+        let h = [
+            pos(at(10, 31), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 30), "brk", "vti-a", "14", "250", 3_500_00, None),
+        ];
+        let rows = run(&h, &[], PositionLens::Account);
+        let r = row(&rows, "brk", "vti-a");
+        assert_eq!(r.gain, None);
+        assert_eq!(r.gain_reason, Some(GainReason::ContributionsUnknown));
+    }
+
+    /// Reinvested dividend: the buy is a contribution to the position, so
+    /// the dividend itself isn't gain here (it is at account level).
+    #[test]
+    fn reinvestment_buy_is_a_position_contribution() {
+        let h = [
+            pos(at(10, 31), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 30), "brk", "vti-a", "10.2", "250", 2_550_00, None),
+        ];
+        let act = [
+            txn(
+                "d1",
+                "brk",
+                "vti-a",
+                "2026-11-10",
+                "cash",
+                "dividend",
+                "0",
+                50_00,
+            ),
+            txn(
+                "r1",
+                "brk",
+                "vti-a",
+                "2026-11-10",
+                "buy",
+                "dividend reinvestment",
+                "0.2",
+                -50_00,
+            ),
+        ];
+        let rows = run(&h, &act, PositionLens::Account);
+        assert_eq!(c(row(&rows, "brk", "vti-a").gain), Some(0));
+    }
+
+    /// Shares transferred in count at the recorded snapshot price (rule D).
+    #[test]
+    fn share_transfer_in_is_a_contribution() {
+        let h = [
+            pos(at(10, 31), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 6), "brk", "abc", "120", "31.37", 3_764_40, None),
+            pos(at(11, 6), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 30), "brk", "abc", "120", "32.10", 3_852_00, None),
+            pos(at(11, 30), "brk", "vti-a", "10", "250", 2_500_00, None),
+        ];
+        let act = [txn(
+            "t1",
+            "brk",
+            "abc",
+            "2026-11-05",
+            "transfer",
+            "transfer",
+            "120",
+            0,
+        )];
+        let rows = run(&h, &act, PositionLens::Account);
+        let r = row(&rows, "brk", "abc");
+        assert_eq!(c(r.contributions), Some(3_764_40));
+        assert_eq!(c(r.gain), Some(87_60));
+    }
+
+    /// The same ticker in two accounts (different security ids) combines;
+    /// warrants without a ticker stay their own row, even at $0; a missing
+    /// basis on one side leaves the combined basis unknown.
+    #[test]
+    fn by_position_combines_tickers_across_accounts() {
+        let h = [
+            pos(
+                at(10, 31),
+                "brk",
+                "vti-a",
+                "10",
+                "250",
+                2_500_00,
+                Some(2_000_00),
+            ),
+            pos(at(10, 31), "ira", "vti-b", "4", "250", 1_000_00, None),
+            pos(at(10, 31), "ira", "wts", "100", "0", 0, None),
+            pos(
+                at(11, 30),
+                "brk",
+                "vti-a",
+                "10",
+                "260",
+                2_600_00,
+                Some(2_000_00),
+            ),
+            pos(at(11, 30), "ira", "vti-b", "4.5", "260", 1_170_00, None),
+            pos(at(11, 30), "ira", "wts", "100", "0", 0, None),
+        ];
+        let act = [txn(
+            "b1",
+            "ira",
+            "vti-b",
+            "2026-11-03",
+            "buy",
+            "buy",
+            "0.5",
+            -125_00,
+        )];
+        let rows = run(&h, &act, PositionLens::Position);
+        let vti = rows
+            .iter()
+            .find(|r| r.ticker.as_deref() == Some("VTI"))
+            .unwrap();
+        assert_eq!(vti.account_ids, ["brk", "ira"]);
+        assert_eq!(vti.account, "brk (0000), ira (0000)");
+        assert_eq!(vti.end_quantity, "14.5");
+        assert_eq!(vti.start_quantity, "14");
+        assert_eq!(vti.end_value.cents(), 3_770_00);
+        assert_eq!(c(vti.contributions), Some(125_00));
+        assert_eq!(c(vti.gain), Some(100_00 + 45_00));
+        assert_eq!(vti.cost_basis, None, "ira's VTI has no basis");
+        assert_eq!(vti.unrealized_gain, None);
+        let wts = rows.iter().find(|r| r.security_id == "wts").unwrap();
+        assert_eq!(wts.end_value.cents(), 0);
+        assert_eq!(wts.label, "wts name");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].label, "VTI"); // largest first
+    }
+
+    /// Money-market funds are cash, listed but with no gain.
+    #[test]
+    fn cash_security_has_no_gain() {
+        let h = [
+            pos(at(10, 31), "brk", "mmf", "100", "1", 100_00, None),
+            pos(at(11, 30), "brk", "mmf", "180", "1", 180_00, None),
+        ];
+        let rows = run(&h, &[], PositionLens::Account);
+        let r = row(&rows, "brk", "mmf");
+        assert!(r.is_cash);
+        assert_eq!(r.gain_reason, Some(GainReason::Cash));
+    }
+
+    /// One holdings snapshot: no change; a first snapshot inside the period
+    /// is a partial start.
+    #[test]
+    fn one_snapshot_and_partial_start() {
+        let h = [pos(at(11, 5), "brk", "vti-a", "10", "250", 2_500_00, None)];
+        let rows = run(&h, &[], PositionLens::Account);
+        let r = row(&rows, "brk", "vti-a");
+        assert_eq!(r.change_reason, Some(ChangeReason::OneSnapshot));
+        assert_eq!(r.gain, None);
+        assert!(r.partial_start);
+    }
+
+    /// Filters and the institution's price date (frozen-price custodians).
+    #[test]
+    fn filter_and_price_as_of() {
+        let h = [
+            pos(at(10, 31), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(11, 30), "brk", "vti-a", "10", "250", 2_500_00, None),
+            pos(at(10, 31), "ira", "abc", "1", "10", 10_00, None),
+            pos(at(11, 30), "ira", "abc", "1", "10", 10_00, None),
+        ];
+        let current = [(
+            Holding {
+                account_id: "brk".into(),
+                security_id: "vti-a".into(),
+                quantity: "10".into(),
+                price: "250".into(),
+                value: Money::from_cents(2_500_00),
+                cost_basis: None,
+                price_as_of: Some("2026-09-30".into()),
+                currency: None,
+            },
+            Some(at(11, 30)),
+        )];
+        let (since, until) = nov();
+        let f = PositionFilter {
+            account: None,
+            ticker: Some("vti".into()),
+        };
+        let rows = position_change(
+            &[acct("brk"), acct("ira")],
+            &secs(),
+            &h,
+            &current,
+            &[],
+            since,
+            until,
+            &f,
+            PositionLens::Account,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].price_as_of.as_deref(), Some("2026-09-30"));
     }
 }

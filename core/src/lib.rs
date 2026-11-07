@@ -45,8 +45,8 @@ pub use query::{
 };
 pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
 pub use stock::{
-    net_worth_change, AccountChange, ChangeReason, ContributedPoint, ExcludedAccount, GainReason,
-    NetWorthChange,
+    net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
+    ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};

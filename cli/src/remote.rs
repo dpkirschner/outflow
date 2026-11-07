@@ -194,7 +194,7 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             with_query("/balances/history", &q)
         }
         Cmd::Holdings(a) => {
-            let range = history_period(a.history, &a.period, today)?;
+            let view = crate::holdings_view(a, today)?;
             let mut q = Vec::new();
             if let Some(acct) = &a.account {
                 q.push(format!("account={}", enc(acct)));
@@ -202,11 +202,19 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             if let Some(t) = &a.ticker {
                 q.push(format!("ticker={}", enc(t)));
             }
-            period_q(range, &mut q);
-            let path = if a.history {
-                "/holdings/history"
-            } else {
-                "/holdings"
+            let path = match view {
+                crate::HoldingsView::Current => "/holdings",
+                crate::HoldingsView::History(range) => {
+                    period_q(range, &mut q);
+                    "/holdings/history"
+                }
+                crate::HoldingsView::Change(p, _) => {
+                    q.push(p.to_query());
+                    if let Some(by) = a.by {
+                        q.push(format!("by={}", by.as_str()));
+                    }
+                    "/holdings/change"
+                }
             };
             with_query(path, &q)
         }
@@ -379,7 +387,14 @@ mod tests {
             ]),
             "/holdings/history?ticker=ABC&period=2026-W45"
         );
-        assert!(path(&["holdings", "--since", "2026-01-01"]).is_err());
+        assert_eq!(
+            ok(&["holdings", "--since", "2026-01-01", "--until", "2026-01-31"]),
+            "/holdings/change?since=2026-01-01&until=2026-01-31"
+        );
+        assert_eq!(
+            ok(&["holdings", "--ticker", "ABC", "--by", "position"]),
+            "/holdings/change?ticker=ABC&period=2026-11&by=position"
+        );
         assert_eq!(
             ok(&["txns", "--limit", "10", "--period", "2026-11"]),
             "/transactions?sort=date&dir=desc&limit=10&offset=0&period=2026-11"

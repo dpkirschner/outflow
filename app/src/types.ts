@@ -739,6 +739,91 @@ export type NetWorthChange = {
 };
 
 /**
+ * One position over a period. Values come from holdings snapshots, priced
+ * as of `priced_at`. Position gains do NOT sum to the account's gain: a
+ * reinvested dividend's buy counts as a contribution here, while at account
+ * level it nets to zero (and positions and balance are priced at different
+ * moments).
+ */
+export type PositionChange = {
+  /**
+   * The account ids behind this row (one, unless combined).
+   */
+  account_ids: Array<string>,
+  /**
+   * Display label(s), comma-joined when combined.
+   */
+  account: string,
+  security_id: string,
+  ticker: string | null,
+  /**
+   * Ticker, else security name, else id.
+   */
+  label: string,
+  name: string,
+  is_cash: boolean,
+  /**
+   * Exact decimal text; "0" when the position wasn't held.
+   */
+  start_quantity: string,
+  end_quantity: string,
+  /**
+   * End snapshot price (exact decimal text); None once sold or on
+   * snapshots without a price.
+   */
+  price: string | null,
+  /**
+   * Epoch seconds of the end snapshot the value is priced at.
+   */
+  priced_at: number | null,
+  /**
+   * The institution's own price date, when the end snapshot is the
+   * current holdings sync (a frozen price shows here). Oldest when
+   * combined.
+   */
+  price_as_of: string | null,
+  start_value: number,
+  end_value: number,
+  /**
+   * Buys - sells + shares transferred in (at snapshot price). None when a
+   * transfer has no recorded price.
+   */
+  contributions: number | null,
+  /**
+   * Gain net of contributions = end - start - contributions.
+   */
+  gain: number | null,
+  /**
+   * Gain over start value plus net contributions (when positive), in
+   * basis points.
+   */
+  gain_bp: number | null,
+  gain_reason: GainReason | null,
+  /**
+   * Start and end are the same snapshot.
+   */
+  change_reason: ChangeReason | null,
+  /**
+   * The account's start is its first holdings snapshot inside the period.
+   */
+  partial_start: boolean,
+  /**
+   * Held at the start or traded in the period, gone by the end.
+   */
+  sold: boolean,
+  /**
+   * End snapshot basis; None when the broker gives none (or any
+   * combined part lacks one).
+   */
+  cost_basis: number | null,
+  /**
+   * `end_value - cost_basis`.
+   */
+  unrealized_gain: number | null,
+  unrealized_bp: number | null,
+};
+
+/**
  * What an offer pays. Cash rewards are exact cents; points are Membership
  * Rewards-style points and are never converted to dollars.
  */

@@ -358,6 +358,35 @@
     ],
     "contributed_complete": false
   },
+  "PositionChange": {
+    "account_ids": [
+      "acct-brokerage",
+      "acct-ira"
+    ],
+    "account": "Demo Brokerage (0000), Demo IRA (1111)",
+    "security_id": "sec-vti",
+    "ticker": "VTI",
+    "label": "VTI",
+    "name": "Demo Total Market ETF",
+    "is_cash": false,
+    "start_quantity": "14",
+    "end_quantity": "14.5",
+    "price": "260",
+    "priced_at": 1771027200,
+    "price_as_of": "2026-02-13",
+    "start_value": 350000,
+    "end_value": 377000,
+    "contributions": 12500,
+    "gain": 14500,
+    "gain_bp": 400,
+    "gain_reason": null,
+    "change_reason": null,
+    "partial_start": false,
+    "sold": false,
+    "cost_basis": null,
+    "unrealized_gain": null,
+    "unrealized_bp": null
+  },
   "PositionRow": {
     "account_id": "acct-demo-brokerage",
     "account": "Demo Brokerage (2222)",

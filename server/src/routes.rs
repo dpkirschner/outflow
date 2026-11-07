@@ -10,8 +10,8 @@ use outflow_core::{
     activity, balance_history, flow_lanes, position_history, positions, spend_by_category,
     summarize_balances, today_local, top_merchants, Account, AccountKind, ActivityFilter,
     ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, MerchantSpend,
-    NetWorthChange, Period, PositionFilter, PositionPoint, PositionRow, RecurringView, SyncEntry,
-    TxnFilter, TxnFlag,
+    NetWorthChange, Period, PositionChange, PositionFilter, PositionLens, PositionPoint,
+    PositionRow, RecurringView, SyncEntry, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -181,10 +181,12 @@ struct HoldingsParams {
     /// Ticker or security id.
     ticker: Option<String>,
     /// `period` or `since`/`until` (see [`resolve_range`]);
-    /// `/holdings/history` only.
+    /// `/holdings/history` and `/holdings/change` only.
     period: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    /// `/holdings/change` only: `account` (default) or `position`.
+    by: Option<String>,
 }
 
 impl HoldingsParams {
@@ -207,6 +209,48 @@ async fn holdings(
         let securities = s.securities().map_err(|e| e.to_string())?;
         let holdings = s.current_holdings_synced().map_err(|e| e.to_string())?;
         Ok(positions(&accounts, &securities, &holdings, &p.filter()))
+    })
+    .await
+    .map(Json)
+}
+
+/// Gain over a period per position (`core::stock::position_change`),
+/// optionally combined across accounts (`by=position`). `period` or
+/// `since`/`until`; omit both for all of history. Visible accounts only.
+async fn holdings_change(
+    State(state): State<AppState>,
+    Query(p): Query<HoldingsParams>,
+) -> ApiResult<Vec<PositionChange>> {
+    let (since, until) =
+        resolve_range(p.period.as_deref(), p.since.as_deref(), p.until.as_deref())?;
+    let lens = match p.by.as_deref().map(str::trim) {
+        None | Some("") | Some("account") => PositionLens::Account,
+        Some("position") => PositionLens::Position,
+        Some(other) => {
+            return Err(ApiError::bad_request(format!(
+                "bad by {other:?}: use account or position"
+            )))
+        }
+    };
+    with_store(&state, move |s| {
+        let accounts = s.accounts().map_err(|e| e.to_string())?;
+        let securities = s.securities().map_err(|e| e.to_string())?;
+        let snaps = s
+            .holding_snapshots(None, until)
+            .map_err(|e| e.to_string())?;
+        let current = s.current_holdings_synced().map_err(|e| e.to_string())?;
+        let txns = s.investment_txns().map_err(|e| e.to_string())?;
+        Ok(outflow_core::position_change(
+            &accounts,
+            &securities,
+            &snaps,
+            &current,
+            &txns,
+            since,
+            until,
+            &p.filter(),
+            lens,
+        ))
     })
     .await
     .map(Json)
@@ -755,6 +799,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/net-worth/change", get(net_worth_change))
         .route("/holdings", get(holdings))
         .route("/holdings/history", get(holdings_history))
+        .route("/holdings/change", get(holdings_change))
         .route("/activity", get(investment_activity))
         .route("/transactions", get(transactions))
         .route("/spend/categories", get(spend_categories))
@@ -1126,6 +1171,22 @@ mod tests {
         assert_eq!(row("brk")["gain"], 0);
         assert_eq!(row("hsa")["gain_reason"], "cash");
         let (status, _) = get_json(app.clone(), "/net-worth/change?period=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // /holdings/change: one holdings snapshot (the second sync kept the
+        // positions), so no period gain yet; basis and unrealized from it.
+        let (status, h) = get_json(app.clone(), "/holdings/change?ticker=vti").await;
+        assert_eq!(status, StatusCode::OK);
+        let rows = h.as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["label"], "VTI");
+        assert_eq!(rows[0]["change_reason"], "one_snapshot");
+        assert_eq!(rows[0]["unrealized_gain"], 9_900_00 - 6_600_00);
+        assert_eq!(rows[0]["price_as_of"], "2026-10-21");
+        let (status, h) = get_json(app.clone(), "/holdings/change?by=position").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(h.as_array().unwrap().len(), 2); // VTI + VMFXX
+        let (status, _) = get_json(app.clone(), "/holdings/change?by=ticker").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // /holdings: flat, largest first, with price dates and unit cost.

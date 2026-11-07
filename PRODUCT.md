@@ -1,0 +1,100 @@
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+web
+
+## Users
+
+One person, viewing their own money. They open outflow for a periodic
+check-in (monthly by default) and to watch net worth and individual
+assets over time. The check-in usually happens at a desktop browser;
+the phone is for an occasional glance.
+
+The second, equal client is an agent the person talks the data over
+with. It reads the same numbers through the read-only API token or the
+CLI. One-off lookups ("how much did I spend at merchant X?") mostly go
+to the agent rather than the screen.
+
+## Product Purpose
+
+Show where the money is and where it's going. Three pillars (see
+`docs/adr/0001-product-direction.md` and `GLOSSARY.md`):
+
+- **Stock**: balances, holdings and how they performed (gain net of
+  contributions, unrealized gain per position, net worth change).
+- **Flow**: money in, out and moved between own accounts, plus the
+  merchants bought from on a cadence.
+- **Find money**: card offers, card choice, unused subscriptions. Not
+  designed yet.
+
+Success: a check-in answers "what changed, and is anything unusual?"
+in a few minutes, and every number on screen can also be asked of the
+agent.
+
+## Positioning
+
+Self-hosted and single-user. The data lives in a local SQLite archive
+that grows past the bank aggregator's pull windows, so history is
+permanent. Analysis only: no budgets, limits or targets. Norms the app
+derives itself (usual monthly cost, unusual charges, idle cash) are
+fine. Transfers between own accounts are shown as their own lane, never
+hidden and never counted as spending or income.
+
+## Operating Context
+
+- Served by an always-on home server over a private network, opened in
+  a browser. Data arrives from Plaid on a background sync (every few
+  hours) or a manual pull.
+- Screens (per ADR 0001): Check-in (home), Holdings, Flow, Find money
+  (placeholder), Settings. The UI is mid-reshape: the current Ledger and
+  Outflows tabs are being replaced by Flow, and Balances becomes
+  Holdings.
+- Upkeep (bank connections, card-payment match review, categorize,
+  reset) lives in Settings, away from the analysis screens.
+
+## Capabilities and Constraints
+
+- Money is integer cents end to end; amounts arrive at the browser as
+  numbers of cents. Outflows are negative.
+- Figures that answer a question you'd ask the agent are computed in the
+  Rust core and exposed through the API and CLI. Chart scaffolding
+  (axes, scaling, sort order) may stay in the browser.
+- Frontend: React + Vite + TypeScript in `app/`, plain CSS in
+  `app/src/theme.css` and `app/src/ledger.css`. No CSS framework.
+- Vocabulary is fixed by `GLOSSARY.md` (In / Out / Moved, Recurring
+  merchant, Ignored, Unusual, Gain net of contributions, Idle cash).
+  Name things the way it does.
+- Open: the Find money pillar has no design yet.
+
+## Brand Commitments
+
+None binding. The name, the lowercase wordmark and the tagline are all
+open.
+
+## Evidence on Hand
+
+- Synthetic sample data only: `examples/plaid-fixture.json`. Real
+  account data never appears in this repo, its screenshots or its docs.
+  Any sample or demo data is invented and labelled synthetic.
+
+## Product Principles
+
+1. **Answers over dashboards.** Each screen answers a question the
+   person actually asks during a check-in. Nothing is on screen just
+   because the data exists.
+2. **Same numbers for the person and the agent.** The screen never shows
+   a figure the API can't produce.
+3. **Show, don't judge.** No budgets or targets. Point out what's unusual
+   relative to the person's own history and leave the decision to them.
+4. **Nothing hidden, nothing double-counted.** Transfers and card
+   payments stay visible in their own lane; they never inflate spending.
+5. **Upkeep stays out of the way.** Destructive or maintenance actions
+   never sit on an analysis screen.
+
+## Accessibility & Inclusion
+
+General good practice: WCAG AA contrast, and money in vs out is never
+signalled by colour alone (sign, label or position carries it too).

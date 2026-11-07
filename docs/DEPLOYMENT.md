@@ -139,6 +139,9 @@ cargo build --release -p outflow-server -p outflow-cli
     <!-- Set the data dir explicitly. A daemon gets no HOME, and the server
          falls back to "." — the DB and plaid-tokens.json would land in
          WorkingDirectory instead, silently. -->
+    <!-- Months and periods are cut in the server's local zone. Pin it so a
+         change to the system zone can't move them. -->
+    <key>TZ</key><string>America/New_York</string> <!-- your zone -->
     <key>OUTFLOW_DATA_DIR</key><string>/Users/YOU/Library/Application Support/outflow</string>
     <key>OUTFLOW_LISTEN</key><string>127.0.0.1:8080</string>
     <key>OUTFLOW_WEB_DIR</key><string>/Users/YOU/code/outflow/app/dist</string>

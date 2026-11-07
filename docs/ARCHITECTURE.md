@@ -69,12 +69,15 @@ Analysis (`query`, `subscriptions`, `ledger`) reads all transactions from the
 store and **aggregates in memory in Rust**, not in SQL. Months are bucketed on
 each transaction's behavioral date (`effective_date()`) in the machine's
 **local timezone** — `core` depends on `chrono` (pure computation, no network)
-for this DST-correct conversion. Aggregations exclude non-`Spending`
+for this DST-correct conversion. "Local" is the server process's zone:
+`TZ` if set, else the system zone. A system-zone change would move month
+and period boundaries for every client, so the launchd plist pins `TZ`
+(DEPLOYMENT.md). Aggregations exclude non-`Spending`
 transactions (transfers, card payments) by default.
 
 Schema evolution on existing DBs runs through a **`PRAGMA user_version`
 migration runner** in `store::migrate` (`run_migrations` + `SCHEMA_VERSION`,
-currently v3): fresh DBs get every column from the `CREATE TABLE`s, existing
+currently v12): fresh DBs get every column from the `CREATE TABLE`s, existing
 DBs get guarded `ALTER TABLE ADD COLUMN`s.
 
 ## Data flow

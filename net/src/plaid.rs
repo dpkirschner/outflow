@@ -1,4 +1,4 @@
-//! Plaid HTTP transport (sync ureq, matching `simplefin`). Only transport
+//! Plaid HTTP transport (sync ureq). Only transport
 //! lives here — response JSON crosses into `outflow_core::plaid` for parsing,
 //! keeping the domain mapping pure and fixture-testable.
 //!

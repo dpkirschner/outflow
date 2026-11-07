@@ -672,8 +672,8 @@ async fn sync_log(
     .map(Json)
 }
 
-/// Manual "pull now": SimpleFIN (if configured) — Plaid items join in the sync
-/// engine (Phase 5 wiring lives in `sync.rs`; this route delegates there).
+/// Manual "pull now": runs the same Plaid sync as the background interval
+/// (`sync::sync_all`, every linked item).
 async fn pull(State(state): State<AppState>) -> ApiResult<crate::sync::SyncReport> {
     crate::sync::sync_all(&state).await.map(Json)
 }

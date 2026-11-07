@@ -42,8 +42,8 @@ pub struct SyncPage {
     pub has_more: bool,
 }
 
-/// Map Plaid `type`/`subtype` to a domain kind. Real typing from the API —
-/// unlike SimpleFIN, no name-substring guessing. Loans and anything unknown
+/// Map Plaid `type`/`subtype` to a domain kind. Real typing from the API, no
+/// name-substring guessing. Loans and anything unknown
 /// fall to `Other`.
 ///
 /// Every HSA is an investment account, whichever type the provider reports
@@ -67,8 +67,8 @@ fn plaid_kind(kind: &str, subtype: Option<&str>) -> AccountKind {
 
 /// Parse a Plaid decimal (JSON number) exactly. `serde_json::Number`'s Display
 /// is the shortest round-trip representation, so a bank amount like `4.22`
-/// prints back as `"4.22"` and goes through the same exact decimal path as
-/// SimpleFIN amounts — never f64 multiplication.
+/// prints back as `"4.22"` and goes through `Money::from_decimal_str` — never
+/// f64 multiplication.
 fn parse_amount(
     n: &serde_json::Number,
     account: &str,

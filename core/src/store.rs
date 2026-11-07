@@ -839,8 +839,8 @@ impl Store {
         Ok(result)
     }
 
-    /// Apply one Plaid sync run atomically. Unlike the SimpleFIN path there is
-    /// no blanket pending sweep: Plaid reports pending-row lifecycle explicitly,
+    /// Apply one Plaid sync run atomically. There is no blanket pending
+    /// sweep: Plaid reports pending-row lifecycle explicitly,
     /// so `removed_ids` (Plaid `removed` + pending predecessors superseded by
     /// posted rows) carries every deletion. The item's cursor advances in the
     /// same transaction — a crash can't persist one without the other.
@@ -2006,8 +2006,8 @@ mod tests {
             .unwrap();
         assert_eq!(r1.added, 1); // pending counts as neither
 
-        // Second sync touching the same account must NOT sweep the pending row
-        // (that's SimpleFIN semantics only).
+        // Second sync touching the same account must NOT sweep the pending row:
+        // Plaid deletes pending rows only through `removed_ids`.
         s.apply_plaid_batch(
             &PlaidBatch {
                 item_id: "item1".into(),

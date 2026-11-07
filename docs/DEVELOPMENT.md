@@ -43,7 +43,8 @@ cargo build -p outflow-cli --features "net,client,encryption"
 
 Subcommands: `pull --from-file P` (offline fixture ingest; live syncs are the
 server's job), `categorize [--llm]`,
-`report --by category|merchant|monthly [--top --since --until --posted-only]`,
+`report --by category|merchant|monthly [--top --since --until --posted-only]`
+(monthly = Flow lanes: in / out / earned − spent / saved / Moved groups),
 `subs`, `fix <id> <category> [--no-learn]`, `txns [--search --category
 --account --source --flag --sort --asc --limit --offset --since --until
 --posted-only --show-excluded]`, `accounts`, `balances [--history]`,

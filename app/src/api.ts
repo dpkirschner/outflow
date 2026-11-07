@@ -13,7 +13,7 @@ import type {
   Mark,
   MatchView,
   MerchantSpend,
-  MonthlyFlow,
+  FlowMonth,
   PlaidItem,
   PullResult,
   Stream,
@@ -154,7 +154,7 @@ export const api = {
     get<MerchantSpend[]>(
       `/merchants${filterQuery(filter, limit !== undefined ? { limit: String(limit) } : undefined)}`,
     ),
-  flow: (filter?: Filter) => get<MonthlyFlow[]>(`/flow${filterQuery(filter)}`),
+  flow: (filter?: Filter) => get<FlowMonth[]>(`/flow${filterQuery(filter)}`),
   subscriptions: () => get<Subscription[]>("/subscriptions"),
   // Rhythm ledger — the primary screen query.
   ledger: (window: Window) => get<LedgerView>(`/ledger?window=${window}`),

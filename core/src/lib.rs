@@ -40,8 +40,8 @@ pub use plaid::{
     InvestmentTxnPage, SourceError, SyncPage,
 };
 pub use query::{
-    monthly_flow, search_transactions, spend_by_category, top_merchants, CategorySpend,
-    MerchantSpend, MonthlyFlow, SortKey, TxnFilter, TxnPage, TxnQuery,
+    flow_lanes, search_transactions, spend_by_category, top_merchants, CategorySpend, FlowMonth,
+    MerchantSpend, MovedFlow, MovedLane, SortKey, TxnFilter, TxnPage, TxnQuery,
 };
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{

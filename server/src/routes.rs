@@ -7,11 +7,11 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    activity, balance_history, detect, monthly_flow, position_history, positions,
-    spend_by_category, summarize_balances, top_merchants, Account, AccountKind, ActivityFilter,
-    ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, LedgerView, Mark,
-    MerchantSpend, MonthlyFlow, PositionFilter, PositionPoint, PositionRow, Subscription,
-    SyncEntry, Transaction, TxnFilter, TxnFlag,
+    activity, balance_history, detect, flow_lanes, position_history, positions, spend_by_category,
+    summarize_balances, top_merchants, Account, AccountKind, ActivityFilter, ActivityRow,
+    BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, LedgerView, Mark,
+    MerchantSpend, PositionFilter, PositionPoint, PositionRow, Subscription, SyncEntry,
+    Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -286,7 +286,7 @@ async fn transactions(
     };
     let mut filter = p.to_filter();
     // Filtering BY a suppressed flag only makes sense with those rows visible.
-    if matches!(p.flag, Some(TxnFlag::Transfer) | Some(TxnFlag::CardPayment)) {
+    if p.flag.is_some_and(TxnFlag::is_moved) {
         filter.include_non_spending = true;
     }
     let q = outflow_core::TxnQuery {
@@ -364,13 +364,15 @@ async fn merchants(
     .map(Json)
 }
 
+/// Flow lanes per month: In / Out (refunds netted) / Moved by group, plus
+/// earned − spent and saved. Date range + pending from the query.
 async fn flow(
     State(state): State<AppState>,
     Query(params): Query<FilterParams>,
-) -> ApiResult<Vec<MonthlyFlow>> {
+) -> ApiResult<Vec<FlowMonth>> {
     let f = params.to_filter();
     with_store(&state, move |s| {
-        monthly_flow(s, &f).map_err(|e| e.to_string())
+        flow_lanes(s, &f).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -499,7 +501,8 @@ async fn set_category(
 
 #[derive(Deserialize)]
 struct FlagBody {
-    /// Serde variant name: "Spending" | "Transfer" | "CardPayment".
+    /// Serde variant name: "Spending" | "Transfer" | "CardPayment" | "Invest"
+    /// | "Save" | "LoanPaydown".
     flag: TxnFlag,
     #[serde(default)]
     learn: bool,

@@ -224,25 +224,22 @@ pub struct MerchantSpend {
     pub count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct MonthlyFlow {
-    pub year: i64,
-    pub month: u32,
-    pub inflow_cents: i64,
-    pub outflow_cents: i64,
-    pub net_cents: i64,
-}
-
 pub fn spend_by_category(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<CategorySpend>> {
     let txns = store.all_transactions()?;
     let mut map: HashMap<Option<String>, (i64, usize)> = HashMap::new();
     for t in &txns {
-        if !passes(t, f) || !t.amount.is_outflow() {
+        if !passes(t, f) {
             continue;
         }
-        let e = map.entry(t.category.clone()).or_insert((0, 0));
-        e.0 += t.amount.cents().abs();
-        e.1 += 1;
+        // Out nets refunds in their own category (GLOSSARY), so these totals
+        // sum to `flow_lanes`' out_cents. `count` stays the number of purchases.
+        if t.amount.is_outflow() {
+            let e = map.entry(t.category.clone()).or_insert((0, 0));
+            e.0 += t.amount.cents().abs();
+            e.1 += 1;
+        } else if t.flag == TxnFlag::Spending && is_refund(t) {
+            map.entry(t.category.clone()).or_insert((0, 0)).0 -= t.amount.cents();
+        }
     }
     let mut out: Vec<CategorySpend> = map
         .into_iter()
@@ -288,34 +285,149 @@ pub fn top_merchants(
     Ok(out)
 }
 
-pub fn monthly_flow(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<MonthlyFlow>> {
-    let txns = store.all_transactions()?;
-    let mut map: HashMap<(i64, u32), (i64, i64)> = HashMap::new();
-    for t in &txns {
-        if !passes(t, f) {
-            continue;
-        }
-        let key = ym_local(t.effective_date());
-        let e = map.entry(key).or_insert((0, 0));
-        if t.amount.is_outflow() {
-            e.1 += t.amount.cents().abs();
+/// The category that marks a positive Spending transaction as In (income)
+/// rather than a refund. Plaid's INCOME seeds it; recategorizing fixes a miss.
+pub const INCOME_CATEGORY: &str = "Income";
+
+/// Which Flow lane a positive Spending transaction belongs to. In: income-type
+/// money (category Income) or not yet categorized, so an unknown deposit
+/// never silently shrinks Out. Refund: a positive carrying a spending
+/// category, netted against Out (GLOSSARY: a refund is not In).
+fn is_refund(t: &Transaction) -> bool {
+    !t.amount.is_outflow() && t.category.as_deref().is_some_and(|c| c != INCOME_CATEGORY)
+}
+
+/// One Moved group's money, seen from the spending-side accounts (checking
+/// and credit). `out_cents` left them, `in_cents` came back; both positive.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct MovedFlow {
+    pub out_cents: i64,
+    pub in_cents: i64,
+}
+
+impl MovedFlow {
+    fn add(&mut self, cents: i64) {
+        if cents < 0 {
+            self.out_cents += -cents;
         } else {
-            e.0 += t.amount.cents();
+            self.in_cents += cents;
         }
     }
-    let mut out: Vec<MonthlyFlow> = map
+}
+
+/// The Moved lane, split by group (GLOSSARY: Flow lanes).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct MovedLane {
+    /// Card balances paid. Both legs are on spending-side accounts (bank out,
+    /// card in), so this is the larger of the two sides for the month: never
+    /// double-counted when both legs synced, still counted when one is missing
+    /// (card not linked, or paid from an unlinked bank).
+    pub card_payment_cents: i64,
+    pub invest: MovedFlow,
+    pub save: MovedFlow,
+    pub loan_paydown: MovedFlow,
+    /// Between own accounts, and moved money with no finer group yet.
+    pub between: MovedFlow,
+}
+
+/// One month of Flow: the In / Out / Moved lanes and the two summary figures.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FlowMonth {
+    pub year: i64,
+    pub month: u32,
+    /// Income-type inflows, plus inflows not categorized yet.
+    pub in_cents: i64,
+    /// Spending net of refunds (positive = money spent).
+    pub out_cents: i64,
+    /// Refunds already netted into `out_cents`, shown for context.
+    pub refunds_cents: i64,
+    pub moved: MovedLane,
+    /// In − Out.
+    pub earned_minus_spent_cents: i64,
+    /// Invest + Save + LoanPaydown out, minus what came back from them.
+    pub saved_cents: i64,
+}
+
+/// Flow lanes per month (GLOSSARY: Flow lanes; ADR 0001).
+///
+/// In and Out read Spending-flagged rows on every visible account. Moved
+/// totals read only the spending-side accounts (checking and credit): the
+/// other leg of a transfer, on a savings, investment or loan account, is the
+/// far side and isn't summed, so a move between two linked accounts counts
+/// once and a move to an unlinked account still counts. Card payments are the
+/// exception and are counted on the card side; see `MovedLane`.
+///
+/// Uses the filter's date range and pending setting; `include_non_spending` is
+/// ignored because every lane is reported.
+pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMonth>> {
+    use crate::model::AccountKind;
+    let kinds: HashMap<String, AccountKind> = store
+        .accounts()?
         .into_iter()
-        .map(
-            |((year, month), (inflow_cents, outflow_cents))| MonthlyFlow {
-                year,
-                month,
-                inflow_cents,
-                outflow_cents,
-                net_cents: inflow_cents - outflow_cents,
-            },
-        )
+        .map(|a| (a.id, a.kind))
         .collect();
-    out.sort_by_key(|a| (a.year, a.month));
+    let kind = |id: &str| kinds.get(id).copied().unwrap_or(AccountKind::Other);
+    let spending_side = |id: &str| matches!(kind(id), AccountKind::Checking | AccountKind::Credit);
+
+    let all = TxnFilter {
+        include_non_spending: true,
+        ..*f
+    };
+    let mut months: HashMap<(i64, u32), FlowMonth> = HashMap::new();
+    // Card payments per month: (bank side out, card side in).
+    let mut card_legs: HashMap<(i64, u32), (i64, i64)> = HashMap::new();
+    for t in store.all_transactions()?.iter().filter(|t| passes(t, &all)) {
+        let (year, month) = ym_local(t.effective_date());
+        let m = months.entry((year, month)).or_insert_with(|| FlowMonth {
+            year,
+            month,
+            in_cents: 0,
+            out_cents: 0,
+            refunds_cents: 0,
+            moved: MovedLane::default(),
+            earned_minus_spent_cents: 0,
+            saved_cents: 0,
+        });
+        let cents = t.amount.cents();
+        match t.flag {
+            TxnFlag::Spending if t.amount.is_outflow() => m.out_cents += -cents,
+            TxnFlag::Spending if is_refund(t) => {
+                m.out_cents -= cents;
+                m.refunds_cents += cents;
+            }
+            TxnFlag::Spending => m.in_cents += cents,
+            TxnFlag::CardPayment => {
+                let legs = card_legs.entry((year, month)).or_default();
+                match kind(&t.account_id) {
+                    AccountKind::Credit if cents > 0 => legs.1 += cents,
+                    AccountKind::Checking if cents < 0 => legs.0 += -cents,
+                    _ => {}
+                }
+            }
+            flag if spending_side(&t.account_id) => match flag {
+                TxnFlag::Invest => m.moved.invest.add(cents),
+                TxnFlag::Save => m.moved.save.add(cents),
+                TxnFlag::LoanPaydown => m.moved.loan_paydown.add(cents),
+                _ => m.moved.between.add(cents),
+            },
+            _ => {} // far-side leg of a move
+        }
+    }
+    let mut out: Vec<FlowMonth> = months
+        .into_values()
+        .map(|mut m| {
+            let (bank, card) = card_legs
+                .get(&(m.year, m.month))
+                .copied()
+                .unwrap_or_default();
+            m.moved.card_payment_cents = bank.max(card);
+            m.earned_minus_spent_cents = m.in_cents - m.out_cents;
+            let saving = [m.moved.invest, m.moved.save, m.moved.loan_paydown];
+            m.saved_cents = saving.iter().map(|g| g.out_cents - g.in_cents).sum();
+            m
+        })
+        .collect();
+    out.sort_by_key(|m| (m.year, m.month));
     Ok(out)
 }
 
@@ -503,23 +615,108 @@ mod tests {
     }
 
     #[test]
-    fn monthly_flow_splits_in_and_out() {
+    fn flow_lanes_split_in_and_out() {
         let s = seed();
-        let rows = monthly_flow(&s, &TxnFilter::all()).unwrap();
+        let rows = flow_lanes(&s, &TxnFilter::all()).unwrap();
         let jan = rows
             .iter()
             .find(|r| (r.year, r.month) == (2021, 1))
             .unwrap();
-        assert_eq!(jan.outflow_cents, 8500);
-        assert_eq!(jan.inflow_cents, 0);
-        assert_eq!(jan.net_cents, -8500);
+        assert_eq!(jan.out_cents, 8500);
+        assert_eq!(jan.in_cents, 0);
+        assert_eq!(jan.earned_minus_spent_cents, -8500);
         let feb = rows
             .iter()
             .find(|r| (r.year, r.month) == (2021, 2))
             .unwrap();
-        assert_eq!(feb.inflow_cents, 250000);
-        assert_eq!(feb.outflow_cents, 3900);
-        assert_eq!(feb.net_cents, 246100);
+        // Uncategorized payroll counts as In, not as a refund.
+        assert_eq!(feb.in_cents, 250000);
+        assert_eq!(feb.out_cents, 3900);
+        assert_eq!(feb.earned_minus_spent_cents, 246100);
+    }
+
+    fn account(id: &str, kind: crate::model::AccountKind) -> crate::model::Account {
+        crate::model::Account {
+            id: id.into(),
+            org: "Example Bank".into(),
+            name: id.into(),
+            kind,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: crate::model::default_source(),
+            nickname: None,
+            hidden: false,
+        }
+    }
+
+    /// A synthetic month across checking, a card and savings exercising every
+    /// lane (all amounts invented).
+    #[test]
+    fn flow_lanes_classify_in_out_and_every_moved_group() {
+        use crate::model::AccountKind::{Checking, Credit, Savings};
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[
+            account("chk", Checking),
+            account("card", Credit),
+            account("sav", Savings),
+        ])
+        .unwrap();
+        let on = |acct: &str, id: &str, cents: i64, cat: Option<&str>, flag: TxnFlag| {
+            let mut x = t(id, JAN15, cents, id, cat, false);
+            x.account_id = acct.into();
+            x.flag = flag;
+            x
+        };
+        use TxnFlag::*;
+        s.upsert_transactions(&[
+            on("chk", "pay", 300000, Some("Income"), Spending),
+            on("card", "groc", -5000, Some("Groceries"), Spending),
+            on("card", "refund", 1000, Some("Groceries"), Spending),
+            on("chk", "ccpay-bank", -4000, None, CardPayment),
+            on("card", "ccpay-card", 4000, None, CardPayment),
+            on("chk", "to-sav", -50000, None, Save),
+            on("sav", "into-sav", 50000, None, Save), // far side: not summed
+            on("chk", "from-sav", 10000, None, Save),
+            on("chk", "ira", -20000, None, Invest), // brokerage not linked
+            on("chk", "car", -30000, None, LoanPaydown),
+            on("chk", "venmo", -7000, None, Transfer),
+        ])
+        .unwrap();
+        let rows = flow_lanes(&s, &TxnFilter::all()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let m = &rows[0];
+        assert_eq!(m.in_cents, 300000);
+        assert_eq!(m.out_cents, 4000, "refund nets against Out");
+        assert_eq!(m.refunds_cents, 1000);
+        assert_eq!(m.moved.card_payment_cents, 4000, "two legs, counted once");
+        assert_eq!(
+            m.moved.save,
+            MovedFlow {
+                out_cents: 50000,
+                in_cents: 10000
+            }
+        );
+        assert_eq!(m.moved.invest.out_cents, 20000);
+        assert_eq!(m.moved.loan_paydown.out_cents, 30000);
+        assert_eq!(
+            m.moved.between,
+            MovedFlow {
+                out_cents: 7000,
+                in_cents: 0
+            }
+        );
+        assert_eq!(m.earned_minus_spent_cents, 296000);
+        assert_eq!(m.saved_cents, 50000 - 10000 + 20000 + 30000);
+
+        // Category totals agree with Out: the refund nets in Groceries.
+        let cats = spend_by_category(&s, &TxnFilter::all()).unwrap();
+        let groc = cats
+            .iter()
+            .find(|c| c.category.as_deref() == Some("Groceries"))
+            .unwrap();
+        assert_eq!((groc.total_cents, groc.count), (4000, 1));
+        assert!(cats.iter().all(|c| c.category.as_deref() != Some("Income")));
     }
 
     #[test]
@@ -540,7 +737,7 @@ mod tests {
     fn range_filter_bounds_are_since_inclusive_until_exclusive() {
         let s = seed();
         let f = TxnFilter::range(1609459200, 1612137600);
-        let rows = monthly_flow(&s, &f).unwrap();
+        let rows = flow_lanes(&s, &f).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].year, rows[0].month), (2021, 1));
     }
@@ -585,7 +782,26 @@ mod tests {
     }
 
     #[test]
-    fn monthly_flow_excludes_transfers_on_both_legs() {
+    fn card_payment_with_only_the_bank_leg_still_counts() {
+        use crate::model::AccountKind::{Checking, Credit};
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("chk", Checking), account("card", Credit)])
+            .unwrap();
+        let mut bank = t("bank", JAN15, -50000, "Card Payment", None, false);
+        bank.account_id = "chk".into();
+        bank.flag = TxnFlag::CardPayment;
+        // A second payment seen only on the card (paid from an unlinked bank).
+        let mut card = t("card", JAN15, 20000, "Payment Thank You", None, false);
+        card.account_id = "card".into();
+        card.flag = TxnFlag::CardPayment;
+        s.upsert_transactions(&[bank, card]).unwrap();
+        let rows = flow_lanes(&s, &TxnFilter::all()).unwrap();
+        // max(bank 500, card 200): a lower bound, never a double count.
+        assert_eq!(rows[0].moved.card_payment_cents, 50000);
+    }
+
+    #[test]
+    fn flow_lanes_keep_unknown_account_transfers_out_of_in_and_out() {
         let s = Store::open_in_memory().unwrap();
         s.upsert_transactions(&[
             t("in", JAN15, 30000, "Transfer from Savings", None, false),
@@ -596,14 +812,16 @@ mod tests {
         s.set_flag("in", TxnFlag::Transfer, false).unwrap();
         s.set_flag("out", TxnFlag::Transfer, false).unwrap();
 
-        let rows = monthly_flow(&s, &TxnFilter::all()).unwrap();
+        let rows = flow_lanes(&s, &TxnFilter::all()).unwrap();
         let jan = rows
             .iter()
             .find(|r| (r.year, r.month) == (2021, 1))
             .unwrap();
-        assert_eq!(jan.inflow_cents, 0, "transfer-in is not income");
-        assert_eq!(jan.outflow_cents, 2000, "transfer-out is not spend");
-        assert_eq!(jan.net_cents, -2000);
+        assert_eq!(jan.in_cents, 0, "transfer-in is not income");
+        assert_eq!(jan.out_cents, 2000, "transfer-out is not spend");
+        assert_eq!(jan.earned_minus_spent_cents, -2000);
+        // No account row, so not a spending-side account: not summed in Moved.
+        assert_eq!(jan.moved.between, MovedFlow::default());
     }
 
     #[test]
@@ -620,7 +838,7 @@ mod tests {
         );
         tx.transacted_at = Some(JAN15);
         s.upsert_transactions(&[tx]).unwrap();
-        let rows = monthly_flow(&s, &TxnFilter::all()).unwrap();
+        let rows = flow_lanes(&s, &TxnFilter::all()).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].year, rows[0].month), (2021, 1));
     }

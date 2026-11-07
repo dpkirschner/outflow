@@ -55,7 +55,7 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 | `GET /transactions` | see **Transaction query** below | `TxnPage { items: Transaction[], total, total_cents }` — paginated |
 | `GET /spend/categories` | `since`, `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
 | `GET /merchants` | `since`, `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
-| `GET /flow` | `since`, `until`, `pending`, `transfers` | `MonthlyFlow[]` — inflow/outflow/net per month (local-time buckets; both legs drop non-Spending) |
+| `GET /flow` | `since`, `until`, `pending` | `FlowMonth[]` — Flow lanes per month (local-time buckets): `in_cents`, `out_cents` (refunds netted), `refunds_cents`, `moved` (`card_payment_cents` + `invest`/`save`/`loan_paydown`/`between` as `{out_cents, in_cents}` from checking + cards), `earned_minus_spent_cents`, `saved_cents` |
 | `GET /subscriptions` | — | `Subscription[]` — fixed-amount recurring (≥3 occurrences) |
 | `GET /ledger` | `window` = `3mo`\|`6mo`(default)\|`12mo`\|`all` | `LedgerView` — the rhythm ledger (streams / committed / notable / transfers / noise) |
 | `GET /stream_occurrences` | `merchant` (required, normalized name), `window` | `Transaction[]` — the raw rows behind one stream |
@@ -78,12 +78,12 @@ All optional; a missing filter set means **everything** (pending included).
 |---|---|---|
 | `since` / `until` | epoch secs | window on `effective_date()`; `since` inclusive, `until` exclusive |
 | `pending` | bool (default `true`) | include pending rows |
-| `transfers` | bool (default `false`) | include Transfer/CardPayment rows |
+| `transfers` | bool (default `false`) | include Moved (non-Spending) rows |
 | `q` | string | case-insensitive text over payee/description/category/normalized merchant |
 | `account` | string | filter by `account_id` |
 | `category` | string | filter by category name |
 | `source` | string | provenance (`plaid`) |
-| `flag` | enum | `Spending`\|`Transfer`\|`CardPayment` — filtering by a suppressed flag auto-includes those rows |
+| `flag` | enum | `Spending`\|`Transfer`\|`CardPayment`\|`Invest`\|`Save`\|`LoanPaydown` — filtering by a Moved flag auto-includes those rows |
 | `min_cents` / `max_cents` | i64 | amount band (cents) |
 | `sort` | string | `date`(default)\|`amount`\|`merchant`\|`category`; a bad key is a `400` |
 | `dir` | string | `asc`\|`desc`(default) |
@@ -107,7 +107,7 @@ An RO token gets **403** on all of these.
 | `POST /categorize` | — | run the rule categorizer over uncategorized rows → `{ rule, remaining }` |
 | `POST /categorize_llm` | — | LLM pass over merchants rules couldn't place (needs `ANTHROPIC_API_KEY` on the server) → count (`number`) |
 | `POST /txn/{txn_id}/category` | `{ category, learn? }` | set a manual category; `learn:true` writes an exact rule so siblings follow |
-| `POST /txn/{txn_id}/flag` | `{ flag, learn? }` | set suppression flag (`Spending`\|`Transfer`\|`CardPayment`) |
+| `POST /txn/{txn_id}/flag` | `{ flag, learn? }` | set the flag (`Spending`, or a Moved group: `Transfer`\|`CardPayment`\|`Invest`\|`Save`\|`LoanPaydown`) |
 | `POST /account/{account_id}/nickname` | `{ nickname }` | set/clear account nickname (empty clears) |
 | `POST /account/{account_id}/hidden` | `{ hidden }` | hide/un-hide an account: its rows leave every list, aggregate, dropdown and match review (data keeps syncing). `404` for an unknown id |
 | `POST /apply_flags` | — | re-apply flag rules → count (`number`) |

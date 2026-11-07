@@ -7,7 +7,8 @@ export type CategorySource = "Plaid" | "Rule" | "Llm" | "Manual";
 export type Cadence = "Monthly" | "Yearly";
 // Suppression flag: how spend analytics treat a transaction. Non-Spending rows
 // (money moved between the user's own accounts) are hidden from the charts.
-export type TxnFlag = "Spending" | "Transfer" | "CardPayment";
+// "Transfer" is the Moved group "between own accounts" (or moved, group unknown).
+export type TxnFlag = "Spending" | "Transfer" | "CardPayment" | "Invest" | "Save" | "LoanPaydown";
 export type Trend = "Rising" | "Falling" | "Steady";
 // Rhythm cadence buckets (StreamCadence in core). UI maps these to badge labels.
 export type StreamCadence =
@@ -62,12 +63,31 @@ export interface MerchantSpend {
   count: number;
 }
 
-export interface MonthlyFlow {
+// One Moved group, seen from checking + cards: out = left them, in = came back.
+export interface MovedFlow {
+  out_cents: number;
+  in_cents: number;
+}
+
+export interface MovedLane {
+  card_payment_cents: number;
+  invest: MovedFlow;
+  save: MovedFlow;
+  loan_paydown: MovedFlow;
+  between: MovedFlow;
+}
+
+// One month of Flow lanes (core query::flow_lanes). out_cents is spending net
+// of refunds; in_cents is income plus not-yet-categorized inflows.
+export interface FlowMonth {
   year: number;
   month: number;
-  inflow_cents: number;
-  outflow_cents: number;
-  net_cents: number;
+  in_cents: number;
+  out_cents: number;
+  refunds_cents: number;
+  moved: MovedLane;
+  earned_minus_spent_cents: number;
+  saved_cents: number;
 }
 
 export interface Subscription {

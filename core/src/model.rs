@@ -254,16 +254,28 @@ impl Mark {
     }
 }
 
-/// How a transaction is treated by spend analytics. `Spending` is real
-/// consumption and the default; `Transfer` (money moved between the user's own
-/// accounts) and `CardPayment` (a checking→card payment whose underlying charges
-/// are the real spend) are suppressed from all aggregations so they aren't
-/// double-counted. See `query` and `subscriptions::detect`.
+/// How a transaction is treated by analysis. `Spending` is the In / Out lanes
+/// and the default. Every other variant is a **Moved** group (GLOSSARY: Flow
+/// lanes): money between the user's own accounts, shown in the Moved lane and
+/// never counted as spending or income.
+///
+/// `Transfer` is the "between own accounts" group, and also "moved, group not
+/// known yet": the name predates the finer groups and is kept so the wire
+/// format, the DB string and learned flag rules stay stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TxnFlag {
     Spending,
+    /// Between own accounts, or moved with no finer group known.
     Transfer,
+    /// Paying a credit card balance. Never saving: the card's purchases are
+    /// already in Out.
     CardPayment,
+    /// To or from a brokerage, retirement account or HSA.
+    Invest,
+    /// To or from savings, a CD or a money market account.
+    Save,
+    /// Principal paid on a loan (Plaid doesn't split out the interest).
+    LoanPaydown,
 }
 
 impl TxnFlag {
@@ -272,6 +284,9 @@ impl TxnFlag {
             TxnFlag::Spending => "spending",
             TxnFlag::Transfer => "transfer",
             TxnFlag::CardPayment => "card_payment",
+            TxnFlag::Invest => "invest",
+            TxnFlag::Save => "save",
+            TxnFlag::LoanPaydown => "loan_paydown",
         }
     }
 
@@ -282,8 +297,21 @@ impl TxnFlag {
             "spending" => Some(TxnFlag::Spending),
             "transfer" => Some(TxnFlag::Transfer),
             "card_payment" => Some(TxnFlag::CardPayment),
+            "invest" => Some(TxnFlag::Invest),
+            "save" => Some(TxnFlag::Save),
+            "loan_paydown" => Some(TxnFlag::LoanPaydown),
             _ => None,
         }
+    }
+
+    /// In the Moved lane (anything but `Spending`).
+    pub fn is_moved(self) -> bool {
+        self != TxnFlag::Spending
+    }
+
+    /// Counts toward Saved: Invest, Save and LoanPaydown.
+    pub fn is_saving(self) -> bool {
+        matches!(self, TxnFlag::Invest | TxnFlag::Save | TxnFlag::LoanPaydown)
     }
 }
 

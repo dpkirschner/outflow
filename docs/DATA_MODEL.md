@@ -43,11 +43,13 @@ Transaction {
     category: Option<String>,
     category_source: Option<CategorySource>, // Plaid | Rule | Llm | Manual
     pending: bool,
-    flag: TxnFlag,    // Spending (default) | Transfer | CardPayment
+    flag: TxnFlag,    // Spending (default) or a Moved group; see TxnFlag
     raw: String,      // original provider JSON, retained (full Plaid payload)
     source: String,   // provenance ("plaid"; "simplefin" on retired-era rows)
 }
-TxnFlag = Spending | Transfer | CardPayment   // suppression axis; see below
+TxnFlag = Spending | Transfer | CardPayment | Invest | Save | LoanPaydown
+          // Spending = In/Out lanes; every other value is a Moved group.
+          // Transfer = between own accounts (or moved, group unknown).
 
 PlaidItem { item_id, institution, cursor: Option<String>, status, created,
             last_synced, investments_consent }   // NON-secret metadata; access token lives in the
@@ -115,8 +117,9 @@ price_as_of/currency/synced_at, holding_snapshots.price), v9
    malformed data returns `SourceError`, never leaks defaults. Plaid signs flip
    here (amounts negate; credit balances negate). Plaid
    `personal_finance_category` seeds `flag` (LOAN_PAYMENTS_CREDIT_CARD_PAYMENT →
-   CardPayment, TRANSFER_IN/OUT and other LOAN_PAYMENTS → Transfer, since
-   paying down a loan counts as saving) and a conservative category
+   CardPayment; *_INVESTMENT_AND_RETIREMENT_FUNDS → Invest; *_SAVINGS → Save;
+   other LOAN_PAYMENTS → LoanPaydown, since paying down a loan counts as
+   saving; other TRANSFER_IN/OUT → Transfer) and a conservative category
    (`CategorySource::Plaid`) at parse time — seed-only, since the upsert never
    overwrites `flag` on conflict.
 
@@ -127,11 +130,21 @@ a `TxnFilter { since, until, include_pending, include_non_spending }` — since
 inclusive, until exclusive, both against `effective_date()`. Every aggregation
 **excludes non-`Spending` transactions** unless `include_non_spending` is set.
 
-- `spend_by_category` / `top_merchants` — sum of **outflows only**, grouped;
-  merchants by `normalize_payee`; uncategorized under `None`.
-- `monthly_flow` — inflow/outflow/net per month, bucketed on `effective_date()`
-  in local time. Both legs drop non-Spending, so a card payment is neither
-  income (card side) nor spend (checking side).
+- `spend_by_category` — outflows grouped by category, **refunds netted** in
+  their own category (so it sums to Out); uncategorized under `None`.
+- `top_merchants` — sum of **outflows only**, grouped by `normalize_payee`.
+- `flow_lanes` — the Flow lanes per month (GLOSSARY), bucketed on
+  `effective_date()` in local time:
+  - **In**: positive Spending rows with category `Income` or no category yet.
+  - **Out**: Spending outflows minus **refunds** (positive Spending rows with
+    any other category), netted in their category.
+  - **Moved** by group, from the **spending-side** accounts (checking +
+    credit) only: the far leg of a move on a savings/investment/loan account
+    isn't summed, so a move counts once whether or not the far account is
+    linked. Card payments are the larger of the bank and card sides per
+    month (never double-counted, still counted when one leg is missing).
+  - **Earned − spent** = In − Out; **Saved** = Invest + Save + LoanPaydown out
+    of the spending side, minus what came back.
 - `search_transactions(store, TxnQuery) -> TxnPage` — the Outflows screen and
   CLI `txns` query: case-insensitive text over payee/description/category/
   normalized merchant, filters (account, category, source, flag, amount band),

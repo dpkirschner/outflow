@@ -77,16 +77,53 @@ Each step ships on its own:
 
 1. Settings: move upkeep off the main screens.
 2. Flow lanes in core, API and CLI.
-3. Recurring view; delete the ledger.
-4. Holdings performance plus a net-worth-change endpoint.
-5. Check-in, built from 2–4.
+3. Platform step (added 2026-11-07, see the amendment below).
+4. Recurring view; delete the ledger.
+5. Holdings performance plus a net-worth-change endpoint.
+6. Check-in, built from 2–5.
+
+## Amendment 2026-11-07: platform step before the screens
+
+A technical review after steps 1 and 2 found that the architecture
+holds, but the seams the UI and the agent share get dearer with every
+screen. Steps 4–6 therefore wait on a short platform step (beads
+`ho-2mj.8`, one child each). None of it changes product behaviour.
+
+- **Generated types and a contract test.** Every figure touches six
+  hand-mirrored places (core function, route, CLI printer, CLI remote
+  dispatch, `api.ts`, `types.ts`) with nothing checking they agree.
+  `types.ts` is generated from the serde structs and one test pins the
+  wire shapes.
+- **One `Period` type.** The API carries four date conventions
+  (`window` strings with 30.5-day months, epoch-second `since`/`until`,
+  `YYYY-MM-DD`, `lookback`). Check-in needs calendar week, month and
+  quarter and Holdings needs a range, so `core` gets one calendar-aligned
+  `Period` in local time, one query-param spelling, and every new
+  endpoint takes it.
+- **Plaid's category becomes columns.** `personal_finance_category`
+  lives only inside the stored raw JSON; the matcher searches it as a
+  substring and two migrations have re-parsed it. `pfc_primary` and
+  `pfc_detailed` are backfilled once, and lane assignment becomes a pure
+  function of columns, account kind and user flag rules. The user flag
+  stays the override axis only.
+- **In comes from provider data, not the Income category.** Category
+  remains the user's vocabulary; a missing rule no longer moves a
+  paycheck between In and Out.
+- **URL routing** per screen, before five screens are built on lifted
+  state. Whether a screen's period goes in the URL is still open.
+- Docs drift from the review is fixed in the same step.
+
+Deferred, not blocking: loading the archive once per request when
+Check-in calls several aggregators, and typed domain errors instead of
+every failure being a 500.
 
 ## Consequences
 
 - The "where did my money go?" pitch widens to "where your money is and
   where it's going."
-- The transfer flag needs a finer classification (the Moved groups);
-  `TxnFlag` or an added column changes through a migration.
+- The transfer flag needs a finer classification (the Moved groups).
+  Step 2 widened `TxnFlag`; the platform step adds the Plaid category
+  columns so later reclassifications need no data migration.
 - Performance depends on history: snapshots start at the first holdings
   sync, and Plaid returns at most about 24 months of investment activity.
   Older cost-basis history needs a brokerage import (still on the

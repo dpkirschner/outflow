@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-outflow is a single-user spending analyzer for one person's own bank data.
+outflow is a single-user view of where one person's money is and where it's
+going: **Stock** (balances, holdings, performance), **Flow** (in / out / moved,
+recurring purchases), and **Find money** (planned). Direction and screen plan:
+`docs/adr/0001-product-direction.md`; vocabulary: `GLOSSARY.md`. Earlier
+framing as a pure spending analyzer below is being reshaped toward that.
 A server (target: an always-on mac-mini, exposed over Tailscale) pulls
 transactions from **Plaid** (checking/savings/credit cards) into local SQLite,
 categorizes them (rules + optional LLM), auto-detects
@@ -111,6 +115,13 @@ fetch JSON in `net`, parse pure in `core`
 Analysis (`query`, `subscriptions`, `ledger`) loads all transactions and
 **aggregates in memory in Rust**, not SQL. The durable SQLite archive grows
 past the providers' pull windows — it's the permanent history.
+
+## Agent access
+
+The web UI and an agent (RO token / CLI `--server`) are equal clients. If a
+number answers a question you'd ask the agent, compute it in `core` and expose
+it through the API and CLI; chart scaffolding (axes, scaling, sort order) may
+stay in the browser. A habit, not an enforced rule.
 
 ## Load-bearing invariants (see docs/INVARIANTS.md)
 

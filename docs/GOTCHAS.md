@@ -173,4 +173,6 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   path still works).
 - Own-account transfers (checking↔savings) auto-flag only when Plaid
   classifies them (`TRANSFER_IN/OUT`); anything else is a manual flag.
-- Annual subscriptions are undetectable until the DB holds >1 year.
+- The recurring list looks back 12 months and needs three regular charges,
+  so yearly charges never appear in it, and a new monthly charge shows up
+  from its third month.

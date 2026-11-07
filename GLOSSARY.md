@@ -59,11 +59,20 @@ product direction behind these terms is in
 
 - **Recurring merchant**: a merchant (keyed by
   `subscriptions::normalize_payee`) that you buy from on a detectable
-  cadence. It shows how often, the monthly cost, and the trend. There is
-  one detector (`subscriptions::detect_rhythms`). A fixed-amount
-  subscription is just a recurring merchant with a steady amount.
-- **Ignored**: the one per-merchant mark. It drops the merchant from the
-  recurring list.
+  cadence: at least three charges, regularly spaced, within the 12 months
+  ending with the month you're looking at. It shows how often, the usual
+  monthly cost, and what changed. There is one detector
+  (`subscriptions::detect_rhythms`). A fixed-amount subscription is just a
+  recurring merchant with a steady amount.
+- **Usual monthly cost**: the mean of a recurring merchant's completed
+  months since its first charge in the window, with months that had no
+  charge counted as $0.
+- **New / Up / Down**: the change marker. New means the first charge falls
+  in the last three months, against older history. Up or Down means the
+  last completed month is more than 25% away from the average of up to
+  three months before it. Otherwise it's steady, and nothing is shown.
+- **Ignored**: the one per-merchant mark. It moves the merchant off the
+  recurring list into a separate ignored list, where it can be restored.
 
 ## Screens
 

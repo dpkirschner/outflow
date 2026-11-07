@@ -35,8 +35,8 @@ doc is for when you want the raw endpoints.
   - **Legacy:** a bare integer `since`/`until` is read as epoch seconds
     (`since` inclusive, `until` exclusive), the form the SPA still sends. New
     endpoints don't accept it.
-  - Exceptions: `/ledger` `window` and `/perks` `lookback` are rolling
-    windows, not calendar periods (the ledger window goes with ho-2mj.3).
+  - Exception: `/perks` `lookback` is a rolling window, not a calendar
+    period.
 - **Timestamps** in response bodies are **epoch seconds** (`i64`) unless a
   field says `YYYY-MM-DD`.
 - **Errors** return the matching 4xx/5xx status with a JSON body
@@ -76,10 +76,7 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 | `GET /spend/categories` | `period` / `since` / `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
 | `GET /merchants` | `period` / `since` / `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
 | `GET /flow` | `period` / `since` / `until`, `pending` | `FlowMonth[]` — Flow lanes per month (local-time buckets): `in_cents`, `out_cents` (refunds netted), `refunds_cents`, `moved` (`card_payment_cents` + `card_payment_bank_cents` / `card_payment_card_cents` + `invest`/`save`/`loan_paydown`/`between` as `{out_cents, in_cents}` from checking + cards), `in_uncategorized_cents`, `earned_minus_spent_cents`, `saved_cents`, `gap_cents` (earned − spent − saved: cash left in checking) |
-| `GET /subscriptions` | — | `Subscription[]` — fixed-amount recurring (≥3 occurrences) |
-| `GET /ledger` | `window` = `3mo`\|`6mo`(default)\|`12mo`\|`all` | `LedgerView` — the rhythm ledger (streams / committed / notable / transfers / noise) |
-| `GET /stream_occurrences` | `merchant` (required, normalized name), `window` | `Transaction[]` — the raw rows behind one stream |
-| `GET /stream_preview` | `merchant` (required), `window` | `Stream \| null` — what a noise merchant would become if promoted (`null` if no spending in window) |
+| `GET /recurring` | `period` / `since` / `until` (optional; the list ends with that range's last month, default this month) | `RecurringView { month, since, until, in_progress, monthly_total_cents, items, ignored }` — recurring merchants over the 12 calendar months ending with that month (`since`/`until` = the window, `YYYY-MM-DD` inclusive). Each `RecurringMerchant` = `{merchant (normalized key), name, cadence, count, median_cents, monthly_cents (usual: mean of completed months since the first charge, gaps as $0; positive = spent), change: New\|Up\|Down\|Steady, change_pct, first_seen, last_seen, spark_cents (6 months ending at that month), category, account_id}`. New = first charge in the last 3 months with older history; Up/Down = last completed month more than 25% from the mean of up to 3 before it. `ignored` holds Ignored merchants still detected. The rows behind a merchant: `/transactions?merchant=<key>&lane=out&direction=out&since=…&until=…` |
 | `GET /categories` | — | `string[]` — the category vocabulary |
 | `GET /has_credit_account` | — | `bool` — whether a credit account is ingested (card-payment suppression is only correct when true) |
 | `GET /sync_log` | `limit` (default 50) | `SyncEntry[]` — most recent sync runs |
@@ -104,6 +101,7 @@ All optional; a missing filter set means **everything** (pending included).
 | `category` | string | filter by category name |
 | `source` | string | provenance (`plaid`) |
 | `flag` | enum | `Spending`\|`Transfer`\|`CardPayment`\|`Invest`\|`Save`\|`LoanPaydown` — filtering by a Moved flag auto-includes those rows |
+| `merchant` | string | normalized merchant key (`normalize_payee`), e.g. a `RecurringMerchant.merchant` |
 | `lane` | string | `in`\|`out`\|`card_payment`\|`invest`\|`save`\|`loan_paydown`\|`between` — exactly the rows behind that `/flow` figure (signed sum = the figure); reads Moved rows without `transfers`; a bad value is a `400` |
 | `uncategorized` | bool | only rows with no category (e.g. `lane=in&uncategorized=true`, or Out's `null` category) |
 | `direction` | string | `out` (negative) \| `in` (positive); on `lane=card_payment`, `out` = bank side, `in` = card side; a bad value is a `400` |
@@ -134,8 +132,7 @@ An RO token gets **403** on all of these.
 | `POST /account/{account_id}/nickname` | `{ nickname }` | set/clear account nickname (empty clears) |
 | `POST /account/{account_id}/hidden` | `{ hidden }` | hide/un-hide an account: its rows leave every list, aggregate, dropdown and match review (data keeps syncing). `404` for an unknown id |
 | `POST /apply_flags` | — | re-apply flag rules → count (`number`) |
-| `POST /mark_stream` | `{ merchant, mark }` | ledger mark (`Committed`\|`Dismissed`\|`Kept`) |
-| `POST /clear_stream_mark` | `{ merchant }` | clear a ledger mark |
+| `POST /recurring/ignored` | `{ merchant, ignored }` | set (`true`) or clear the Ignored mark on a normalized merchant; ignored merchants move to `RecurringView.ignored`. `400` on an empty merchant |
 | `POST /pull` | — | trigger a live Plaid sync now → `SyncReport` (a pull with no linked items returns a clean empty report without touching credentials) |
 | `POST /reset_data` | — | clear transactions/accounts/sync_log/matches and reset Plaid cursors — **destructive**, back up the DB first (cannot recover rows older than Plaid's window) |
 
@@ -162,7 +159,7 @@ An RO token gets **403** on all of these.
 Routes are registered in `server/src/routes.rs::api_router` (+ `plaid_routes.rs`
 and `match_routes.rs`). Response types are the core domain types — see
 [DATA_MODEL.md](DATA_MODEL.md) for `Account`, `Transaction`, `TxnPage`,
-`LedgerView`, `Subscription`, `FlowMonth`, `SyncEntry`, and the enums. The
+`RecurringView`, `FlowMonth`, `SyncEntry`, and the enums. The
 exact JSON shapes are in `app/src/types.ts` (generated) and
 `server/contract/responses.json` (one example of each). If this table and the
 code ever disagree, the code wins — update this doc.

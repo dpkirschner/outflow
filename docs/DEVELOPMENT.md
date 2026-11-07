@@ -45,8 +45,8 @@ Subcommands: `pull --from-file P` (offline fixture ingest; live syncs are the
 server's job), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --since --until --posted-only]`
 (monthly = Flow lanes: in / out / earned − spent / saved / Moved groups),
-`subs`, `fix <id> <category> [--no-learn]`, `txns [--search --category
---account --source --flag --sort --asc --limit --offset --since --until
+`recurring [--period P --ignored]`, `fix <id> <category> [--no-learn]`,
+`txns [--search --category --account --source --flag --merchant --sort --asc --limit --offset --since --until
 --posted-only --show-excluded]`, `accounts`, `balances [--history]`,
 `holdings [--account A --ticker T --history --since D]`, `activity [--account A
 --ticker T --type T --since D --until D]`, `perks [--file F

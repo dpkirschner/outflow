@@ -6,13 +6,13 @@ One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
 core/    pure domain — money, model, store, plaid, categorize, query,
-         subscriptions, ledger, transfers, perks, balances, activity, llm. Zero
+         subscriptions, recurring, transfers, perks, balances, activity, llm. Zero
          GUI/network deps by default. Source of truth.
 net/     networked adapters (sync ureq) — plaid (Link/exchange/sync
          transport), plaid_tokens (0600 token file), secrets (0600-file
          helpers), anthropic (Prompter impl). Depends on core.
 cli/     headless binary `outflow` — pull --from-file, categorize, report,
-         subs, fix, txns, accounts, balances, holdings, activity, matches,
+         recurring, fix, txns, accounts, balances, holdings, activity, matches,
          status, perks; direct-DB or HTTP client mode (--server) against a running server.
 server/  axum + tokio HTTP server — JSON API + serves the built React SPA.
          The always-on deployment target (mac-mini behind tailscale serve).
@@ -49,8 +49,10 @@ money            i64-cents type, decimal parse, display
                  rule/category/match CRUD; sync_log
           ├ query          spend_by_category, top_merchants, flow_lanes,
           │                search_transactions (text/sort/filter/pagination)
-          ├ subscriptions  normalize_payee (THE normalizer), detect(), detect_rhythms()
-          ├ ledger         the rhythm-ledger view model (ledger() → LedgerView)
+          ├ subscriptions  normalize_payee (THE normalizer), detect_rhythms() (THE
+          │                recurring detector)
+          ├ recurring      recurring() → RecurringView: the recurring list over
+          │                12 months, change marker, Ignored mark
           ├ transfers      detect_card_payments() — checking↔card pair matcher
           ├ perks          card offers TOML → domain (parse_offers/load_offers);
           │                evaluate() → add-offer / wrong-card / expiring findings
@@ -65,7 +67,7 @@ money            i64-cents type, decimal parse, display
           └ llm            Prompter trait, prompt build, response validation
 ```
 
-Analysis (`query`, `subscriptions`, `ledger`) reads all transactions from the
+Analysis (`query`, `recurring`) reads all transactions from the
 store and **aggregates in memory in Rust**, not in SQL. Months are bucketed on
 each transaction's behavioral date (`effective_date()`) in the machine's
 **local timezone** — `core` depends on `chrono` (pure computation, no network)
@@ -92,7 +94,7 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
    post-ingest: apply_flags ── categorize(RuleSet) ── transfers::detect_card_payments
      (high-confidence pairs auto-flag CardPayment; ambiguous queue for review)
                                                                       ▼
-   query::* / ledger / subscriptions ──▶ server /api/* ──▶ React SPA
+   query::* / recurring ─────────────▶ server /api/* ──▶ React SPA
                                      └──▶ CLI stdout (tables or --json)
 ```
 
@@ -113,15 +115,16 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
   `--server URL` (feature `client`, `cli/src/remote.rs`) redirects every
   subcommand to the HTTP API and prints the server's JSON verbatim — identical
   shapes to local `--json`, so agent consumers don't care which mode ran.
-- **Frontend** (`app/src/`) — four screens, one URL each (`route.ts`, a
-  small hand-rolled path router): `/ledger` the **rhythm ledger**
-  (`components/ledger/*`), `/flow` (month strip, earned − spent next to
-  saved, the In / Out / Moved lanes and the month's transaction table;
-  each figure is a button that drills the table into its rows via the
-  core `lane` filter, `components/Flow.tsx`), `/balances`
+- **Frontend** (`app/src/`) — three screens, one URL each (`route.ts`, a
+  small hand-rolled path router): `/flow` (month strip, earned − spent next
+  to saved, the In / Out / Moved lanes, the recurring list
+  (`components/Recurring.tsx`) and the month's transaction table; each
+  figure and each recurring merchant is a button that drills the table into
+  its rows via the core `lane` / `merchant` filters, `components/Flow.tsx`),
+  `/balances`
   (`components/Balances.tsx`), and `/settings` (Connections, card-payment
   review, categorize, reset; `components/Settings.tsx`). `/` and unknown
-  paths redirect to `/ledger`; `/oauth-return` shows Settings and is
+  paths redirect to `/flow`; `/oauth-return` shows Settings and is
   rewritten to `/settings` once Plaid Link has read it. Only the screen is in
   the URL — the selected month (App state, shared across screens) and open
   panels stay in app memory.
@@ -174,4 +177,5 @@ unconditionally.
   periodic polling covers a personal archive. Tailscale Funnel could expose a
   webhook path later.
 - **Local-model LLM** — an OpenAI-shaped `Prompter` behind the same trait.
-- **Annual subscriptions** — undetectable until the DB holds >1 year.
+- **Annual subscriptions** — the recurring list looks back 12 months and
+  needs three charges, so a yearly charge never shows up there.

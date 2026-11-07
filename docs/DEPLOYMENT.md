@@ -261,7 +261,7 @@ export OUTFLOW_SERVER=http://host.docker.internal:8080
 That hop is plain HTTP but never leaves the machine. It still requires the
 token — being on the box is not authorization.
 
-(Build the CLI with `--features client`. `txns`, `report`, `subs`, `accounts`,
+(Build the CLI with `--features client`. `txns`, `report`, `recurring`, `accounts`,
 `balances`, `holdings`, `activity`, `perks`, `matches`, `status`,
 `categorize`, `pull`, `fix` all work in server mode and
 print the same JSON shapes as local `--json` — the reads need only the RO

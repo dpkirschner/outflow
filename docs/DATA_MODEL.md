@@ -78,7 +78,7 @@ string round-tripping in SQLite.
 | `category_rules` | learned/manual rules | `match_type` (exact/contains), `pattern` (lowercased), `category` |
 | `flag_rules` | learned/manual suppression rules | same shape but carries a `flag` — an independent axis |
 | `categories` | the vocabulary | seeded on first open; constrains the LLM |
-| `merchant_overrides` | per-merchant ledger marks | `Committed` / `Dismissed` / `Kept` |
+| `merchant_overrides` | the per-merchant Ignored mark | `pattern` = normalized merchant, `mark` = `ignored` (the only value since v13) |
 | `sync_log` | sync history | one row per source leg per run |
 | `plaid_items` | linked Plaid connections | item_id PK, institution, **cursor**, status (`ok`/`login_required`/`error`), created, last_synced, investments_consent (refreshed from `/accounts/get`'s `item` each sync) — no secrets |
 | `securities` | instruments seen in holdings | security_id PK; ticker, name, type, is_cash, cusip, isin, close_price (decimal text) + close_price_as_of |
@@ -103,7 +103,9 @@ data-only: `transfer` rows split into the Moved groups (`split_moved_groups`),
 v12 `transactions.pfc_primary`/`pfc_detailed`/`flag_overridden`, backfilled
 once from `raw` (`backfill_pfc_columns`; a row is marked overridden when its
 stored flag differs from what its category gives, so no effective flag
-changes). The v10 and v11 backfills still parse `raw`; nothing after v12 does.
+changes), v13 data-only: `merchant_overrides` keeps one mark — the ledger's
+`dismissed` became `ignored`, `committed`/`kept` rows were deleted. The v10
+and v11 backfills still parse `raw`; nothing after v12 does.
 Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
 
@@ -163,7 +165,7 @@ API.md **Dates**.
 
 ## Read / analysis layer
 
-`query` and `subscriptions` load all transactions and aggregate in memory over
+`query` and `recurring` load all transactions and aggregate in memory over
 a `TxnFilter { since, until, include_pending, include_non_spending }` — since
 inclusive, until exclusive, both against `effective_date()`. Every aggregation
 **excludes non-`Spending` transactions** unless `include_non_spending` is set.
@@ -198,16 +200,28 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
 - `search_transactions(store, TxnQuery) -> TxnPage` — the Flow screen and
   CLI `txns` query: case-insensitive text over payee/description/category/
   normalized merchant, filters (account, category, source, flag, amount band,
-  `lane`, `uncategorized`, `direction` = out|in by sign; a lane reads Moved
+  `merchant` = exact normalized key, `lane`, `uncategorized`, `direction` = out|in by sign; a lane reads Moved
   rows by itself; on a card payment, out = bank side, in = card side),
   stable sort (date/amount/merchant/category + direction, tie-broken by date
   then id), offset/limit pagination. `TxnPage.total_cents` sums ALL matches,
   not just the page.
-- `subscriptions::detect` — fixed-amount recurring (≥3 occurrences, stable
-  amount, monthly/yearly cadence).
-- `subscriptions::detect_rhythms(txns, now)` — variable-amount stream detector
-  (cadence classes Daily…Yearly, completed-month monthly estimate, trend,
-  sparkline). Powers the ledger streams.
+- `subscriptions::detect_rhythms(txns)` — the one recurring detector: Spending
+  outflows grouped by `normalize_payee`, at least 3 charges, spacing regular
+  (most gaps within 0.5×–2× the median gap). Amounts may vary. Returns each
+  merchant's charges and its cadence class (Daily…Yearly).
+- `recurring(store, through, now) -> RecurringView` — the recurring list
+  (GLOSSARY: Recurring) over the 12 calendar months ending with the month that
+  contains `through`; `now` decides which months are complete. Per merchant:
+  usual monthly cost = mean of the completed months since its first charge in
+  the window (months with no charge count as $0; with none complete, median
+  charge × frequency); a 6-month spark ending at that month; the change marker
+  — **New** if the first charge falls in the last 3 months and the archive has
+  older rows, else **Up**/**Down** when the last completed month is more than
+  25% (`CHANGE_PCT`) from the mean of up to 3 completed months before it.
+  Ignored merchants (`merchant_overrides`) are split into `ignored`. A yearly
+  charge can't qualify inside 12 months. The `merchant` filter on
+  `search_transactions` (exact normalized key) returns the rows behind a
+  merchant.
 
 ## Card-payment matching (`core/src/transfers.rs`)
 
@@ -221,14 +235,6 @@ is **Medium**. The sync engine auto-accepts High (flags both legs
 `CardPayment`, retires competing proposals) and queues Medium for the Review
 screen. Accepting/rejecting is idempotent and survives re-sync (UNIQUE pair +
 flag-preserving upsert). Undoing an accept restores both legs to `Spending`.
-
-## Rhythm ledger (`core/src/ledger.rs`)
-
-`ledger(store, since, now) -> LedgerView` partitions a window **once** into
-streams / committed / notable / transfers / noise with per-stream `Source`
-chips (card last-4 parsed from the account name vs ACH). Unchanged by the
-Plaid migration except that Plaid account names carry their mask (e.g.
-"Plaid Credit Card (3333)") so last-4 attribution works.
 
 ## Categorization precedence
 

@@ -30,9 +30,10 @@ names).
   that serves a React SPA + JSON API, and a headless **CLI** (direct-DB or
   HTTP-client mode against the server). Both front-ends call the same core, so
   they run identical domain logic.
-- **The rhythm ledger** — the primary view: recurring streams (with cadence,
-  trend, and which card/account they hit), committed vs. discretionary, notable
-  one-offs, and a noise fold — all with card-payments and transfers suppressed.
+- **Flow** — money in, out and moved between your own accounts per month,
+  each figure drilling into its rows, plus the **recurring list**: merchants
+  you pay on a cadence, their usual monthly cost and what changed (new, or up
+  or down more than 25%).
 - **Card-payment matching** — pairs a checking→card payment with the card's
   balance payment so the same money isn't counted as both an outflow and the
   card's underlying charges. High-confidence pairs auto-match; ambiguous ones
@@ -88,7 +89,7 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" pull --from-file examples/pl
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" categorize
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" report --by category
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" report --by merchant --top 10
-cargo run -p outflow-cli -- --db "$HOME/outflow.db" subs
+cargo run -p outflow-cli -- --db "$HOME/outflow.db" recurring
 ```
 
 The database path also reads from `OUTFLOW_DB`.
@@ -138,8 +139,8 @@ URL with a read-only token. Full recipe (Plaid dashboard, tailscale, launchd,
   before linking) and Plaid sends no tax lots, so purchase dates for older
   positions aren't available. Some 401(k) funds arrive with no ticker or cost
   basis.
-- Annual subscriptions are only detectable once the database holds over a year
-  of history.
+- The recurring list looks back 12 months, so yearly charges don't show in
+  it.
 
 ## License
 

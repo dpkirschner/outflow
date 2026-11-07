@@ -238,10 +238,10 @@ phone is a glance surface; desktop is where the layout is tuned.
 ## Elevation & Depth
 
 Flat by design. Depth is three tonal steps: Recessed Panel sits below Panel,
-which sits on the Ink Background. Hairlines separate everything. The one
-place a surface floats is the slide-over, which dims the page with a scrim;
-it still uses no drop shadow. The selected row is marked with an inset 3px
-Field Teal bar on its leading edge rather than a lift.
+which sits on the Ink Background. Hairlines separate everything. Nothing
+floats over the page but the toast, and it has no drop shadow either. A
+selected figure or row is marked with the Selected Fill and a 2px Field
+Teal inset ring rather than a lift.
 
 ### Named Rules
 **The Hairline Rule.** Surfaces are separated by a 1px Hairline border or a
@@ -271,7 +271,7 @@ those capsules.
 ### Segmented controls
 - A Recessed Panel track with a Hairline border and 2px inset. Options are
   bare text in Text Dim; the selected option gets the Selected Fill and Text
-  colour. Used for the time window (3mo / 6mo / 12mo / All) and sort modes.
+  colour. Used for the Balances trend range.
 
 ### Cards / Containers
 - **Corner Style:** 12px.
@@ -297,10 +297,24 @@ those capsules.
   Fill and Text colour. A count that needs attention sits in an Attention
   Amber capsule beside the label.
 
-### Slide-over
-- The detail view for a merchant or stream. It slides in from the right
-  over a dark scrim, holds a bar rhythm chart, occurrence list and actions,
-  and closes back to the list without losing scroll or fold state.
+### Recurring list (Flow)
+- A table between the lanes and the transaction table: merchant (Row name,
+  with cadence and category in Text Dim under it), a six-bar spark of the
+  last six months, the change marker, usual cost per month (signed,
+  tabular), and the last charge. Headers are sort buttons with `aria-sort`.
+- The merchant button's hit area stretches over the whole row, so the row is
+  a drill-down figure: the dotted underline sits on the name, and the
+  selected row gets the Selected Fill and a 2px Field Teal inset ring.
+- Only a change gets a margin note, in words: "new" and "up 44%" in
+  Attention Amber, "down 12%" in Text Dim. Steady says nothing visible.
+- The spark's bars are Text Faint (Text Dim on hover or selection); the
+  month still in progress is an outlined bar, so a partial month doesn't
+  read as a drop.
+- Ignore is the row action, waiting for hover or focus like the table's.
+  Ignored merchants collapse into an "N ignored" button that lists them
+  with Restore. Top eight first, then "Show all".
+- Below 720px each merchant becomes two lines: name and cost, then spark,
+  change, last charge and Ignore.
 
 ### Month strip (Flow)
 - One button per month: a 20px bar (Out, scaled to the largest month),

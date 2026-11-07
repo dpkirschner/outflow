@@ -39,7 +39,9 @@ server), `categorize [--llm]`,
 `report --by category|merchant|monthly [--top --posted-only]
 [--period P | --since D --until D]`
 (monthly = Flow lanes: in / out / earned − spent / saved / Moved groups),
-`subs`, `fix <id> <category> [--no-learn]`,
+`recurring [--period P --ignored]` (recurring merchants over the 12 months
+ending with P's last month: cadence, usual monthly cost, new / up / down >25%),
+`fix <id> <category> [--no-learn]`,
 `perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
 vs spending; file from `--file`/`OUTFLOW_PERKS`),
 `balances [--history [--period P | --since D --until D]]`
@@ -51,7 +53,8 @@ investment account's uninvested cash is a synthetic `cash:uninvested`
 row), `activity [--account --ticker --type] [--period P | --since D --until D]`
 (investment transactions: buys, sells, dividends, contributions; amount = cash
 effect), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`):
-`txns [... --lane in|out|card-payment|invest|save|loan-paydown|between
+`txns [... --merchant KEY
+--lane in|out|card-payment|invest|save|loan-paydown|between
 --direction out|in --uncategorized] [--period P | --since D --until D]`
 (`--lane` = exactly the rows behind a `report --by monthly` figure; on a
 card payment `--direction out` = bank side, `in` = card side), `accounts`,
@@ -100,7 +103,7 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
 `core net cli server` (`app/` is an npm project, not a cargo member):
 
 - **`core/`** — pure domain, zero GUI/network deps by default. `money` → `model`
-  → `store` (SQLite via rusqlite) → `query` / `subscriptions` / `categorize` /
+  → `store` (SQLite via rusqlite) → `query` / `subscriptions` / `recurring` / `categorize` /
   `llm` / `plaid` (pure Plaid JSON→domain parser) / `transfers` (card-payment
   matcher). Source of truth; every front-end calls it directly so **CLI and web
   run identical domain logic**.
@@ -118,7 +121,7 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
 
 **Styling:** plain CSS in two files — `app/src/theme.css` and `app/src/ledger.css`
 (no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
-`fl-*` = Flow tab, `lg-*` = ledger, `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
+`fl-*` = Flow tab (`fl-rc-*` its recurring list), `lg-*` = shell and shared, `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
 match review. For styling/visual questions, trace
 `className` → rule with `rtk grep` across those `.css` files (graphify doesn't
 index CSS), or just read both — they're small.
@@ -128,7 +131,7 @@ fetch JSON in `net`, parse pure in `core`
 (`plaid::parse_sync_page`/`parse_accounts_get`/`parse_fixture`) — plus
 `categorize::Categorizer` / `llm::Prompter` (rules today, LLM tail).
 
-Analysis (`query`, `subscriptions`, `ledger`) loads all transactions and
+Analysis (`query`, `recurring`) loads all transactions and
 **aggregates in memory in Rust**, not SQL. The durable SQLite archive grows
 past the providers' pull windows — it's the permanent history.
 

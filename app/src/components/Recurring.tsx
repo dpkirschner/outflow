@@ -5,12 +5,14 @@
 // A row drills the transaction table into that merchant's charges over the
 // window, through the same Pick as the lanes. Ignore moves a merchant to the
 // ignored list (one mark, no other states), with Undo.
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Change, RecurringMerchant, RecurringView, StreamCadence } from "../types";
 import { monthLabel, signedCents, unsignedCents } from "../format";
 import type { Pick } from "./Flow";
 
 const PREVIEW = 8;
+/** Mirrors core `recurring::CHANGE_PCT`, for the note's wording only. */
+const CHANGE_PCT = 25;
 
 const CADENCE: Record<StreamCadence, string> = {
   Daily: "about daily",
@@ -78,12 +80,17 @@ function Spark({ r, month, inProgress }: { r: RecurringMerchant; month: string; 
     })
     .join(", ");
   return (
-    <span className="fl-rc-spark" role="img" aria-label={`Last ${n} months: ${spoken}`}>
+    <span
+      className="fl-rc-spark"
+      role="img"
+      aria-label={`Last ${n} months: ${spoken}`}
+      title={`Last ${n} months: ${spoken}`}
+    >
       {r.spark_cents.map((c, i) => (
         <i
           key={i}
           className={inProgress && i === n - 1 ? "sofar" : undefined}
-          style={{ height: `${c === 0 ? 1 : Math.max(3, Math.round((c / max) * 22))}px` }}
+          style={{ height: `${c === 0 ? (inProgress && i === n - 1 ? 6 : 2) : Math.max(3, Math.round((c / max) * 22))}px` }}
         />
       ))}
     </span>
@@ -101,8 +108,10 @@ export function RecurringSection({
   onRetry: () => void;
   pick: Pick | null;
   onPick: (p: Pick) => void;
-  onIgnore: (r: RecurringMerchant, ignored: boolean) => Promise<void>;
+  /** Resolves true when the mark was saved. */
+  onIgnore: (r: RecurringMerchant, ignored: boolean) => Promise<boolean>;
 }) {
+  const root = useRef<HTMLElement>(null);
   const [sort, setSort] = useState<SortKey>("monthly");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [all, setAll] = useState(false);
@@ -162,25 +171,40 @@ export function RecurringSection({
     </th>
   );
 
-  // Ignoring removes the row (and the control that had focus): move focus to
-  // the row now in its place, else the section title.
-  const ignore = async (r: RecurringMerchant, index: number) => {
-    await onIgnore(r, true);
+  // Ignore and Restore remove the control that had focus. Move focus to the
+  // control now in its place, else the next sensible one, else the title.
+  const refocus = (selectors: string[], index: number) =>
     window.requestAnimationFrame(() => {
-      const picks = document.querySelectorAll<HTMLElement>(".fl-rc-table .fl-rc-pick");
-      (picks[Math.min(index, picks.length - 1)] ?? document.getElementById("fl-rc-title"))?.focus();
+      for (const sel of selectors) {
+        const els = root.current?.querySelectorAll<HTMLElement>(sel) ?? [];
+        if (els.length > 0) {
+          els[Math.min(index, els.length - 1)].focus();
+          return;
+        }
+      }
+      document.getElementById("fl-rc-title")?.focus();
     });
+  const ignore = async (r: RecurringMerchant, index: number) => {
+    if (await onIgnore(r, true)) refocus([".fl-rc-table .fl-rc-pick"], index);
+  };
+  const restore = async (r: RecurringMerchant, index: number) => {
+    if (await onIgnore(r, false)) {
+      refocus([".fl-rc-ignored .fl-mini", ".fl-rc-ignored-toggle", ".fl-rc-pick"], index);
+    }
   };
 
   return (
-    <section className="fl-rc" aria-labelledby="fl-rc-title">
+    <section className="fl-rc" aria-labelledby="fl-rc-title" ref={root}>
       {title}
       <p className="fl-rc-note">
         Merchants you pay on a regular cadence, {span}.
         {v.items.length > 0 && (
           <>
             {" "}
-            Usual cost <b>{signedCents(-v.monthly_total_cents)}</b> a month.
+            <span className="fl-nowrap">
+              Usual cost <b>{signedCents(-v.monthly_total_cents)}</b> a month.
+            </span>{" "}
+            New merchants and moves of more than {CHANGE_PCT}% are marked.
           </>
         )}
       </p>
@@ -202,8 +226,8 @@ export function RecurringSection({
                     Last 6 months
                   </th>
                   {head("change", "Change", "fl-rc-col-change")}
-                  {head("monthly", "Usual / mo", "num fl-rc-col-monthly")}
-                  {head("last", "Last", "fl-rc-col-last")}
+                  {head("monthly", "Usual per month", "num fl-rc-col-monthly")}
+                  {head("last", "Last charge", "fl-rc-col-last")}
                   <th scope="col" className="fl-rc-col-act">
                     <span className="fl-sr">Actions</span>
                   </th>
@@ -254,47 +278,53 @@ export function RecurringSection({
               </tbody>
             </table>
           </div>
+        </>
+      )}
+
+      {(sorted.length > PREVIEW || v.ignored.length > 0) && (
+        <div className="fl-rc-foot">
           {sorted.length > PREVIEW && (
             <button className="fl-more" aria-expanded={all} onClick={() => setAll((a) => !a)}>
               {all ? "Show fewer" : `Show all ${sorted.length} merchants`}
             </button>
           )}
-        </>
-      )}
-
-      {v.ignored.length > 0 && (
-        <div className="fl-rc-ignored">
-          <button
-            className="fl-more"
-            aria-expanded={showIgnored}
-            aria-controls="fl-rc-ignored-list"
-            onClick={() => setShowIgnored((s) => !s)}
-          >
-            {showIgnored ? "Hide ignored" : `${v.ignored.length} ignored`}
-          </button>
-          {showIgnored && (
-            <ul id="fl-rc-ignored-list" className="fl-rows" aria-label="Ignored merchants">
-              {v.ignored.map((r) => (
-                <li key={r.merchant} className="fl-row">
-                  <span className="fl-row-label">
-                    {r.name}
-                    <span className="fl-sub">{CADENCE[r.cadence]}</span>
-                  </span>
-                  <span className="fl-rc-restore">
-                    <span className="fl-row-value">{signedCents(-r.monthly_cents)} / mo</span>
-                    <button
-                      className="fl-mini fl-mini-shown"
-                      onClick={() => void onIgnore(r, false)}
-                      aria-label={`Restore ${r.name} to the recurring list`}
-                    >
-                      Restore
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
+          {v.ignored.length > 0 && (
+            <button
+              className="fl-rc-ignored-toggle"
+              aria-expanded={showIgnored}
+              aria-controls="fl-rc-ignored-list"
+              onClick={() => setShowIgnored((x) => !x)}
+            >
+              {showIgnored ? "Hide ignored" : `${v.ignored.length} ignored`}
+            </button>
           )}
         </div>
+      )}
+
+      {v.ignored.length > 0 && showIgnored && (
+        <ul id="fl-rc-ignored-list" className="fl-rows fl-rc-ignored" aria-label="Ignored merchants">
+          {v.ignored.map((r, i) => (
+            <li key={r.merchant} className="fl-row">
+              <span className="fl-row-label">
+                {r.name}
+                <span className="fl-sub">
+                  {CADENCE[r.cadence]}
+                  {r.category && ` · ${r.category}`}
+                </span>
+              </span>
+              <span className="fl-rc-restore">
+                <span className="fl-row-value">{signedCents(-r.monthly_cents)} a month</span>
+                <button
+                  className="fl-mini fl-mini-shown"
+                  onClick={() => void restore(r, i)}
+                  aria-label={`Restore ${r.name} to the recurring list`}
+                >
+                  Restore
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

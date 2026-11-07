@@ -200,34 +200,53 @@ export function Flow({
     await Promise.all([loadFlow(), loadCats(), loadRecurring()]);
   }, [loadFlow, loadCats, loadRecurring]);
 
+  // Merchants ignored since the last toast that wasn't an ignore toast. The
+  // app has one toast slot, so each Ignore replaces the previous toast; its
+  // Undo restores the whole batch, so no earlier Ignore loses its Undo.
+  const ignoredBatch = useRef<RecurringMerchant[]>([]);
+  const notifyOther = useCallback(
+    (msg: ToastMsg) => {
+      ignoredBatch.current = [];
+      notify(msg);
+    },
+    [notify],
+  );
+
   const setIgnored = useCallback(
-    async (r: RecurringMerchant, ignored: boolean) => {
+    async (r: RecurringMerchant, ignored: boolean): Promise<boolean> => {
       try {
         await api.setRecurringIgnored(r.merchant, ignored);
-        if (ignored) setPick((cur) => (cur?.merchant === r.merchant ? null : cur));
+      } catch (err) {
+        notifyOther({ kind: "err", text: String(err) });
+        return false;
+      }
+      if (ignored) {
+        setPick((cur) => (cur?.merchant === r.merchant ? null : cur));
+        const batch = [...ignoredBatch.current.filter((x) => x.merchant !== r.merchant), r];
+        ignoredBatch.current = batch;
         notify({
           kind: "ok",
-          text: ignored
-            ? `${r.name} is ignored: off the recurring list.`
-            : `${r.name} is back on the recurring list.`,
-          action: ignored
-            ? {
-                label: "Undo",
-                run: () => {
-                  void api
-                    .setRecurringIgnored(r.merchant, false)
-                    .then(loadRecurring)
-                    .catch((err) => notify({ kind: "err", text: String(err) }));
-                },
-              }
-            : undefined,
+          text:
+            batch.length === 1
+              ? `${r.name} is ignored: off the recurring list.`
+              : `${batch.length} merchants ignored: off the recurring list.`,
+          action: {
+            label: batch.length === 1 ? "Undo" : `Undo all ${batch.length}`,
+            run: () => {
+              ignoredBatch.current = [];
+              void Promise.all(batch.map((x) => api.setRecurringIgnored(x.merchant, false)))
+                .then(loadRecurring)
+                .catch((err) => notify({ kind: "err", text: String(err) }));
+            },
+          },
         });
-        await loadRecurring();
-      } catch (err) {
-        notify({ kind: "err", text: String(err) });
+      } else {
+        notifyOther({ kind: "ok", text: `${r.name} is back on the recurring list.` });
       }
+      await loadRecurring();
+      return true;
     },
-    [notify, loadRecurring],
+    [notify, notifyOther, loadRecurring],
   );
 
   // A merchant pick reads the recurring window, not the month.
@@ -333,7 +352,7 @@ export function Flow({
           onClearPick={clearPick}
           accounts={accounts}
           vocab={vocab}
-          notify={notify}
+          notify={notifyOther}
           onFiguresChanged={refreshFigures}
         />
       )}

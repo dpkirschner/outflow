@@ -1110,8 +1110,8 @@ button.fl-lane-figure {
 }
 .fl-rc-table th.fl-rc-col-spark { width: 92px; }
 .fl-rc-table th.fl-rc-col-change { width: 92px; }
-.fl-rc-table th.fl-rc-col-monthly { width: 104px; }
-.fl-rc-table th.fl-rc-col-last { width: 68px; }
+.fl-rc-table th.fl-rc-col-monthly { width: 120px; }
+.fl-rc-table th.fl-rc-col-last { width: 84px; }
 .fl-rc-table th.fl-rc-col-act { width: 76px; }
 .fl-rc-table td {
   padding: 6px 8px;
@@ -1151,11 +1151,14 @@ button.fl-lane-figure {
 .fl-wrap .fl-rc-pick:focus-visible {
   outline: none;
 }
-.fl-rc-pick:focus-visible::after {
-  box-shadow: inset 0 0 0 2px var(--lg-teal);
-}
+/* Selected = the 2px inset ring (the drill-down pattern). Focus is a
+   separate outline drawn inside it, so a focused selected row shows both. */
 .fl-rc-pick.on::after {
   box-shadow: inset 0 0 0 2px var(--lg-teal);
+}
+.fl-rc-pick:focus-visible::after {
+  outline: 2px solid var(--lg-teal);
+  outline-offset: -6px;
 }
 .fl-rc-name {
   max-width: 100%;
@@ -1196,6 +1199,15 @@ button.fl-lane-figure {
 .fl-rc-table tr.on .fl-rc-spark i:not(.sofar) {
   background: var(--lg-dim);
 }
+/* Faint edges fall below 3:1 on the hover and selected fills: lift them. */
+.fl-rc-table tr:hover .fl-rc-spark i.sofar,
+.fl-rc-table tr.on .fl-rc-spark i.sofar {
+  box-shadow: inset 0 0 0 1px var(--lg-dim);
+}
+.fl-rc-table tr:hover .fl-mini,
+.fl-rc-table tr.on .fl-mini {
+  border-color: var(--lg-dim);
+}
 .fl-rc-change {
   font-size: 12px;
   color: var(--lg-dim);
@@ -1233,13 +1245,43 @@ button.fl-lane-figure {
     opacity: 1;
   }
 }
-.fl-rc-ignored {
+.fl-nowrap {
+  white-space: nowrap;
+}
+/* Show all on the left; the ignored count as a quieter text control on
+   the right, since it's a footer, not a list action. */
+.fl-rc-foot {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.fl-rc-ignored-toggle {
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: var(--lg-faint);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.fl-rc-ignored-toggle:hover {
+  color: var(--lg-text);
+  text-decoration-color: var(--lg-dim);
+}
+/* Lines up with the table's cell padding. */
+.fl-rc-ignored {
+  margin-top: 0;
 }
 .fl-rc-ignored .fl-row {
   align-items: center;
+  padding: 7px 8px;
+  color: var(--lg-dim);
 }
 .fl-rc-restore {
   display: inline-flex;
@@ -1305,6 +1347,13 @@ button.fl-lane-figure {
   .fl-rc-table .fl-mini,
   .fl-rc-ignored .fl-mini {
     min-height: 32px;
+  }
+  .fl-rc-table .fl-sort,
+  .fl-rc-ignored-toggle {
+    min-height: 32px;
+  }
+  .fl-rc-table thead tr {
+    gap: 0 12px;
   }
 }
 

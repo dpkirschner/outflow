@@ -311,8 +311,14 @@ those capsules.
   month still in progress is an outlined bar, so a partial month doesn't
   read as a drop.
 - Ignore is the row action, waiting for hover or focus like the table's.
-  Ignored merchants collapse into an "N ignored" button that lists them
-  with Restore. Top eight first, then "Show all".
+  It's a deliberate exception to "upkeep stays off analysis screens": it
+  only changes what this list shows, and it's undone in place (Undo on the
+  toast, which covers several Ignores in a row, or Restore).
+- Top eight first. Under the table, "Show all" on the left and a quieter
+  "N ignored" text control on the right, which lists the ignored merchants
+  with Restore, aligned with the table's cells.
+- Focus and selection differ: selection is the 2px inset ring, focus an
+  outline drawn inside it.
 - Below 720px each merchant becomes two lines: name and cost, then spark,
   change, last charge and Ignore.
 

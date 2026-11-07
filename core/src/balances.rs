@@ -662,7 +662,7 @@ mod tests {
 
     #[test]
     fn investment_account_with_no_holdings_is_all_cash() {
-        // The one custodian HSA case: $3,210.00, no positions.
+        // An HSA that holds only cash (synthetic): no positions.
         let v = summarize(&[acct("hsa", AccountKind::Investment, 3_210_00)], &[], &[]);
         let hsa = find(&v, "hsa");
         assert_eq!(hsa.cash.cents(), 3_210_00);

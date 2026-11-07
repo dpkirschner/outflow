@@ -1,0 +1,486 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-07T07:28:01+00:00",
+  "title": "Design System: outflow",
+  "extensions": {
+    "colorMeta": {
+      "ink-bg": {
+        "role": "neutral",
+        "displayName": "Ink Background",
+        "canonical": "oklch(16% 0.015 255)",
+        "tonalRamp": [
+          "oklch(15% 0.008 255)",
+          "oklch(25% 0.009 255)",
+          "oklch(35% 0.011 255)",
+          "oklch(45% 0.013 255)",
+          "oklch(55% 0.014 255)",
+          "oklch(65% 0.014 255)",
+          "oklch(80% 0.012 255)",
+          "oklch(95% 0.009 255)"
+        ]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "oklch(21% 0.02 255)",
+        "tonalRamp": [
+          "oklch(15% 0.01 255)",
+          "oklch(25% 0.012 255)",
+          "oklch(35% 0.015 255)",
+          "oklch(45% 0.017 255)",
+          "oklch(55% 0.019 255)",
+          "oklch(65% 0.019 255)",
+          "oklch(80% 0.016 255)",
+          "oklch(95% 0.012 255)"
+        ]
+      },
+      "panel-recessed": {
+        "role": "neutral",
+        "displayName": "Recessed Panel",
+        "canonical": "oklch(18% 0.018 255)",
+        "tonalRamp": [
+          "oklch(15% 0.009 255)",
+          "oklch(25% 0.011 255)",
+          "oklch(35% 0.013 255)",
+          "oklch(45% 0.015 255)",
+          "oklch(55% 0.017 255)",
+          "oklch(65% 0.017 255)",
+          "oklch(80% 0.014 255)",
+          "oklch(95% 0.011 255)"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(28% 0.025 250)",
+        "tonalRamp": [
+          "oklch(15% 0.013 250)",
+          "oklch(25% 0.016 250)",
+          "oklch(35% 0.018 250)",
+          "oklch(45% 0.021 250)",
+          "oklch(55% 0.024 250)",
+          "oklch(65% 0.024 250)",
+          "oklch(80% 0.02 250)",
+          "oklch(95% 0.016 250)"
+        ]
+      },
+      "row-divider": {
+        "role": "neutral",
+        "displayName": "Row Divider",
+        "canonical": "oklch(24% 0.022 252)",
+        "tonalRamp": [
+          "oklch(15% 0.011 252)",
+          "oklch(25% 0.014 252)",
+          "oklch(35% 0.016 252)",
+          "oklch(45% 0.018 252)",
+          "oklch(55% 0.021 252)",
+          "oklch(65% 0.021 252)",
+          "oklch(80% 0.017 252)",
+          "oklch(95% 0.014 252)"
+        ]
+      },
+      "row-hover": {
+        "role": "neutral",
+        "displayName": "Row Hover",
+        "canonical": "oklch(19% 0.018 252)",
+        "tonalRamp": [
+          "oklch(15% 0.009 252)",
+          "oklch(25% 0.011 252)",
+          "oklch(35% 0.013 252)",
+          "oklch(45% 0.015 252)",
+          "oklch(55% 0.017 252)",
+          "oklch(65% 0.017 252)",
+          "oklch(80% 0.014 252)",
+          "oklch(95% 0.011 252)"
+        ]
+      },
+      "selected-fill": {
+        "role": "neutral",
+        "displayName": "Selected Fill",
+        "canonical": "oklch(29% 0.035 252)",
+        "tonalRamp": [
+          "oklch(15% 0.018 252)",
+          "oklch(25% 0.022 252)",
+          "oklch(35% 0.026 252)",
+          "oklch(45% 0.029 252)",
+          "oklch(55% 0.033 252)",
+          "oklch(65% 0.033 252)",
+          "oklch(80% 0.027 252)",
+          "oklch(95% 0.022 252)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "oklch(94% 0.01 250)",
+        "tonalRamp": [
+          "oklch(15% 0.005 250)",
+          "oklch(25% 0.006 250)",
+          "oklch(35% 0.007 250)",
+          "oklch(45% 0.008 250)",
+          "oklch(55% 0.009 250)",
+          "oklch(65% 0.009 250)",
+          "oklch(80% 0.008 250)",
+          "oklch(95% 0.006 250)"
+        ]
+      },
+      "text-dim": {
+        "role": "neutral",
+        "displayName": "Text Dim",
+        "canonical": "oklch(67% 0.025 255)",
+        "tonalRamp": [
+          "oklch(15% 0.013 255)",
+          "oklch(25% 0.016 255)",
+          "oklch(35% 0.018 255)",
+          "oklch(45% 0.021 255)",
+          "oklch(55% 0.024 255)",
+          "oklch(65% 0.024 255)",
+          "oklch(80% 0.02 255)",
+          "oklch(95% 0.016 255)"
+        ]
+      },
+      "text-faint": {
+        "role": "neutral",
+        "displayName": "Text Faint",
+        "canonical": "oklch(50% 0.025 255)",
+        "tonalRamp": [
+          "oklch(15% 0.013 255)",
+          "oklch(25% 0.016 255)",
+          "oklch(35% 0.018 255)",
+          "oklch(45% 0.021 255)",
+          "oklch(55% 0.024 255)",
+          "oklch(65% 0.024 255)",
+          "oklch(80% 0.02 255)",
+          "oklch(95% 0.016 255)"
+        ]
+      },
+      "field-teal": {
+        "role": "primary",
+        "displayName": "Field Teal",
+        "canonical": "oklch(79% 0.13 181)",
+        "tonalRamp": [
+          "oklch(15% 0.067 181)",
+          "oklch(25% 0.081 181)",
+          "oklch(35% 0.095 181)",
+          "oklch(45% 0.109 181)",
+          "oklch(55% 0.123 181)",
+          "oklch(65% 0.123 181)",
+          "oklch(80% 0.102 181)",
+          "oklch(95% 0.081 181)"
+        ]
+      },
+      "teal-wash": {
+        "role": "primary",
+        "displayName": "Teal Wash",
+        "canonical": "oklch(27% 0.04 180)",
+        "tonalRamp": [
+          "oklch(15% 0.02 180)",
+          "oklch(25% 0.025 180)",
+          "oklch(35% 0.029 180)",
+          "oklch(45% 0.034 180)",
+          "oklch(55% 0.038 180)",
+          "oklch(65% 0.038 180)",
+          "oklch(80% 0.031 180)",
+          "oklch(95% 0.025 180)"
+        ]
+      },
+      "teal-edge": {
+        "role": "primary",
+        "displayName": "Teal Edge",
+        "canonical": "oklch(41% 0.06 182)",
+        "tonalRamp": [
+          "oklch(15% 0.031 182)",
+          "oklch(25% 0.037 182)",
+          "oklch(35% 0.044 182)",
+          "oklch(45% 0.05 182)",
+          "oklch(55% 0.057 182)",
+          "oklch(65% 0.057 182)",
+          "oklch(80% 0.047 182)",
+          "oklch(95% 0.037 182)"
+        ]
+      },
+      "in-green": {
+        "role": "secondary",
+        "displayName": "In Green",
+        "canonical": "oklch(78% 0.15 163)",
+        "tonalRamp": [
+          "oklch(15% 0.077 163)",
+          "oklch(25% 0.093 163)",
+          "oklch(35% 0.109 163)",
+          "oklch(45% 0.126 163)",
+          "oklch(55% 0.142 163)",
+          "oklch(65% 0.142 163)",
+          "oklch(80% 0.118 163)",
+          "oklch(95% 0.093 163)"
+        ]
+      },
+      "out-red": {
+        "role": "secondary",
+        "displayName": "Out Red",
+        "canonical": "oklch(71% 0.16 22)",
+        "tonalRamp": [
+          "oklch(15% 0.082 22)",
+          "oklch(25% 0.099 22)",
+          "oklch(35% 0.117 22)",
+          "oklch(45% 0.134 22)",
+          "oklch(55% 0.151 22)",
+          "oklch(65% 0.151 22)",
+          "oklch(80% 0.125 22)",
+          "oklch(95% 0.099 22)"
+        ]
+      },
+      "note-blue": {
+        "role": "tertiary",
+        "displayName": "Note Blue",
+        "canonical": "oklch(71% 0.14 255)",
+        "tonalRamp": [
+          "oklch(15% 0.072 255)",
+          "oklch(25% 0.087 255)",
+          "oklch(35% 0.102 255)",
+          "oklch(45% 0.117 255)",
+          "oklch(55% 0.132 255)",
+          "oklch(65% 0.132 255)",
+          "oklch(80% 0.11 255)",
+          "oklch(95% 0.087 255)"
+        ]
+      },
+      "attention-amber": {
+        "role": "tertiary",
+        "displayName": "Attention Amber",
+        "canonical": "oklch(84% 0.16 84)",
+        "tonalRamp": [
+          "oklch(15% 0.082 84)",
+          "oklch(25% 0.099 84)",
+          "oklch(35% 0.117 84)",
+          "oklch(45% 0.134 84)",
+          "oklch(55% 0.151 84)",
+          "oklch(65% 0.151 84)",
+          "oklch(80% 0.125 84)",
+          "oklch(95% 0.099 84)"
+        ]
+      },
+      "kind-cash": {
+        "role": "tertiary",
+        "displayName": "Cash Ink",
+        "canonical": "oklch(82% 0.09 178)",
+        "tonalRamp": [
+          "oklch(15% 0.046 178)",
+          "oklch(25% 0.056 178)",
+          "oklch(35% 0.066 178)",
+          "oklch(45% 0.075 178)",
+          "oklch(55% 0.085 178)",
+          "oklch(65% 0.085 178)",
+          "oklch(80% 0.071 178)",
+          "oklch(95% 0.056 178)"
+        ]
+      },
+      "kind-credit": {
+        "role": "tertiary",
+        "displayName": "Credit Ink",
+        "canonical": "oklch(81% 0.1 293)",
+        "tonalRamp": [
+          "oklch(15% 0.051 293)",
+          "oklch(25% 0.062 293)",
+          "oklch(35% 0.073 293)",
+          "oklch(45% 0.084 293)",
+          "oklch(55% 0.095 293)",
+          "oklch(65% 0.095 293)",
+          "oklch(80% 0.078 293)",
+          "oklch(95% 0.062 293)"
+        ]
+      },
+      "kind-invest": {
+        "role": "tertiary",
+        "displayName": "Invest Ink",
+        "canonical": "oklch(88% 0.1 88)",
+        "tonalRamp": [
+          "oklch(15% 0.051 88)",
+          "oklch(25% 0.062 88)",
+          "oklch(35% 0.073 88)",
+          "oklch(45% 0.084 88)",
+          "oklch(55% 0.095 88)",
+          "oklch(65% 0.095 88)",
+          "oklch(80% 0.078 88)",
+          "oklch(95% 0.062 88)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "Product name in the header only."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Headline numbers in stat tiles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section headings on a screen."
+      },
+      "row-name": {
+        "displayName": "Row name",
+        "purpose": "Merchant or account name leading a row."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Table cells, explanations, button text."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Dates, sources, coverage and sync status."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase card headers and stat keys."
+      }
+    },
+    "shadows": [
+      {
+        "name": "active-row-marker",
+        "value": "inset 3px 0 0 #2dd4bf",
+        "purpose": "Leading-edge marker on the selected row; not a lift."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "0.15s",
+        "purpose": "Hover and chevron rotation."
+      },
+      {
+        "name": "slide-over",
+        "value": "transform 0.22s ease",
+        "purpose": "Detail panel sliding in."
+      },
+      {
+        "name": "scrim",
+        "value": "opacity 0.2s",
+        "purpose": "Scrim fade behind the slide-over."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow",
+        "value": "640px"
+      },
+      {
+        "name": "compact",
+        "value": "560px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Default action: Panel fill, hairline border.",
+      "html": "<button class=\"ds-btn\">Refresh</button>",
+      "css": ".ds-btn{font:13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#111823;border:1px solid #1e2a38;color:#e6edf3;cursor:pointer;transition:background .15s,border-color .15s}.ds-btn:hover{background:#16202e}.ds-btn:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}.ds-btn:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Key Button",
+      "kind": "button",
+      "refersTo": "button-key",
+      "description": "The one primary action in a group.",
+      "html": "<button class=\"ds-btn-key\">Pull</button>",
+      "css": ".ds-btn-key{font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#0f2e29;border:1px solid #1f5850;color:#2dd4bf;cursor:pointer;transition:border-color .15s}.ds-btn-key:hover{border-color:#2dd4bf}.ds-btn-key:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-priority or guarded actions (Reset, Unlink).",
+      "html": "<button class=\"ds-btn-ghost\">Unlink</button>",
+      "css": ".ds-btn-ghost{font:13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#111823;border:1px solid #1e2a38;color:#8b98a9;cursor:pointer}.ds-btn-ghost:hover{color:#e6edf3;background:#16202e}.ds-btn-ghost:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+    },
+    {
+      "name": "Window Picker",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "Segmented control for the time window.",
+      "html": "<span class=\"ds-seg\"><button>3mo</button><button class=\"on\">6mo</button><button>12mo</button><button>All</button></span>",
+      "css": ".ds-seg{display:inline-flex;background:#0e141d;border:1px solid #1e2a38;border-radius:8px;padding:2px;font:11.5px -apple-system,BlinkMacSystemFont,sans-serif}.ds-seg button{border:0;background:none;color:#8b98a9;padding:4px 9px;border-radius:6px;cursor:pointer;font:inherit}.ds-seg button:hover{color:#e6edf3}.ds-seg button.on{background:#1c2c40;color:#e6edf3}.ds-seg button:focus-visible{outline:2px solid #2dd4bf}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "nav-tab",
+      "description": "Header tabs with an attention badge.",
+      "html": "<nav class=\"ds-nav\"><a>Ledger</a><a>Balances</a><a class=\"on\">Settings<span class=\"ds-badge\">2</span></a></nav>",
+      "css": ".ds-nav{display:flex;gap:6px;font:12px -apple-system,BlinkMacSystemFont,sans-serif}.ds-nav a{padding:5px 11px;border-radius:7px;color:#5a6675;cursor:pointer}.ds-nav a:hover{color:#8b98a9}.ds-nav a.on{background:#152233;color:#e6edf3}.ds-badge{display:inline-block;margin-left:6px;min-width:16px;padding:0 5px;border-radius:8px;background:#fbbf24;color:#0a0e14;font-size:10px;font-weight:700;line-height:16px;text-align:center}"
+    },
+    {
+      "name": "Stat Tile",
+      "kind": "card",
+      "refersTo": "stat-tile",
+      "description": "Uppercase key over a tabular headline figure.",
+      "html": "<div class=\"ds-stat\"><div class=\"k\">Net worth</div><div class=\"v\">$48,210 <small>+1.8%</small></div></div>",
+      "css": ".ds-stat{background:#0e141d;border:1px solid #1e2a38;border-radius:10px;padding:12px 14px;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,sans-serif;width:200px}.ds-stat .k{font-size:10.5px;letter-spacing:.09em;color:#5a6675;text-transform:uppercase}.ds-stat .v{font-size:20px;font-weight:650;margin-top:5px;font-variant-numeric:tabular-nums}.ds-stat small{font-size:12px;color:#8b98a9;font-weight:500}"
+    },
+    {
+      "name": "Merchant Row",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "A card with a labelled header and clickable rows.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-head\">Recurring</div><div class=\"ds-row active\"><b>Synthetic Grocer</b><span class=\"amt\">$412</span></div><div class=\"ds-row\"><b>Example Streaming</b><span class=\"amt\">$16</span></div></div>",
+      "css": ".ds-card{background:#111823;border:1px solid #1e2a38;border-radius:12px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3;width:360px}.ds-head{padding:15px 16px 13px;border-bottom:1px solid #1e2a38;font-size:11px;letter-spacing:.1em;color:#8b98a9;text-transform:uppercase;font-weight:600}.ds-row{display:flex;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #172230;font-size:14px;cursor:pointer}.ds-row:last-child{border-bottom:0}.ds-row:hover{background:#0e1620}.ds-row.active{background:#0d1a26;box-shadow:inset 3px 0 0 #2dd4bf}.ds-row .amt{font-variant-numeric:tabular-nums;color:#f87171}"
+    },
+    {
+      "name": "Account Chip",
+      "kind": "chip",
+      "refersTo": "account-chip-cash",
+      "description": "Account label tinted by kind: cash, credit, investment.",
+      "html": "<span class=\"ds-src cash\">Checking (0000)</span> <span class=\"ds-src credit\">Card (3333)</span> <span class=\"ds-src invest\">Brokerage (2222)</span>",
+      "css": ".ds-src{font:600 10.5px -apple-system,BlinkMacSystemFont,sans-serif;padding:1px 6px;border-radius:4px;border:1px solid}.ds-src.cash{color:#7dd3c0;border-color:#1f4a44;background:#0f2420}.ds-src.credit{color:#c4b5fd;border-color:#3b2f66;background:#1a1533}.ds-src.invest{color:#f5d38a;border-color:#4a3a1f;background:#241d0f}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Field Notebook",
+    "overview": "outflow records observations, not verdicts. The person's own history is the baseline: a charge is \"unusual\" because it's unusual *for them*, never because it broke a budget. The interface reads like a well-kept notebook opened at a desk in the evening: a dark, calm page, dense rows of dated entries with tabular figures, and an annotation in the margin only where something deserves a second look.\n\nDensity is high and type is small, because the main reader sits at a desktop and wants many rows in view. Depth comes from tonal steps between near-black navy surfaces and hairline borders, not from shadows. Colour is an ink used for meaning: money in, money out, the kind of account, and things that need attention. The chrome around the data stays neutral so the figures carry the page.\n\nControls are tactile and clear. They sit quietly at rest but always look pressable: a visible border, a real hit area, and a distinct pressed and focused state.",
+    "keyCharacteristics": [
+      "Dark, single theme (`color-scheme: dark`); near-black navy page with slightly lifted panels.",
+      "System sans-serif throughout; all figures use tabular numerals.",
+      "One interactive accent (Field Teal); every other hue encodes data meaning.",
+      "Flat: hairline borders and tonal layering, no drop shadows on content.",
+      "Narrow reading column (940px max) centred on the page."
+    ],
+    "rules": [
+      {
+        "name": "The Meaning-Only Rule",
+        "body": "Every hue other than Field Teal encodes data meaning (in, out, account kind, attention). Chrome, layout and decoration stay on the neutral ramp. If a colour doesn't answer \"what kind of money, or does this need me?\", it shouldn't be there.",
+        "section": "colors"
+      },
+      {
+        "name": "The Not-Colour-Alone Rule",
+        "body": "In versus out is never told by green versus red alone. The sign, a label or the lane always carries it as well.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every money figure uses `font-variant-numeric: tabular-nums` and right-aligns in columns, so digits line up down the page.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Surfaces are separated by a 1px Hairline border or a tonal step, never by a shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the `--lg-*` custom properties in `app/src/ledger.css` for every new colour; they are the live token set.",
+      "Do keep money figures tabular and right-aligned.",
+      "Do give every control a visible border and a pressed and focused state, so it reads as pressable on the dark page.",
+      "Do put one Key button per action group, at most.",
+      "Do mirror token values into constants when SVG presentation attributes can't read CSS variables (as `Balances.tsx` does), and keep them in sync."
+    ],
+    "donts": [
+      "Don't use the legacy `theme.css` palette (`--bg`, `--card`, `--accent`, the teal-to-blue gradient) for new work. Only the auth gate, toast and a few fallbacks still read it.",
+      "Don't add drop shadows to content surfaces.",
+      "Don't use colour for decoration; see the Meaning-Only Rule.",
+      "Don't signal in versus out by colour alone.",
+      "Don't put destructive or upkeep actions on an analysis screen; they belong in Settings."
+    ]
+  }
+}

@@ -97,6 +97,9 @@ pub struct TxnQuery {
     /// Keep only the rows behind this Flow lane figure (`lane_of`). Reads
     /// every flag, so `filter.include_non_spending` doesn't matter here.
     pub lane: Option<Lane>,
+    /// Keep only this normalized merchant (`normalize_payee`), e.g. a
+    /// recurring merchant's key.
+    pub merchant: Option<String>,
     /// Keep only rows with no category.
     pub uncategorized: bool,
     /// Keep only money out (negative) or money in (positive).
@@ -119,6 +122,7 @@ impl Default for TxnQuery {
             source: None,
             flag: None,
             lane: None,
+            merchant: None,
             uncategorized: false,
             direction: None,
             min_cents: None,
@@ -156,6 +160,11 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
         .filter(|t| {
             q.lane
                 .is_none_or(|l| lane_of(t, kind(&t.account_id)) == Some(l))
+        })
+        .filter(|t| {
+            q.merchant
+                .as_deref()
+                .is_none_or(|m| normalize_payee(t.merchant()) == m)
         })
         .filter(|t| !q.uncategorized || t.category.is_none())
         .filter(|t| q.direction.is_none_or(|d| d.matches(t.amount.cents())))

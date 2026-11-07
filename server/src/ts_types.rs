@@ -89,6 +89,12 @@ fn render() -> String {
         );
     }
 
+    // --- core::recurring ---
+    {
+        use outflow_core::recurring::*;
+        decls!(&cfg, out, [Change, RecurringMerchant, RecurringView]);
+    }
+
     // --- core::ledger ---
     {
         use outflow_core::ledger::*;

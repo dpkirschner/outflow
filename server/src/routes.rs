@@ -10,8 +10,8 @@ use outflow_core::{
     activity, balance_history, detect, flow_lanes, position_history, positions, spend_by_category,
     summarize_balances, today_local, top_merchants, Account, AccountKind, ActivityFilter,
     ActivityRow, BalancesView, CategorySource, CategorySpend, DayTotals, FlowMonth, LedgerView,
-    Mark, MerchantSpend, Period, PositionFilter, PositionPoint, PositionRow, Subscription,
-    SyncEntry, Transaction, TxnFilter, TxnFlag,
+    Mark, MerchantSpend, Period, PositionFilter, PositionPoint, PositionRow, RecurringView,
+    Subscription, SyncEntry, Transaction, TxnFilter, TxnFlag,
 };
 use serde::{Deserialize, Serialize};
 
@@ -349,6 +349,8 @@ struct TxnQueryParams {
     /// Flow lane, e.g. "card_payment": exactly the rows behind that figure.
     /// Parsed in the handler (JSON 400 on a bad value, like `sort`).
     lane: Option<String>,
+    /// Normalized merchant, e.g. a recurring merchant's key.
+    merchant: Option<String>,
     /// true = only rows with no category.
     uncategorized: Option<bool>,
     /// "out" | "in": the amount's sign.
@@ -410,6 +412,7 @@ async fn transactions(
         source: p.source,
         flag: p.flag,
         lane,
+        merchant: p.merchant.filter(|s| !s.trim().is_empty()),
         uncategorized: p.uncategorized.unwrap_or(false),
         direction,
         min_cents: p.min_cents,
@@ -585,6 +588,59 @@ async fn clear_stream_mark(
 ) -> ApiResult<()> {
     with_store(&state, move |s| {
         s.clear_merchant_mark(&body.merchant)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct RecurringParams {
+    period: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+}
+
+/// The recurring list over the 12 months ending with the period's last month
+/// (default: this month). `period=2026-10` is the usual spelling.
+async fn recurring(
+    State(state): State<AppState>,
+    Query(p): Query<RecurringParams>,
+) -> ApiResult<RecurringView> {
+    let today = today_local();
+    let through = Period::resolve(
+        blank(p.period.as_deref()),
+        blank(p.since.as_deref()),
+        blank(p.until.as_deref()),
+        today,
+    )
+    .map_err(ApiError::bad_request)?
+    .map_or(today, |period| period.last_day());
+    let now = now_secs();
+    with_store(&state, move |s| {
+        outflow_core::recurring(s, through, now).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct IgnoredBody {
+    /// Normalized merchant, as `RecurringMerchant::merchant`.
+    merchant: String,
+    ignored: bool,
+}
+
+/// Set or clear the Ignored mark on a recurring merchant.
+async fn set_recurring_ignored(
+    State(state): State<AppState>,
+    Json(body): Json<IgnoredBody>,
+) -> ApiResult<()> {
+    if body.merchant.trim().is_empty() {
+        return Err(ApiError::bad_request("merchant is empty"));
+    }
+    with_store(&state, move |s| {
+        s.set_merchant_ignored(body.merchant.trim(), body.ignored)
             .map_err(|e| e.to_string())
     })
     .await
@@ -767,6 +823,8 @@ pub fn api_router() -> Router<AppState> {
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
         .route("/flow", get(flow))
+        .route("/recurring", get(recurring))
+        .route("/recurring/ignored", post(set_recurring_ignored))
         .route("/subscriptions", get(subscriptions))
         .route("/ledger", get(ledger))
         .route("/stream_occurrences", get(stream_occurrences))
@@ -1275,6 +1333,55 @@ mod tests {
         let (status, body) = get_json(app, "/transactions?lane=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(body["error"].as_str().unwrap().contains("bogus"));
+    }
+
+    /// /recurring lists a monthly merchant as of a chosen month, Ignore moves
+    /// it to `ignored`, and merchant= on /transactions shows its rows.
+    #[tokio::test]
+    async fn recurring_lists_ignores_and_drills_into_a_merchant() {
+        use chrono::{Local, TimeZone};
+        let at = |m: u32| {
+            Local
+                .with_ymd_and_hms(2026, m, 10, 12, 0, 0)
+                .single()
+                .unwrap()
+                .timestamp()
+        };
+        let mut txns: Vec<Transaction> = (8..=10)
+            .map(|m| {
+                let mut t = txn(&format!("sf{m}"), -1599, "STREAMFLIX.COM 1234");
+                t.posted = at(m);
+                t.transacted_at = Some(at(m));
+                t
+            })
+            .collect();
+        txns.push(txn("cafe", -1500, "Blue Bottle"));
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_transactions(&txns).unwrap();
+        let app = app_with_store(store);
+
+        let (status, body) = get_json(app.clone(), "/recurring?period=2026-10").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["month"], "2026-10");
+        assert_eq!(body["since"], "2025-11-01");
+        assert_eq!(body["until"], "2026-10-31");
+        assert_eq!(body["items"][0]["merchant"], "streamflix com");
+        assert_eq!(body["items"][0]["monthly_cents"], 1599);
+
+        let q = "/transactions?merchant=streamflix%20com&since=2025-11-01&until=2026-10-31";
+        assert_eq!(txn_ids(app.clone(), q).await, ["sf10", "sf8", "sf9"]);
+
+        let ignore = serde_json::json!({ "merchant": "streamflix com", "ignored": true });
+        assert_eq!(
+            post_status(app.clone(), "/recurring/ignored", ignore).await,
+            StatusCode::OK
+        );
+        let (_, body) = get_json(app.clone(), "/recurring?period=2026-10").await;
+        assert_eq!(body["items"].as_array().unwrap().len(), 0);
+        assert_eq!(body["ignored"][0]["merchant"], "streamflix com");
+
+        let (status, _) = get_json(app, "/recurring?period=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     // The /merchants handler flattens FilterParams too — same fix, same guard.

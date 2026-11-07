@@ -1447,6 +1447,34 @@ impl Store {
         Ok(())
     }
 
+    /// Normalized merchants carrying the Ignored mark (GLOSSARY: Recurring).
+    /// Until the ledger goes (ho-2mj.3.2), its `dismissed` mark counts too.
+    pub fn ignored_merchants(&self) -> rusqlite::Result<HashSet<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT pattern FROM merchant_overrides WHERE mark IN ('ignored', 'dismissed')",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect()
+    }
+
+    /// Set or clear the Ignored mark on a normalized merchant.
+    pub fn set_merchant_ignored(&self, merchant: &str, ignored: bool) -> rusqlite::Result<()> {
+        let key = merchant.to_lowercase();
+        if ignored {
+            self.conn.execute(
+                "INSERT INTO merchant_overrides (pattern, mark) VALUES (?1, 'ignored')
+                 ON CONFLICT(pattern) DO UPDATE SET mark = excluded.mark",
+                params![key],
+            )?;
+        } else {
+            self.conn.execute(
+                "DELETE FROM merchant_overrides WHERE pattern = ?1",
+                params![key],
+            )?;
+        }
+        Ok(())
+    }
+
     /// All merchant overrides, keyed by normalized merchant.
     pub fn merchant_marks(&self) -> rusqlite::Result<HashMap<String, Mark>> {
         let mut stmt = self

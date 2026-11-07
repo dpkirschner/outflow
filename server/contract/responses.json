@@ -110,6 +110,61 @@
     "saved_cents": 95000,
     "gap_cents": 95000
   },
+  "RecurringView": {
+    "month": "2026-11",
+    "since": "2025-12-01",
+    "until": "2026-11-30",
+    "in_progress": true,
+    "monthly_total_cents": 7800,
+    "items": [
+      {
+        "merchant": "example coffee co",
+        "name": "Example Coffee Co",
+        "cadence": "FewPerWeek",
+        "count": 36,
+        "median_cents": 650,
+        "monthly_cents": 7800,
+        "change": "Up",
+        "change_pct": 31.5,
+        "first_seen": 1739923200,
+        "last_seen": 1768435200,
+        "spark_cents": [
+          7100,
+          7400,
+          7900,
+          7600,
+          10000,
+          3200
+        ],
+        "category": "Dining",
+        "account_id": "acct-demo-card"
+      }
+    ],
+    "ignored": [
+      {
+        "merchant": "sample parking",
+        "name": "SAMPLE PARKING 0042",
+        "cadence": "FewPerWeek",
+        "count": 36,
+        "median_cents": 650,
+        "monthly_cents": 7800,
+        "change": "Steady",
+        "change_pct": null,
+        "first_seen": 1739923200,
+        "last_seen": 1768435200,
+        "spark_cents": [
+          7100,
+          7400,
+          7900,
+          7600,
+          10000,
+          3200
+        ],
+        "category": null,
+        "account_id": "acct-demo-card"
+      }
+    ]
+  },
   "Subscription": {
     "payee": "Sample Streaming",
     "cadence": "Yearly",

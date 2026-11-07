@@ -7,6 +7,7 @@ use outflow_core::{
     CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions,
     PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
+use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
 
 #[cfg(feature = "client")]
@@ -145,6 +146,17 @@ pub(crate) enum Cmd {
         posted_only: bool,
     },
     Subs,
+    /// Recurring merchants over the 12 months ending with the period's last
+    /// month (default: this month): cadence, usual monthly cost, change
+    /// (new / up / down >25% vs usual). --json prints the whole view,
+    /// ignored merchants included.
+    Recurring {
+        #[command(flatten)]
+        period: PeriodArgs,
+        /// List the ignored merchants instead.
+        #[arg(long)]
+        ignored: bool,
+    },
     Fix {
         txn_id: String,
         category: String,
@@ -224,6 +236,9 @@ pub(crate) struct TxnsArgs {
     /// Only the rows behind this Flow lane figure (`report --by monthly`).
     #[arg(long, value_enum)]
     pub lane: Option<LaneArg>,
+    /// Only this normalized merchant (the `merchant` key from `recurring`).
+    #[arg(long)]
+    pub merchant: Option<String>,
     /// Only rows with no category.
     #[arg(long)]
     pub uncategorized: bool,
@@ -615,6 +630,78 @@ fn cmd_subs(store: &Store) -> Result<(), String> {
     Ok(())
 }
 
+fn cmd_recurring(
+    store: &Store,
+    period: &PeriodArgs,
+    ignored: bool,
+    json: bool,
+) -> Result<(), String> {
+    let through = period.resolve()?.map_or_else(today_local, |p| p.last_day());
+    let now = now_secs();
+    let v = recurring(store, through, now).map_err(|e| format!("{e}"))?;
+    if json {
+        return json_out(&v);
+    }
+    let rows = if ignored { &v.ignored } else { &v.items };
+    println!(
+        "recurring {} to {}{}",
+        v.since,
+        v.until,
+        if v.in_progress {
+            " (month in progress)"
+        } else {
+            ""
+        }
+    );
+    if rows.is_empty() {
+        println!(
+            "{}",
+            if ignored {
+                "nothing ignored"
+            } else {
+                "no recurring merchants detected"
+            }
+        );
+        return Ok(());
+    }
+    for r in rows {
+        let change = match (r.change, r.change_pct) {
+            (Change::New, _) => "new".to_string(),
+            (Change::Up | Change::Down, Some(p)) => format!("{p:+.0}%"),
+            _ => String::new(),
+        };
+        println!(
+            "{:<28} {:<10} {:>10}/mo  {:<6} last {}  {}",
+            truncate(&r.name, 28),
+            cadence_label(r.cadence),
+            dollars(r.monthly_cents),
+            change,
+            date_label(r.last_seen),
+            r.merchant
+        );
+    }
+    if !ignored {
+        println!(
+            "total {}/mo · {} ignored",
+            dollars(v.monthly_total_cents),
+            v.ignored.len()
+        );
+    }
+    Ok(())
+}
+
+fn cadence_label(c: StreamCadence) -> &'static str {
+    match c {
+        StreamCadence::Daily => "~daily",
+        StreamCadence::FewPerWeek => "~3x/wk",
+        StreamCadence::Weekly => "weekly",
+        StreamCadence::FewPerMonth => "~4x/mo",
+        StreamCadence::Monthly => "monthly",
+        StreamCadence::Yearly => "yearly",
+        StreamCadence::Irregular => "irregular",
+    }
+}
+
 fn cmd_fix(store: &Store, txn_id: String, category: String, no_learn: bool) -> Result<(), String> {
     let rule = store
         .set_manual_category(&txn_id, &category, !no_learn)
@@ -645,6 +732,7 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
         source: a.source.clone(),
         flag: a.flag.map(FlagArg::to_flag),
         lane: a.lane.map(LaneArg::to_lane),
+        merchant: a.merchant.clone(),
         uncategorized: a.uncategorized,
         direction: a.direction.map(DirectionArg::to_direction),
         min_cents: None,
@@ -1165,6 +1253,7 @@ fn run() -> Result<(), String> {
             }
             cmd_subs(&store)
         }
+        Cmd::Recurring { period, ignored } => cmd_recurring(&store, &period, ignored, cli.json),
         Cmd::Fix {
             txn_id,
             category,

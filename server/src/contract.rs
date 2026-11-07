@@ -11,6 +11,7 @@
 
 use std::path::PathBuf;
 
+use chrono::NaiveDate;
 use outflow_core::balances::{
     AccountBalance, BalancesView, DayTotals, Group, GroupBalance, HoldingRow, PositionPoint,
     PositionRow, Totals,
@@ -24,6 +25,7 @@ use outflow_core::model::{
 };
 use outflow_core::perks::{Cap, CardStatus, Finding, FindingKind, Offer, PerksReport, Reward};
 use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, MovedLane, TxnPage};
+use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
 use outflow_core::subscriptions::{Cadence, RhythmEntry, StreamCadence, Subscription, Trend};
 use outflow_core::{ActivityRow, Money};
 use serde::Serialize;
@@ -182,6 +184,42 @@ fn subscription() -> Subscription {
         first_seen: T0 - 730 * DAY,
         last_seen: T0,
         total_cents: -29_700,
+    }
+}
+
+fn recurring_merchant() -> RecurringMerchant {
+    RecurringMerchant {
+        merchant: "example coffee co".into(),
+        name: "Example Coffee Co".into(),
+        cadence: StreamCadence::FewPerWeek,
+        count: 36,
+        median_cents: 650,
+        monthly_cents: 7_800,
+        change: Change::Up,
+        change_pct: Some(31.5),
+        first_seen: T0 - 330 * DAY,
+        last_seen: T0,
+        spark_cents: vec![7_100, 7_400, 7_900, 7_600, 10_000, 3_200],
+        category: Some("Dining".into()),
+        account_id: "acct-demo-card".into(),
+    }
+}
+
+fn recurring_view() -> RecurringView {
+    let mut ignored = recurring_merchant();
+    ignored.merchant = "sample parking".into();
+    ignored.name = "SAMPLE PARKING 0042".into();
+    ignored.change = Change::Steady;
+    ignored.change_pct = None;
+    ignored.category = None;
+    RecurringView {
+        month: "2026-11".into(),
+        since: NaiveDate::from_ymd_opt(2025, 12, 1).unwrap(),
+        until: NaiveDate::from_ymd_opt(2026, 11, 30).unwrap(),
+        in_progress: true,
+        monthly_total_cents: 7_800,
+        items: vec![recurring_merchant()],
+        ignored: vec![ignored],
     }
 }
 
@@ -580,6 +618,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("CategorySpend", j(category_spend())),
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
+        ("RecurringView", j(recurring_view())),
         ("Subscription", j(subscription())),
         ("LedgerView", j(ledger_view())),
         ("Stream", j(stream())),

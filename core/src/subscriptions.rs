@@ -58,7 +58,7 @@ pub fn normalize_payee(s: &str) -> String {
     out.trim().to_string()
 }
 
-fn median(sorted: &[i64]) -> i64 {
+pub(crate) fn median(sorted: &[i64]) -> i64 {
     sorted[sorted.len() / 2]
 }
 
@@ -188,7 +188,7 @@ pub struct RhythmEntry {
     pub spark_cents: Vec<i64>,
 }
 
-const MONTH_DAYS: f64 = 30.44;
+pub(crate) const MONTH_DAYS: f64 = 30.44;
 /// Number of trailing months drawn in the rhythm strip.
 const SPARK_MONTHS: usize = 6;
 
@@ -322,6 +322,27 @@ fn trend_dir(pct: f64) -> Trend {
 /// amount range/median, monthly rate, and trend (completed months only, per
 /// `now`). Sorted by monthly estimate desc.
 pub fn detect_rhythms(txns: &[Transaction], now: i64) -> Vec<RhythmEntry> {
+    let mut out: Vec<RhythmEntry> = rhythm_groups(txns)
+        .into_iter()
+        .map(|g| build_rhythm(g.merchant, &g.items, g.cadence, g.med_gap, now))
+        .collect();
+    out.sort_by_key(|x| std::cmp::Reverse(x.monthly_estimate_cents));
+    out
+}
+
+/// A merchant that passed the detector's gates: its Spending outflows sorted
+/// by behavioral date, the cadence, and the median gap in days.
+pub(crate) struct RhythmGroup<'a> {
+    pub merchant: String,
+    pub items: Vec<&'a Transaction>,
+    pub cadence: StreamCadence,
+    pub med_gap: f64,
+}
+
+/// The detector's gates on their own: group Spending outflows by normalized
+/// merchant, keep merchants with at least `MIN_OCCURRENCES` charges spaced
+/// regularly. Unordered.
+pub(crate) fn rhythm_groups(txns: &[Transaction]) -> Vec<RhythmGroup<'_>> {
     let mut groups: HashMap<String, Vec<&Transaction>> = HashMap::new();
     for t in txns
         .iter()
@@ -347,10 +368,13 @@ pub fn detect_rhythms(txns: &[Transaction], now: i64) -> Vec<RhythmEntry> {
             Some(c) => c,
             None => continue,
         };
-        out.push(build_rhythm(merchant, &items, cadence, med_gap, now));
+        out.push(RhythmGroup {
+            merchant,
+            items,
+            cadence,
+            med_gap,
+        });
     }
-
-    out.sort_by_key(|x| std::cmp::Reverse(x.monthly_estimate_cents));
     out
 }
 

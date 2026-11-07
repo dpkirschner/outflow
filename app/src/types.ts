@@ -283,6 +283,97 @@ export type Subscription = {
 };
 
 /**
+ * How a recurring merchant's cost moved.
+ */
+export type Change = "New" | "Up" | "Down" | "Steady";
+
+/**
+ * One recurring merchant.
+ */
+export type RecurringMerchant = {
+  /**
+   * Normalized merchant (`normalize_payee`): the key for `merchant=` on
+   * `/transactions` and for the Ignored mark.
+   */
+  merchant: string,
+  /**
+   * The merchant as the bank writes it most often, for display.
+   */
+  name: string,
+  cadence: StreamCadence,
+  /**
+   * Charges in the window.
+   */
+  count: number,
+  /**
+   * Median charge, positive = money spent.
+   */
+  median_cents: number,
+  /**
+   * Usual monthly cost: mean of the completed months since the first
+   * charge in the window (months with no charge count as $0). Positive.
+   */
+  monthly_cents: number,
+  change: Change,
+  /**
+   * Signed % of the last completed month against its usual; `None` with
+   * fewer than two completed months.
+   */
+  change_pct: number | null,
+  /**
+   * Behavioral date (epoch seconds) of the first and last charge in the
+   * window.
+   */
+  first_seen: number,
+  last_seen: number,
+  /**
+   * Spend per month, `SPARK_MONTHS` long, oldest first, ending at the
+   * chosen month (which may still be in progress). Positive.
+   */
+  spark_cents: Array<number>,
+  /**
+   * Most common category, if any charge has one.
+   */
+  category: string | null,
+  /**
+   * The account most charges land on.
+   */
+  account_id: string,
+};
+
+/**
+ * The recurring list as of one month.
+ */
+export type RecurringView = {
+  /**
+   * The chosen month, `YYYY-MM`: the window's last month.
+   */
+  month: string,
+  /**
+   * Window bounds, `YYYY-MM-DD`, both inclusive: pass them as
+   * `since`/`until` to `/transactions` to see the rows behind a merchant.
+   */
+  since: string,
+  until: string,
+  /**
+   * Whether the chosen month is still in progress.
+   */
+  in_progress: boolean,
+  /**
+   * Sum of `monthly_cents` over `items`.
+   */
+  monthly_total_cents: number,
+  /**
+   * Not ignored, by monthly cost (largest first).
+   */
+  items: Array<RecurringMerchant>,
+  /**
+   * Ignored merchants that are still detected, same order.
+   */
+  ignored: Array<RecurringMerchant>,
+};
+
+/**
  * How often a stream recurs, classified from the median inter-occurrence
  * interval. Distinct from `Cadence` (Monthly/Yearly, used by `detect`) — a
  * stream can be daily or weekly. The UI maps each variant to a badge label.

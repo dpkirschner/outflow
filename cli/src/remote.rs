@@ -130,6 +130,7 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         | Cmd::Balances { .. }
         | Cmd::Holdings(_)
         | Cmd::Activity(_)
+        | Cmd::Recurring { .. }
         | Cmd::Txns(_) => unreachable!("handled by read_path"),
         Cmd::Matches { action } => match action {
             MatchCmd::List { status } => match status {
@@ -221,6 +222,13 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             period_q(a.period.resolve_at(today)?, &mut q);
             with_query("/activity", &q)
         }
+        // --ignored only picks which list the text printer shows; the JSON
+        // view always carries both.
+        Cmd::Recurring { period, .. } => {
+            let mut q = Vec::new();
+            period_q(period.resolve_at(today)?, &mut q);
+            with_query("/recurring", &q)
+        }
         Cmd::Txns(a) => {
             let mut q = Vec::new();
             let mut push = |k: &str, v: String| q.push(format!("{k}={v}"));
@@ -241,6 +249,9 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             }
             if let Some(l) = &a.lane {
                 push("lane", l.to_lane().as_str().into());
+            }
+            if let Some(m) = &a.merchant {
+                push("merchant", enc(m));
             }
             if a.uncategorized {
                 push("uncategorized", "true".into());
@@ -286,6 +297,16 @@ mod tests {
 
     fn ok(args: &[&str]) -> String {
         path(args).unwrap().expect("a read path")
+    }
+
+    #[test]
+    fn recurring_and_merchant_filter_paths() {
+        assert_eq!(ok(&["recurring"]), "/recurring");
+        assert_eq!(
+            ok(&["recurring", "--period", "last-month"]),
+            "/recurring?period=2026-10"
+        );
+        assert!(ok(&["txns", "--merchant", "streamflix com"]).contains("merchant=streamflix%20com"));
     }
 
     #[test]

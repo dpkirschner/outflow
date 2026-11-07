@@ -9,6 +9,7 @@ pub mod period;
 pub mod perks;
 pub mod plaid;
 pub mod query;
+pub mod recurring;
 pub mod store;
 pub mod subscriptions;
 pub mod transfers;
@@ -46,6 +47,7 @@ pub use query::{
     Direction, FlowMonth, Lane, MerchantSpend, MovedFlow, MovedLane, SortKey, TxnFilter, TxnPage,
     TxnQuery,
 };
+pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{
     detect, detect_rhythms, normalize_payee, Cadence, RhythmEntry, StreamCadence, Subscription,

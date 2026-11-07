@@ -1568,3 +1568,36 @@ body:has(.lg-app) {
   border-radius: 4px;
   padding: 0 4px;
 }
+
+/* settings screen: upkeep sections stacked (Connections, review, categorize, reset) */
+.st-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.st-section + .st-section {
+  border-top: 1px solid var(--lg-line);
+  padding-top: 22px;
+}
+.st-blurb {
+  color: var(--lg-dim);
+  font-size: 12px;
+  margin: 8px 0 0;
+  max-width: 68ch;
+}
+.st-danger h2 {
+  color: var(--lg-red);
+}
+.st-badge {
+  display: inline-block;
+  margin-left: 6px;
+  min-width: 16px;
+  padding: 0 5px !important;
+  border-radius: 8px !important;
+  background: var(--lg-amber);
+  color: var(--lg-bg) !important;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}

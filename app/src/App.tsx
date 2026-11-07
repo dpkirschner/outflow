@@ -8,18 +8,20 @@ import { StreamsCard, type SortMode } from "./components/ledger/Streams";
 import { StreamSlideOver } from "./components/ledger/SlideOver";
 import { coverageText } from "./components/ledger/labels";
 import { Balances } from "./components/Balances";
-import { Connections } from "./components/Connections";
-import { MatchReview } from "./components/MatchReview";
 import { Outflows } from "./components/Outflows";
+import { Settings } from "./components/Settings";
 
-type Tab = "ledger" | "outflows" | "balances" | "review" | "connections";
+type Tab = "ledger" | "outflows" | "balances" | "settings";
 
 export default function App() {
-  // A Plaid OAuth return must land on Connections so Link can resume there.
+  // A Plaid OAuth return must land on Settings (Connections) so Link can
+  // resume there.
   const [tab, setTab] = useState<Tab>(
-    window.location.pathname === "/oauth-return" ? "connections" : "ledger",
+    window.location.pathname === "/oauth-return" ? "settings" : "ledger",
   );
-  const [reviewCount, setReviewCount] = useState(0);
+  // Upkeep that needs a look: proposed card-payment matches + connections
+  // not "ok". Shown as a badge on the Settings tab.
+  const [attention, setAttention] = useState(0);
   const [view, setView] = useState<LedgerView | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vocab, setVocab] = useState<string[]>([]);
@@ -50,18 +52,19 @@ export default function App() {
   const reload = useCallback(
     async (w: Window) => {
       try {
-        const [v, accts, cats, card, pending] = await Promise.all([
+        const [v, accts, cats, card, pending, items] = await Promise.all([
           api.ledger(w),
           api.accounts(),
           api.categories(),
           api.hasCreditAccount(),
           api.matches("proposed").catch(() => []),
+          api.plaidItems().catch(() => []),
         ]);
         setView(v);
         setAccounts(accts);
         setVocab(cats);
         setHasCard(card);
-        setReviewCount(pending.length);
+        setAttention(pending.length + items.filter((it) => it.status !== "ok").length);
         // Keep an open slide-over in sync with fresh data (or close it if the
         // stream moved out of the streams/committed lists, e.g. dismissed).
         setOpen((cur) =>
@@ -175,29 +178,6 @@ export default function App() {
       const r = await api.pullLive();
       return `Pulled ${r.accounts} account(s): ${r.added} added, ${r.updated} updated`;
     });
-  const onCategorize = () =>
-    act(async () => {
-      const r = await api.categorize();
-      return `Categorized ${r.rule} by rule · ${r.remaining} left`;
-    });
-  const onCategorizeLlm = () =>
-    act(async () => {
-      const r = await api.categorize();
-      const m = await api.categorizeLlm();
-      return `Categorized ${r.rule} by rule · ${m} by AI`;
-    });
-  const onReset = () => {
-    if (
-      !window.confirm(
-        "Clear all pulled data (accounts + transactions)? Learned rules are kept. Then hit Pull.",
-      )
-    )
-      return;
-    void act(async () => {
-      await api.resetData();
-      return "Data cleared — hit Pull to re-fetch.";
-    });
-  };
   const onWindow = (w: Window) => {
     setWin(w);
     void reload(w);
@@ -234,28 +214,19 @@ export default function App() {
             Balances
           </span>
           <span
-            className={tab === "review" ? "on" : "lg-navlink"}
-            onClick={() => setTab("review")}
+            className={tab === "settings" ? "on" : "lg-navlink"}
+            onClick={() => setTab("settings")}
+            title={attention > 0 ? `${attention} thing(s) need a look` : undefined}
           >
-            Review{reviewCount > 0 ? ` · ${reviewCount}` : ""}
-          </span>
-          <span
-            className={tab === "connections" ? "on" : "lg-navlink"}
-            onClick={() => setTab("connections")}
-          >
-            Connections
+            Settings
+            {attention > 0 && <span className="st-badge">{attention}</span>}
           </span>
         </span>
       </div>
 
-      {tab === "connections" ? (
+      {tab === "settings" ? (
         <>
-          <Connections notify={notify} onChanged={() => void reload(win)} />
-          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
-        </>
-      ) : tab === "review" ? (
-        <>
-          <MatchReview notify={notify} onChanged={() => void reload(win)} />
+          <Settings notify={notify} onChanged={() => void reload(win)} />
           {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "balances" ? (
@@ -289,16 +260,13 @@ export default function App() {
         onWindow={onWindow}
         onPull={onPull}
         onRefresh={() => reload(win)}
-        onCategorize={onCategorize}
-        onCategorizeLlm={onCategorizeLlm}
-        onReset={onReset}
       />
 
       {loading ? (
         <div className="lg-empty">Loading…</div>
       ) : empty ? (
         <div className="lg-empty">
-          No data yet — open <b>Connections</b> to link your banks through Plaid.
+          No data yet — open <b>Settings</b> to link your banks through Plaid.
         </div>
       ) : (
         view && (

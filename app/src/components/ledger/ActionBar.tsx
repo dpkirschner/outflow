@@ -19,9 +19,6 @@ export function ActionBar({
   onWindow,
   onPull,
   onRefresh,
-  onCategorize,
-  onCategorizeLlm,
-  onReset,
 }: {
   accounts: Account[];
   busy: boolean;
@@ -29,9 +26,6 @@ export function ActionBar({
   onWindow: (w: Window) => void;
   onPull: () => void;
   onRefresh: () => void;
-  onCategorize: () => void;
-  onCategorizeLlm: () => void;
-  onReset: () => void;
 }) {
   return (
     <div className="lg-bar">
@@ -40,15 +34,6 @@ export function ActionBar({
       </button>
       <button className="lg-pill" disabled={busy} onClick={onRefresh}>
         Refresh
-      </button>
-      <button className="lg-pill" disabled={busy} onClick={onCategorize}>
-        Categorize
-      </button>
-      <button className="lg-pill" disabled={busy} onClick={onCategorizeLlm}>
-        Categorize · AI
-      </button>
-      <button className="lg-pill ghost" disabled={busy} onClick={onReset}>
-        Reset
       </button>
       <span className="lg-win">
         {WINDOWS.map((w) => (

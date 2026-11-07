@@ -94,7 +94,7 @@ one-glance check of which DB it opened. An empty/fresh file is the usual
 reason "no data shows".
 
 Plaid against sandbox: set `OUTFLOW_PLAID_CLIENT_ID`, `OUTFLOW_PLAID_SECRET`,
-`OUTFLOW_PLAID_ENV=sandbox`, open the Connections tab, link institution
+`OUTFLOW_PLAID_ENV=sandbox`, open Settings → Connections, link institution
 `user_good`/`pass_good`. Production setup lives in DEPLOYMENT.md.
 
 Makefile shortcuts: `make test` / `make web` / `make server` / `make run` /

@@ -47,7 +47,7 @@ pub struct SyncPage {
 /// fall to `Other`.
 ///
 /// Every HSA is an investment account, whichever type the provider reports
-/// (one custodian says `investment`, another custodian says `depository`): it's money meant to
+/// (one custodian says `investment`, another says `depository`): it's money meant to
 /// be invested, so its uninvested balance should read as idle cash in
 /// Investments, not as spendable cash beside checking. Its bank transactions
 /// still sync as usual.
@@ -409,8 +409,8 @@ pub fn parse_holdings_get(json: &str) -> Result<(Vec<Security>, Vec<Holding>), S
 /// which is what the store keys on — without this, `INSERT OR REPLACE` keeps
 /// only the last row and the rest of the position silently vanishes.
 ///
-/// Two steps, both seen in a real 401(k) provider response: (1) byte-identical
-/// rows are dropped as repeats — the 401(k) provider sent each of two lots four times,
+/// Two steps, both seen in a real 401(k) response: (1) byte-identical
+/// rows are dropped as repeats — the provider sent each of two lots four times,
 /// and only the distinct lots summed to the account balance; (2) the
 /// remaining lots of one security are summed: quantity exactly (decimal
 /// text), value in cents, cost basis only when every lot has one. Price,
@@ -860,7 +860,7 @@ mod tests {
         assert!(page.removed_ids.is_empty() && page.pending_superseded.is_empty());
     }
 
-    // Shape taken from a real Vanguard /investments/holdings/get: a cash sweep
+    // Synthetic, in the shape of a brokerage /investments/holdings/get: a cash sweep
     // (VMFXX, is_cash_equivalent), a no-ticker warrant with null cost basis,
     // and a fractional-share ETF.
     const HOLDINGS: &str = r#"{
@@ -886,7 +886,7 @@ mod tests {
       ]
     }"#;
 
-    // Synthetic, in the shape an 401(k) provider returned: a no-ticker
+    // Synthetic, in the shape a 401(k) provider returned: a no-ticker
     // target-date fund whose two lots each arrive three times. Only the
     // distinct lots (100.5 + 200.25 shares @ $10) add up to the balance.
     #[test]

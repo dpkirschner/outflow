@@ -116,10 +116,13 @@ export const flowMonth: FlowMonth = {
   "year": 2026,
   "month": 1,
   "in_cents": 500000,
+  "in_uncategorized_cents": 15000,
   "out_cents": 310000,
   "refunds_cents": 2500,
   "moved": {
     "card_payment_cents": 120000,
+    "card_payment_bank_cents": 120000,
+    "card_payment_card_cents": 118000,
     "invest": {
       "out_cents": 50000,
       "in_cents": 0

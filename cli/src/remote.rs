@@ -239,6 +239,15 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             if let Some(f) = &a.flag {
                 push("flag", f.wire().into());
             }
+            if let Some(l) = &a.lane {
+                push("lane", l.to_lane().as_str().into());
+            }
+            if a.uncategorized {
+                push("uncategorized", "true".into());
+            }
+            if let Some(d) = &a.direction {
+                push("direction", d.wire().into());
+            }
             if a.posted_only {
                 push("pending", "false".into());
             }
@@ -340,6 +349,24 @@ mod tests {
         assert_eq!(
             ok(&["txns", "--limit", "10", "--period", "2026-11"]),
             "/transactions?sort=date&dir=desc&limit=10&offset=0&period=2026-11"
+        );
+    }
+
+    #[test]
+    fn txns_lane_filters_go_on_the_wire() {
+        assert_eq!(
+            ok(&[
+                "txns",
+                "--lane",
+                "card-payment",
+                "--direction",
+                "out",
+                "--uncategorized",
+                "--period",
+                "2026-11"
+            ]),
+            "/transactions?lane=card_payment&uncategorized=true&direction=out\
+             &sort=date&dir=desc&limit=50&offset=0&period=2026-11"
         );
     }
 

@@ -143,10 +143,13 @@ fn flow_month() -> FlowMonth {
         year: 2026,
         month: 1,
         in_cents: 500_000,
+        in_uncategorized_cents: 15_000,
         out_cents: 310_000,
         refunds_cents: 2_500,
         moved: MovedLane {
             card_payment_cents: 120_000,
+            card_payment_bank_cents: 120_000,
+            card_payment_card_cents: 118_000,
             invest: MovedFlow {
                 out_cents: 50_000,
                 in_cents: 0,

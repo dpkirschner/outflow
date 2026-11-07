@@ -51,7 +51,11 @@ investment account's uninvested cash is a synthetic `cash:uninvested`
 row), `activity [--account --ticker --type] [--period P | --since D --until D]`
 (investment transactions: buys, sells, dividends, contributions; amount = cash
 effect), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`):
-`txns [... --period P | --since D --until D]`, `accounts`, `matches`, `status`.
+`txns [... --lane in|out|card-payment|invest|save|loan-paydown|between
+--direction out|in --uncategorized] [--period P | --since D --until D]`
+(`--lane` = exactly the rows behind a `report --by monthly` figure; on a
+card payment `--direction out` = bank side, `in` = card side), `accounts`,
+`matches`, `status`.
 DB path from `--db` or `OUTFLOW_DB`.
 
 One date group everywhere (`core::period`): `--period` takes `2026-11`,

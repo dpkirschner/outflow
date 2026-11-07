@@ -177,6 +177,16 @@ export type MerchantSpend = {
 };
 
 /**
+ * The Flow lane (or Moved group) a transaction is counted in.
+ */
+export type Lane = "in" | "out" | "card_payment" | "invest" | "save" | "loan_paydown" | "between";
+
+/**
+ * Money out (negative amount) or in (positive).
+ */
+export type Direction = "out" | "in";
+
+/**
  * One Moved group's money, seen from the spending-side accounts (checking
  * and credit). `out_cents` left them, `in_cents` came back; both positive.
  */
@@ -196,6 +206,14 @@ export type MovedLane = {
    * (card not linked, or paid from an unlinked bank).
    */
   card_payment_cents: number,
+  /**
+   * Card payments seen leaving checking.
+   */
+  card_payment_bank_cents: number,
+  /**
+   * Card payments seen arriving on a card.
+   */
+  card_payment_card_cents: number,
   invest: MovedFlow,
   save: MovedFlow,
   loan_paydown: MovedFlow,
@@ -215,6 +233,10 @@ export type FlowMonth = {
    * Income-type inflows, plus inflows not categorized yet.
    */
   in_cents: number,
+  /**
+   * The part of `in_cents` with no category yet.
+   */
+  in_uncategorized_cents: number,
   /**
    * Spending net of refunds (positive = money spent).
    */

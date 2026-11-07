@@ -78,6 +78,8 @@ fn render() -> String {
                 TxnPage,
                 CategorySpend,
                 MerchantSpend,
+                Lane,
+                Direction,
                 MovedFlow,
                 MovedLane,
                 FlowMonth,

@@ -4,8 +4,8 @@ use outflow_core::{
     account_display_label, activity, balance_history, detect, evaluate_perks, flow_lanes,
     load_offers, parse_fixture, position_history, positions, search_transactions,
     spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
-    CategorySource, FindingKind, MatchStatus, Money, Offer, Period, PerkOptions, PositionFilter,
-    Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer, Period, PerkOptions,
+    PositionFilter, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use std::process::ExitCode;
 
@@ -221,6 +221,15 @@ pub(crate) struct TxnsArgs {
     /// Keep only this flag (transfer/card-payment imply --show-excluded).
     #[arg(long, value_enum)]
     pub flag: Option<FlagArg>,
+    /// Only the rows behind this Flow lane figure (`report --by monthly`).
+    #[arg(long, value_enum)]
+    pub lane: Option<LaneArg>,
+    /// Only rows with no category.
+    #[arg(long)]
+    pub uncategorized: bool,
+    /// Only money out or money in (on a card payment: bank or card side).
+    #[arg(long, value_enum)]
+    pub direction: Option<DirectionArg>,
     #[command(flatten)]
     pub period: PeriodArgs,
     #[arg(long)]
@@ -287,6 +296,56 @@ impl FlagArg {
             FlagArg::Invest => "Invest",
             FlagArg::Save => "Save",
             FlagArg::LoanPaydown => "LoanPaydown",
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+pub(crate) enum LaneArg {
+    In,
+    Out,
+    CardPayment,
+    Invest,
+    Save,
+    LoanPaydown,
+    /// Between own accounts.
+    Between,
+}
+
+impl LaneArg {
+    pub(crate) fn to_lane(self) -> Lane {
+        match self {
+            LaneArg::In => Lane::In,
+            LaneArg::Out => Lane::Out,
+            LaneArg::CardPayment => Lane::CardPayment,
+            LaneArg::Invest => Lane::Invest,
+            LaneArg::Save => Lane::Save,
+            LaneArg::LoanPaydown => Lane::LoanPaydown,
+            LaneArg::Between => Lane::Between,
+        }
+    }
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+pub(crate) enum DirectionArg {
+    Out,
+    In,
+}
+
+impl DirectionArg {
+    pub(crate) fn to_direction(self) -> Direction {
+        match self {
+            DirectionArg::Out => Direction::Out,
+            DirectionArg::In => Direction::In,
+        }
+    }
+
+    /// Wire spelling (server mode).
+    #[cfg_attr(not(feature = "client"), allow(dead_code))]
+    pub(crate) fn wire(self) -> &'static str {
+        match self {
+            DirectionArg::Out => "out",
+            DirectionArg::In => "in",
         }
     }
 }
@@ -585,6 +644,9 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
         category: a.category.clone(),
         source: a.source.clone(),
         flag: a.flag.map(FlagArg::to_flag),
+        lane: a.lane.map(LaneArg::to_lane),
+        uncategorized: a.uncategorized,
+        direction: a.direction.map(DirectionArg::to_direction),
         min_cents: None,
         max_cents: None,
         sort: a.sort.to_key(),

@@ -346,6 +346,13 @@ struct TxnQueryParams {
     source: Option<String>,
     /// serde variant name, e.g. "Transfer" — implies include_non_spending.
     flag: Option<TxnFlag>,
+    /// Flow lane, e.g. "card_payment": exactly the rows behind that figure.
+    /// Parsed in the handler (JSON 400 on a bad value, like `sort`).
+    lane: Option<String>,
+    /// true = only rows with no category.
+    uncategorized: Option<bool>,
+    /// "out" | "in": the amount's sign.
+    direction: Option<String>,
     min_cents: Option<i64>,
     max_cents: Option<i64>,
     sort: Option<String>,
@@ -376,6 +383,20 @@ async fn transactions(
         Some(s) => outflow_core::SortKey::from_str(s)
             .ok_or_else(|| ApiError::bad_request(format!("bad sort key {s:?}")))?,
     };
+    let lane = match p.lane.as_deref() {
+        None => None,
+        Some(s) => Some(
+            outflow_core::Lane::from_str(s)
+                .ok_or_else(|| ApiError::bad_request(format!("bad lane {s:?}")))?,
+        ),
+    };
+    let direction = match p.direction.as_deref() {
+        None => None,
+        Some(s) => Some(
+            outflow_core::Direction::from_str(s)
+                .ok_or_else(|| ApiError::bad_request(format!("bad direction {s:?}")))?,
+        ),
+    };
     let mut filter = p.to_filter()?;
     // Filtering BY a suppressed flag only makes sense with those rows visible.
     if p.flag.is_some_and(TxnFlag::is_moved) {
@@ -388,6 +409,9 @@ async fn transactions(
         category: p.category,
         source: p.source,
         flag: p.flag,
+        lane,
+        uncategorized: p.uncategorized.unwrap_or(false),
+        direction,
         min_cents: p.min_cents,
         max_cents: p.max_cents,
         sort,
@@ -1209,6 +1233,48 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "body: {body}");
         assert_eq!(body["total"], 1);
         assert_eq!(body["items"][0]["payee"], "Blue Bottle");
+    }
+
+    // Lane drill-down: the lane reads moved rows without transfers=true,
+    // direction picks a side, uncategorized picks rows with no category.
+    #[tokio::test]
+    async fn transactions_filter_by_lane_direction_and_uncategorized() {
+        use outflow_core::model::{Account, AccountKind};
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_accounts(&[Account {
+                id: "acct-1".into(),
+                org: "Example Bank".into(),
+                name: "Checking".into(),
+                kind: AccountKind::Checking,
+                balance: Money::from_cents(0),
+                currency: "USD".into(),
+                last_synced: 0,
+                source: "plaid".into(),
+                nickname: None,
+                hidden: false,
+            }])
+            .unwrap();
+        let mut out = txn("sav-out", -5000, "To Savings");
+        out.flag = TxnFlag::Save;
+        let mut back = txn("sav-in", 2000, "From Savings");
+        back.flag = TxnFlag::Save;
+        let mut pay = txn("pay", 90000, "Payroll");
+        pay.category = None;
+        pay.pfc_primary = Some("INCOME".into());
+        store
+            .upsert_transactions(&[txn("cafe", -1500, "Blue Bottle"), out, back, pay])
+            .unwrap();
+        let app = app_with_store(store);
+        let ids = txn_ids(app.clone(), "/transactions?lane=save").await;
+        assert_eq!(ids, ["sav-in", "sav-out"]);
+        let ids = txn_ids(app.clone(), "/transactions?lane=save&direction=out").await;
+        assert_eq!(ids, ["sav-out"]);
+        let ids = txn_ids(app.clone(), "/transactions?lane=in&uncategorized=true").await;
+        assert_eq!(ids, ["pay"]);
+        let (status, body) = get_json(app, "/transactions?lane=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body["error"].as_str().unwrap().contains("bogus"));
     }
 
     // The /merchants handler flattens FilterParams too — same fix, same guard.

@@ -2,7 +2,7 @@ use crate::model::{AccountKind, Transaction, TxnFlag};
 use crate::store::Store;
 use crate::subscriptions::normalize_payee;
 use chrono::{Datelike, Local, TimeZone};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub struct TxnFilter {
@@ -94,6 +94,13 @@ pub struct TxnQuery {
     /// Keep only this flag. Filtering on Transfer/CardPayment requires
     /// `filter.include_non_spending = true` or the rows are dropped first.
     pub flag: Option<TxnFlag>,
+    /// Keep only the rows behind this Flow lane figure (`lane_of`). Reads
+    /// every flag, so `filter.include_non_spending` doesn't matter here.
+    pub lane: Option<Lane>,
+    /// Keep only rows with no category.
+    pub uncategorized: bool,
+    /// Keep only money out (negative) or money in (positive).
+    pub direction: Option<Direction>,
     pub min_cents: Option<i64>,
     pub max_cents: Option<i64>,
     pub sort: SortKey,
@@ -111,6 +118,9 @@ impl Default for TxnQuery {
             category: None,
             source: None,
             flag: None,
+            lane: None,
+            uncategorized: false,
+            direction: None,
             min_cents: None,
             max_cents: None,
             sort: SortKey::Date,
@@ -133,10 +143,22 @@ pub struct TxnPage {
 
 pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnPage> {
     let needle = q.text.as_deref().map(|s| s.to_lowercase());
+    let kind = account_kinds(store)?;
+    // A lane names its own flags, so non-Spending rows must reach it.
+    let filter = TxnFilter {
+        include_non_spending: q.filter.include_non_spending || q.lane.is_some(),
+        ..q.filter
+    };
     let mut matched: Vec<Transaction> = store
         .all_transactions()?
         .into_iter()
-        .filter(|t| passes(t, &q.filter))
+        .filter(|t| passes(t, &filter))
+        .filter(|t| {
+            q.lane
+                .is_none_or(|l| lane_of(t, kind(&t.account_id)) == Some(l))
+        })
+        .filter(|t| !q.uncategorized || t.category.is_none())
+        .filter(|t| q.direction.is_none_or(|d| d.matches(t.amount.cents())))
         .filter(|t| q.account_id.as_deref().is_none_or(|a| t.account_id == a))
         .filter(|t| {
             q.category
@@ -323,6 +345,106 @@ fn account_kinds(store: &Store) -> rusqlite::Result<impl Fn(&str) -> AccountKind
     Ok(move |id: &str| kinds.get(id).copied().unwrap_or(AccountKind::Other))
 }
 
+/// The Flow lane (or Moved group) a transaction is counted in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Lane {
+    In,
+    /// Spending, refunds included (they net against it).
+    Out,
+    /// Either leg: the bank side is money out of checking, the card side
+    /// money into a card (`Direction` tells them apart).
+    CardPayment,
+    Invest,
+    Save,
+    LoanPaydown,
+    Between,
+}
+
+impl Lane {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Lane::In => "in",
+            Lane::Out => "out",
+            Lane::CardPayment => "card_payment",
+            Lane::Invest => "invest",
+            Lane::Save => "save",
+            Lane::LoanPaydown => "loan_paydown",
+            Lane::Between => "between",
+        }
+    }
+
+    // Lenient wire lookup (Option), like `TxnFlag::from_str`.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Lane> {
+        [
+            Lane::In,
+            Lane::Out,
+            Lane::CardPayment,
+            Lane::Invest,
+            Lane::Save,
+            Lane::LoanPaydown,
+            Lane::Between,
+        ]
+        .into_iter()
+        .find(|l| l.as_str() == s)
+    }
+}
+
+/// Money out (negative amount) or in (positive).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    Out,
+    In,
+}
+
+impl Direction {
+    // Lenient wire lookup (Option), like `TxnFlag::from_str`.
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Direction> {
+        match s {
+            "out" => Some(Direction::Out),
+            "in" => Some(Direction::In),
+            _ => None,
+        }
+    }
+
+    pub fn matches(self, cents: i64) -> bool {
+        match self {
+            Direction::Out => cents < 0,
+            Direction::In => cents > 0,
+        }
+    }
+}
+
+/// The one lane classifier: which Flow figure a transaction counts toward,
+/// given its account's kind. `None` = counted nowhere: the far-side leg of a
+/// move (on a savings, investment or loan account, or an unknown account),
+/// or a card-payment leg that is neither money out of checking nor money
+/// into a card. `flow_lanes` and the `lane` filter both use this, so a lane
+/// figure always equals the sum of its rows.
+pub fn lane_of(t: &Transaction, kind: AccountKind) -> Option<Lane> {
+    let cents = t.amount.cents();
+    let spending_side = matches!(kind, AccountKind::Checking | AccountKind::Credit);
+    match t.flag {
+        TxnFlag::Spending if t.amount.is_outflow() || is_refund(t, kind) => Some(Lane::Out),
+        TxnFlag::Spending => Some(Lane::In),
+        TxnFlag::CardPayment => match kind {
+            AccountKind::Credit if cents > 0 => Some(Lane::CardPayment),
+            AccountKind::Checking if cents < 0 => Some(Lane::CardPayment),
+            _ => None,
+        },
+        _ if !spending_side => None,
+        TxnFlag::Invest => Some(Lane::Invest),
+        TxnFlag::Save => Some(Lane::Save),
+        TxnFlag::LoanPaydown => Some(Lane::LoanPaydown),
+        TxnFlag::Transfer => Some(Lane::Between),
+    }
+}
+
 /// One Moved group's money, seen from the spending-side accounts (checking
 /// and credit). `out_cents` left them, `in_cents` came back; both positive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
@@ -351,6 +473,10 @@ pub struct MovedLane {
     /// double-counted when both legs synced, still counted when one is missing
     /// (card not linked, or paid from an unlinked bank).
     pub card_payment_cents: i64,
+    /// Card payments seen leaving checking.
+    pub card_payment_bank_cents: i64,
+    /// Card payments seen arriving on a card.
+    pub card_payment_card_cents: i64,
     pub invest: MovedFlow,
     pub save: MovedFlow,
     pub loan_paydown: MovedFlow,
@@ -366,6 +492,8 @@ pub struct FlowMonth {
     pub month: u32,
     /// Income-type inflows, plus inflows not categorized yet.
     pub in_cents: i64,
+    /// The part of `in_cents` with no category yet.
+    pub in_uncategorized_cents: i64,
     /// Spending net of refunds (positive = money spent).
     pub out_cents: i64,
     /// Refunds already netted into `out_cents`, shown for context.
@@ -390,21 +518,21 @@ pub struct FlowMonth {
 /// ignored because every lane is reported.
 pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMonth>> {
     let kind = account_kinds(store)?;
-    let spending_side = |id: &str| matches!(kind(id), AccountKind::Checking | AccountKind::Credit);
-
     let all = TxnFilter {
         include_non_spending: true,
         ..*f
     };
     let mut months: HashMap<(i64, u32), FlowMonth> = HashMap::new();
-    // Card payments per month: (bank side out, card side in).
-    let mut card_legs: HashMap<(i64, u32), (i64, i64)> = HashMap::new();
     for t in store.all_transactions()?.iter().filter(|t| passes(t, &all)) {
+        let Some(lane) = lane_of(t, kind(&t.account_id)) else {
+            continue; // far-side leg of a move
+        };
         let (year, month) = ym_local(t.effective_date());
         let m = months.entry((year, month)).or_insert_with(|| FlowMonth {
             year,
             month,
             in_cents: 0,
+            in_uncategorized_cents: 0,
             out_cents: 0,
             refunds_cents: 0,
             moved: MovedLane::default(),
@@ -412,38 +540,32 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
             saved_cents: 0,
         });
         let cents = t.amount.cents();
-        match t.flag {
-            TxnFlag::Spending if t.amount.is_outflow() => m.out_cents += -cents,
-            TxnFlag::Spending if is_refund(t, kind(&t.account_id)) => {
-                m.out_cents -= cents;
-                m.refunds_cents += cents;
-            }
-            TxnFlag::Spending => m.in_cents += cents,
-            TxnFlag::CardPayment => {
-                let legs = card_legs.entry((year, month)).or_default();
-                match kind(&t.account_id) {
-                    AccountKind::Credit if cents > 0 => legs.1 += cents,
-                    AccountKind::Checking if cents < 0 => legs.0 += -cents,
-                    _ => {}
+        match lane {
+            Lane::In => {
+                m.in_cents += cents;
+                if t.category.is_none() {
+                    m.in_uncategorized_cents += cents;
                 }
             }
-            flag if spending_side(&t.account_id) => match flag {
-                TxnFlag::Invest => m.moved.invest.add(cents),
-                TxnFlag::Save => m.moved.save.add(cents),
-                TxnFlag::LoanPaydown => m.moved.loan_paydown.add(cents),
-                _ => m.moved.between.add(cents),
-            },
-            _ => {} // far-side leg of a move
+            Lane::Out => {
+                m.out_cents -= cents;
+                if cents > 0 {
+                    m.refunds_cents += cents;
+                }
+            }
+            Lane::CardPayment if cents < 0 => m.moved.card_payment_bank_cents += -cents,
+            Lane::CardPayment => m.moved.card_payment_card_cents += cents,
+            Lane::Invest => m.moved.invest.add(cents),
+            Lane::Save => m.moved.save.add(cents),
+            Lane::LoanPaydown => m.moved.loan_paydown.add(cents),
+            Lane::Between => m.moved.between.add(cents),
         }
     }
     let mut out: Vec<FlowMonth> = months
         .into_values()
         .map(|mut m| {
-            let (bank, card) = card_legs
-                .get(&(m.year, m.month))
-                .copied()
-                .unwrap_or_default();
-            m.moved.card_payment_cents = bank.max(card);
+            let mv = &mut m.moved;
+            mv.card_payment_cents = mv.card_payment_bank_cents.max(mv.card_payment_card_cents);
             m.earned_minus_spent_cents = m.in_cents - m.out_cents;
             let saving = [m.moved.invest, m.moved.save, m.moved.loan_paydown];
             m.saved_cents = saving.iter().map(|g| g.out_cents - g.in_cents).sum();
@@ -907,6 +1029,238 @@ mod tests {
         assert_eq!(jan.earned_minus_spent_cents, -2000);
         // No account row, so not a spending-side account: not summed in Moved.
         assert_eq!(jan.moved.between, MovedFlow::default());
+    }
+
+    /// Rows behind each lane figure, signed sum (synthetic data).
+    fn lane_sum(s: &Store, f: &TxnFilter, lane: Lane, dir: Option<Direction>, uncat: bool) -> i64 {
+        lane_rows(s, f, lane, dir, uncat, None)
+    }
+
+    fn lane_rows(
+        s: &Store,
+        f: &TxnFilter,
+        lane: Lane,
+        dir: Option<Direction>,
+        uncat: bool,
+        category: Option<&str>,
+    ) -> i64 {
+        let q = TxnQuery {
+            filter: TxnFilter { ..*f },
+            lane: Some(lane),
+            direction: dir,
+            uncategorized: uncat,
+            category: category.map(Into::into),
+            limit: 1000,
+            ..TxnQuery::default()
+        };
+        search_transactions(s, &q).unwrap().total_cents
+    }
+
+    /// One synthetic month across checking, a card, savings and a brokerage
+    /// with every lane, group and direction present (amounts invented).
+    fn lane_fixture() -> Store {
+        use crate::model::AccountKind::{Checking, Credit, Investment, Savings};
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[
+            account("chk", Checking),
+            account("card", Credit),
+            account("sav", Savings),
+            account("brk", Investment),
+        ])
+        .unwrap();
+        let on = |acct: &str,
+                  id: &str,
+                  cents: i64,
+                  cat: Option<&str>,
+                  pfc: Option<&str>,
+                  flag: TxnFlag| {
+            let mut x = t(id, JAN15, cents, id, cat, false);
+            x.account_id = acct.into();
+            x.pfc_primary = pfc.map(Into::into);
+            x.flag = flag;
+            x
+        };
+        use TxnFlag::*;
+        s.upsert_transactions(&[
+            on(
+                "chk",
+                "pay",
+                300000,
+                Some("Income"),
+                Some("INCOME"),
+                Spending,
+            ),
+            on("chk", "pay-uncat", 40000, None, Some("INCOME"), Spending),
+            on("chk", "interest", 300, None, None, Spending),
+            on(
+                "card",
+                "groc",
+                -5000,
+                Some("Groceries"),
+                Some("FOOD_AND_DRINK"),
+                Spending,
+            ),
+            on(
+                "card",
+                "groc-ref",
+                1000,
+                Some("Groceries"),
+                Some("FOOD_AND_DRINK"),
+                Spending,
+            ),
+            on(
+                "card",
+                "mystery",
+                -2500,
+                None,
+                Some("GENERAL_MERCHANDISE"),
+                Spending,
+            ),
+            on(
+                "chk",
+                "ret",
+                700,
+                None,
+                Some("GENERAL_MERCHANDISE"),
+                Spending,
+            ),
+            on("chk", "ccpay-bank", -4000, None, None, CardPayment),
+            on("card", "ccpay-card", 4000, None, None, CardPayment),
+            on("card", "ccpay-only", 1500, None, None, CardPayment),
+            on("chk", "to-sav", -50000, None, None, Save),
+            on("sav", "into-sav", 50000, None, None, Save),
+            on("chk", "from-sav", 10000, None, None, Save),
+            on("sav", "out-of-sav", -10000, None, None, Save),
+            on("chk", "to-brk", -20000, None, None, Invest),
+            on("brk", "into-brk", 20000, None, None, Invest),
+            on("chk", "from-brk", 3000, None, None, Invest),
+            on("chk", "car", -30000, None, None, LoanPaydown),
+            on("chk", "car-back", 500, None, None, LoanPaydown),
+            on("chk", "venmo-out", -7000, None, None, Transfer),
+            on("chk", "venmo-in", 2000, None, None, Transfer),
+        ])
+        .unwrap();
+        s
+    }
+
+    #[test]
+    fn lane_filtered_rows_sum_to_every_flow_figure() {
+        use Direction::{In as Back, Out as Away};
+        let s = lane_fixture();
+        let f = TxnFilter::all();
+        let m = &flow_lanes(&s, &f).unwrap()[0];
+
+        assert_eq!(lane_sum(&s, &f, Lane::In, None, false), m.in_cents);
+        assert_eq!(
+            lane_sum(&s, &f, Lane::In, None, true),
+            m.in_uncategorized_cents
+        );
+        assert_eq!(m.in_uncategorized_cents, 40000 + 300);
+        assert_eq!(-lane_sum(&s, &f, Lane::Out, None, false), m.out_cents);
+        assert_eq!(
+            lane_sum(&s, &f, Lane::Out, Some(Back), false),
+            m.refunds_cents
+        );
+
+        // Out per category, uncategorized bucket included, matches the breakdown.
+        for c in spend_by_category(&s, &f).unwrap() {
+            let rows = match &c.category {
+                Some(name) => lane_rows(&s, &f, Lane::Out, None, false, Some(name)),
+                None => lane_rows(&s, &f, Lane::Out, None, true, None),
+            };
+            assert_eq!(-rows, c.total_cents, "category {:?}", c.category);
+        }
+
+        // Card payment per side: bank leg = out, card leg = in.
+        let mv = &m.moved;
+        assert_eq!(
+            -lane_sum(&s, &f, Lane::CardPayment, Some(Away), false),
+            mv.card_payment_bank_cents
+        );
+        assert_eq!(
+            lane_sum(&s, &f, Lane::CardPayment, Some(Back), false),
+            mv.card_payment_card_cents
+        );
+        assert_eq!(
+            (mv.card_payment_bank_cents, mv.card_payment_card_cents),
+            (4000, 5500)
+        );
+        assert_eq!(mv.card_payment_cents, 5500);
+
+        for (lane, flow) in [
+            (Lane::Invest, mv.invest),
+            (Lane::Save, mv.save),
+            (Lane::LoanPaydown, mv.loan_paydown),
+            (Lane::Between, mv.between),
+        ] {
+            assert_eq!(
+                -lane_sum(&s, &f, lane, Some(Away), false),
+                flow.out_cents,
+                "{lane:?} out"
+            );
+            assert_eq!(
+                lane_sum(&s, &f, lane, Some(Back), false),
+                flow.in_cents,
+                "{lane:?} in"
+            );
+            assert!(
+                flow.out_cents > 0 && flow.in_cents > 0,
+                "{lane:?} has both sides"
+            );
+        }
+    }
+
+    #[test]
+    fn lane_of_skips_the_far_leg() {
+        use crate::model::AccountKind::{Checking, Credit, Savings};
+        let mut x = t("x", JAN15, 5000, "x", None, false);
+        x.flag = TxnFlag::Save;
+        assert_eq!(lane_of(&x, Savings), None);
+        assert_eq!(lane_of(&x, Checking), Some(Lane::Save));
+        x.flag = TxnFlag::CardPayment;
+        assert_eq!(
+            lane_of(&x, Checking),
+            None,
+            "money back into checking is no payment leg"
+        );
+        assert_eq!(lane_of(&x, Credit), Some(Lane::CardPayment));
+    }
+
+    /// A month period (resolved in core, local days) picks exactly the rows
+    /// `flow_lanes` buckets into that month, at both edges.
+    #[test]
+    fn month_period_and_flow_lanes_agree_at_the_edges() {
+        use crate::model::AccountKind::Checking;
+        use crate::period::Period;
+        let jan = Period::parse("2021-01", jan15_day()).unwrap();
+        let (start, end) = jan.bounds();
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("chk", Checking)]).unwrap();
+        let at = |id: &str, secs: i64| {
+            let mut x = t(id, secs, -100, id, Some("Coffee"), false);
+            x.account_id = "chk".into();
+            x
+        };
+        s.upsert_transactions(&[
+            at("dec-last", start - 1),
+            at("jan-first", start),
+            at("jan-last", end - 1),
+            at("feb-first", end),
+        ])
+        .unwrap();
+        let f = TxnFilter::range(start, end);
+        let months = flow_lanes(&s, &TxnFilter::all()).unwrap();
+        let in_jan = months
+            .iter()
+            .find(|m| (m.year, m.month) == (2021, 1))
+            .unwrap();
+        assert_eq!(in_jan.out_cents, 200);
+        assert_eq!(-lane_sum(&s, &f, Lane::Out, None, false), in_jan.out_cents);
+        assert_eq!(flow_lanes(&s, &f).unwrap(), vec![in_jan.clone()]);
+    }
+
+    fn jan15_day() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2021, 1, 15).unwrap()
     }
 
     #[test]

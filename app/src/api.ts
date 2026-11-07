@@ -21,6 +21,8 @@ import type {
   SyncReport,
   Transaction,
   TxnFlag,
+  Lane,
+  Direction,
   TxnPage,
 } from "./types";
 
@@ -50,6 +52,10 @@ export interface TxnSearch {
   category?: string;
   source?: string;
   flag?: TxnFlag;
+  period?: string; // e.g. "2026-11"; resolved in server-local days
+  lane?: Lane; // exactly the rows behind that Flow figure
+  uncategorized?: boolean;
+  direction?: Direction; // card payment: out = bank side, in = card side
   minCents?: number;
   maxCents?: number;
   sort?: SortKey;
@@ -177,6 +183,10 @@ export const api = {
     set("category", s?.category);
     set("source", s?.source);
     set("flag", s?.flag);
+    set("period", s?.period);
+    set("lane", s?.lane);
+    set("uncategorized", s?.uncategorized || undefined);
+    set("direction", s?.direction);
     set("min_cents", s?.minCents);
     set("max_cents", s?.maxCents);
     set("sort", s?.sort);

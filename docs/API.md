@@ -75,7 +75,7 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 | `GET /transactions` | see **Transaction query** below | `TxnPage { items: Transaction[], total, total_cents }` — paginated |
 | `GET /spend/categories` | `period` / `since` / `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
 | `GET /merchants` | `period` / `since` / `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
-| `GET /flow` | `period` / `since` / `until`, `pending` | `FlowMonth[]` — Flow lanes per month (local-time buckets): `in_cents`, `out_cents` (refunds netted), `refunds_cents`, `moved` (`card_payment_cents` + `invest`/`save`/`loan_paydown`/`between` as `{out_cents, in_cents}` from checking + cards), `earned_minus_spent_cents`, `saved_cents` |
+| `GET /flow` | `period` / `since` / `until`, `pending` | `FlowMonth[]` — Flow lanes per month (local-time buckets): `in_cents`, `out_cents` (refunds netted), `refunds_cents`, `moved` (`card_payment_cents` + `card_payment_bank_cents` / `card_payment_card_cents` + `invest`/`save`/`loan_paydown`/`between` as `{out_cents, in_cents}` from checking + cards), `in_uncategorized_cents`, `earned_minus_spent_cents`, `saved_cents` |
 | `GET /subscriptions` | — | `Subscription[]` — fixed-amount recurring (≥3 occurrences) |
 | `GET /ledger` | `window` = `3mo`\|`6mo`(default)\|`12mo`\|`all` | `LedgerView` — the rhythm ledger (streams / committed / notable / transfers / noise) |
 | `GET /stream_occurrences` | `merchant` (required, normalized name), `window` | `Transaction[]` — the raw rows behind one stream |
@@ -104,6 +104,9 @@ All optional; a missing filter set means **everything** (pending included).
 | `category` | string | filter by category name |
 | `source` | string | provenance (`plaid`) |
 | `flag` | enum | `Spending`\|`Transfer`\|`CardPayment`\|`Invest`\|`Save`\|`LoanPaydown` — filtering by a Moved flag auto-includes those rows |
+| `lane` | string | `in`\|`out`\|`card_payment`\|`invest`\|`save`\|`loan_paydown`\|`between` — exactly the rows behind that `/flow` figure (signed sum = the figure); reads Moved rows without `transfers`; a bad value is a `400` |
+| `uncategorized` | bool | only rows with no category (e.g. `lane=in&uncategorized=true`, or Out's `null` category) |
+| `direction` | string | `out` (negative) \| `in` (positive); on `lane=card_payment`, `out` = bank side, `in` = card side; a bad value is a `400` |
 | `min_cents` / `max_cents` | i64 | amount band (cents) |
 | `sort` | string | `date`(default)\|`amount`\|`merchant`\|`category`; a bad key is a `400` |
 | `dir` | string | `asc`\|`desc`(default) |

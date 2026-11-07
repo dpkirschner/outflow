@@ -171,11 +171,18 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
 - `spend_by_category` — outflows grouped by category, **refunds netted** in
   their own category (so it sums to Out); uncategorized under `None`.
 - `top_merchants` — sum of **outflows only**, grouped by `normalize_payee`.
+- `lane_of(txn, account_kind) -> Option<Lane>` — the one lane classifier.
+  `Lane` = `In`, `Out` (refunds included), `CardPayment`, `Invest`, `Save`,
+  `LoanPaydown`, `Between`; `None` = counted nowhere (the far leg of a move,
+  or a card-payment leg that is neither money out of checking nor money into
+  a card). `flow_lanes` and the `lane` filter both call it, so every lane
+  figure is the signed sum of its rows.
 - `flow_lanes` — the Flow lanes per month (GLOSSARY), bucketed on
   `effective_date()` in local time:
   - **In**: positive Spending rows whose `pfc_primary` is `INCOME`, or
     `TRANSFER_IN` re-flagged as Spending by the user; with no PFC, a positive
     on any account but credit. The user's `category` never decides the lane.
+    `in_uncategorized_cents` is the part of In with no category yet.
   - **Out**: Spending outflows minus **refunds** (every other positive
     Spending row: any other PFC, or no PFC on a credit account), netted in
     their category (uncategorized under `None`).
@@ -183,12 +190,16 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
     credit) only: the far leg of a move on a savings/investment/loan account
     isn't summed, so a move counts once whether or not the far account is
     linked. Card payments are the larger of the bank and card sides per
-    month (never double-counted, still counted when one leg is missing).
+    month (never double-counted, still counted when one leg is missing);
+    both sides are reported (`card_payment_bank_cents`,
+    `card_payment_card_cents`).
   - **Earned − spent** = In − Out; **Saved** = Invest + Save + LoanPaydown out
     of the spending side, minus what came back.
 - `search_transactions(store, TxnQuery) -> TxnPage` — the Outflows screen and
   CLI `txns` query: case-insensitive text over payee/description/category/
-  normalized merchant, filters (account, category, source, flag, amount band),
+  normalized merchant, filters (account, category, source, flag, amount band,
+  `lane`, `uncategorized`, `direction` = out|in by sign; a lane reads Moved
+  rows by itself; on a card payment, out = bank side, in = card side),
   stable sort (date/amount/merchant/category + direction, tie-broken by date
   then id), offset/limit pagination. `TxnPage.total_cents` sums ALL matches,
   not just the page.

@@ -5,6 +5,7 @@ pub mod ledger;
 pub mod llm;
 pub mod model;
 pub mod money;
+pub mod period;
 pub mod perks;
 pub mod plaid;
 pub mod query;
@@ -30,6 +31,7 @@ pub use model::{
     SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
+pub use period::{parse_day, today_local, Period, PeriodError, PeriodKind};
 pub use perks::{
     evaluate as evaluate_perks, load_offers, parse_offers, Cap, CardOffers, CardStatus, Finding,
     FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,

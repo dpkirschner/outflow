@@ -110,6 +110,23 @@ export type SyncEntry = {
   note: string | null,
 };
 
+export type PeriodKind = "Week" | "Month" | "Quarter" | "Year" | "Custom";
+
+/**
+ * A half-open range of local calendar days.
+ */
+export type Period = {
+  kind: PeriodKind,
+  /**
+   * First day, `YYYY-MM-DD`.
+   */
+  start: string,
+  /**
+   * The day after the last day, `YYYY-MM-DD` (exclusive).
+   */
+  end: string,
+};
+
 export type TxnPage = {
   /**
    * Matching rows before pagination.

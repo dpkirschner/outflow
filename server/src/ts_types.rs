@@ -61,6 +61,12 @@ fn render() -> String {
         );
     }
 
+    // --- core::period ---
+    {
+        use outflow_core::period::*;
+        decls!(&cfg, out, [PeriodKind, Period]);
+    }
+
     // --- core::query, core::subscriptions ---
     {
         use outflow_core::query::*;

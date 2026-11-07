@@ -51,7 +51,9 @@ export default function App() {
     // earlier timeout would otherwise fire and clear the newest toast early.
     window.clearTimeout(toastTimer.current);
     setToast(msg);
-    toastTimer.current = window.setTimeout(() => setToast(null), 3200);
+    // A toast with an action (Undo) waits to be used or dismissed: no time
+    // limit on reaching it from the keyboard (WCAG 2.2.1).
+    if (!msg.action) toastTimer.current = window.setTimeout(() => setToast(null), 3200);
   }, []);
 
   const reload = useCallback(
@@ -223,12 +225,10 @@ export default function App() {
       {tab === "settings" ? (
         <>
           <Settings notify={notify} onChanged={() => void reload(win)} />
-          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "balances" ? (
         <>
           <Balances notify={notify} />
-          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : tab === "flow" ? (
         <>
@@ -239,7 +239,6 @@ export default function App() {
             month={month}
             onMonth={setMonth}
           />
-          {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
         </>
       ) : (
         // Called as a function, NOT <LedgerTab/>: a nested component rendered as
@@ -247,6 +246,10 @@ export default function App() {
         // subtree (resetting fold/expand state). Inlining keeps that state.
         LedgerTab()
       )}
+      {/* Always in the page so screen readers announce what appears in it. */}
+      <div className="toast-region" role="status" aria-live="polite">
+        {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+      </div>
     </div>
   );
 
@@ -321,7 +324,6 @@ export default function App() {
         notify={notify}
       />
 
-      {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
       </>
     );
   }

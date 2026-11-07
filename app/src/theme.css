@@ -344,6 +344,19 @@ select.cat:focus {
   background: var(--accent);
   color: var(--card-2);
 }
+.toast-close {
+  flex: none;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.toast-close:hover {
+  color: var(--text);
+}
 
 /* subtle scrollbars */
 .scroll-y::-webkit-scrollbar { width: 10px; }

@@ -183,7 +183,9 @@ each mean one thing.
 - **Hairline** (hairline): every border and divider between surfaces.
 - **Row Divider / Row Hover / Selected Fill** (row-divider, row-hover,
   selected-fill): list row separators, hover wash, and the selected segment
-  or active nav tab.
+  or active nav tab. In CSS these are `--lg-divider`, `--lg-hover`,
+  `--lg-selected` and its edge `--lg-selected-edge` (Flow uses them; older
+  screens still repeat the hex values).
 - **Text / Text Dim / Text Faint** (text, text-dim, text-faint): primary
   copy, secondary copy and labels, and metadata.
 
@@ -300,6 +302,54 @@ those capsules.
   over a dark scrim, holds a bar rhythm chart, occurrence list and actions,
   and closes back to the list without losing scroll or fold state.
 
+### Month strip (Flow)
+- One button per month: a 20px bar (Out, scaled to the largest month),
+  the short month and the short Out figure. The selected month gets the
+  Selected Fill, its edge and a Field Teal bar. The strip is one Tab stop
+  (roving tabindex): arrow keys, Home and End move and select.
+
+### Headline pair (Flow)
+- The screen's focal moment, open on the page rather than in a card, so
+  the lanes below read as subordinate. Two figures (34px, 650, tabular)
+  split by a Hairline, with their keys in Text Dim above. Under them, the
+  answer in words at 15px in Text colour, with the money in semibold.
+
+### Lane card (Flow)
+- A Card (Panel, Hairline, 12px) with a Row-name title, a 20px Figure, a
+  one-line Text Dim note, then label/value rows split by Row Dividers.
+  The three lanes are equal width and stack In → Out → Moved below 720px.
+  A row with nothing behind it reads quiet (Text Dim) and isn't a button.
+
+### Drill-down figure (Flow)
+- Any figure with rows behind it is a button that filters the table to
+  exactly those rows. At rest the amount carries a dotted Text Faint
+  underline (the "you can act on this" mark, like the dashed category
+  control); hover adds Row Hover and a Hairline inset, and the selected one
+  gets the Selected Fill, a 2px Field Teal inset ring and `aria-pressed`.
+  Rows bleed into the card padding so the whole line is the target; 44px
+  tall on touch widths.
+
+### Filter chip (Flow)
+- A 999px capsule in Selected Fill with its edge: the drill-down path in
+  600 ("Moved › Card payment"), the month in Text Dim, and a Clear button.
+  Clearing (or Escape anywhere on the screen) returns focus to the figure
+  that was selected.
+
+### Transaction table (Flow)
+- Sortable headers are buttons with `aria-sort`; amounts are signed and
+  tabular, In amounts also In Green. Moved rows carry a "Moved · group" tag
+  and dim the name and amount. Category is a dashed-underline control that
+  opens a select: a pointer pick saves, a keyboard pick saves on Enter or
+  on leaving the field, Escape cancels. The row action waits for hover or
+  focus on desktop.
+- **Side-grouped:** a card payment drills into both legs, each under a
+  group header row ("From checking" / "Into cards") with its row count and
+  subtotal, so the reader can see why Moved counts it once.
+- **Two-line rows (below 720px):** each row becomes merchant and amount on
+  line 1, then date, category, account chip and action on line 2,
+  wrapping rather than truncating. The header row stays as the sort
+  controls. Nothing is hidden at narrow widths or 200% zoom.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -307,7 +357,11 @@ those capsules.
   every new colour; they are the live token set.
 - **Do** keep money figures tabular and right-aligned.
 - **Do** give every control a visible border and a pressed and focused
-  state, so it reads as pressable on the dark page.
+  state, so it reads as pressable on the dark page. Form fields and small
+  outline buttons use Text Faint for that edge: Hairline is about 1.3:1,
+  and a control's boundary needs 3:1 (WCAG 1.4.11).
+- **Do** put focus somewhere sensible after an action removes the control
+  that had it, and keep an Undo toast up until it's used or dismissed.
 - **Do** put one Key button per action group, at most.
 - **Do** mirror token values into constants when SVG presentation
   attributes can't read CSS variables (as `Balances.tsx` does), and keep

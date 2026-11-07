@@ -13,6 +13,11 @@
   --lg-red: #f87171;
   --lg-blue: #60a5fa;
   --lg-amber: #fbbf24;
+  --lg-selected: #1c2c40; /* selected-fill */
+  --lg-selected-edge: #2b415c;
+  --lg-hover: #0e1620; /* row-hover */
+  --lg-divider: #172230; /* row-divider */
+  --lg-amber-edge: rgba(251, 191, 36, 0.35);
 }
 
 .lg-app {
@@ -30,8 +35,9 @@ body:has(.lg-app) {
 /* header */
 .lg-top {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 14px;
+  gap: 8px 14px;
   margin-bottom: 16px;
 }
 .lg-wm {
@@ -47,8 +53,15 @@ body:has(.lg-app) {
 .lg-nav {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   font-size: 12px;
+}
+/* Narrow: wordmark and nav share the line; the tagline gives way. */
+@media (max-width: 560px) {
+  .lg-sub {
+    display: none;
+  }
 }
 .lg-nav a {
   padding: 5px 11px;
@@ -1116,8 +1129,8 @@ body:has(.lg-app) {
 }
 .fl-strip ol {
   list-style: none;
-  margin: 0;
-  padding: 0 0 4px;
+  margin: 0 -4px;
+  padding: 4px 4px 6px;
   display: flex;
   gap: 4px;
   overflow-x: auto;
@@ -1143,8 +1156,8 @@ body:has(.lg-app) {
   border-color: var(--lg-line);
 }
 .fl-month.on {
-  background: #1c2c40;
-  border-color: #2b415c;
+  background: var(--lg-selected);
+  border-color: var(--lg-selected-edge);
   color: var(--lg-text);
 }
 .fl-bar-track {
@@ -1179,7 +1192,7 @@ body:has(.lg-app) {
 }
 .fl-msofar {
   margin-top: -2px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--lg-amber);
 }
@@ -1198,42 +1211,46 @@ body:has(.lg-app) {
   font-weight: 600;
   color: var(--lg-amber);
   padding: 1px 8px;
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  border: 1px solid var(--lg-amber-edge);
   border-radius: 999px;
 }
 .fl-head {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  padding: 4px 0 8px;
 }
 .fl-pair {
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  gap: 0;
 }
 .fl-pair > div {
-  background: var(--lg-panel2);
-  border: 1px solid var(--lg-line);
-  border-radius: 10px;
-  padding: 14px 16px;
+  padding-right: 32px;
+}
+.fl-pair > div + div {
+  padding-left: 32px;
+  border-left: 1px solid var(--lg-line);
 }
 .fl-pair dt {
   font-size: 13px;
   color: var(--lg-dim);
 }
 .fl-pair dd {
-  margin: 4px 0 0;
-  font-size: 28px;
+  margin: 2px 0 0;
+  font-size: 34px;
   font-weight: 650;
   letter-spacing: -0.02em;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
 }
 .fl-gap {
   margin: 0;
-  font-size: 13px;
-  color: var(--lg-dim);
-  max-width: 70ch;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--lg-text);
+  max-width: 62ch;
 }
 .fl-gap b {
   color: var(--lg-text);
@@ -1282,7 +1299,7 @@ body:has(.lg-app) {
   border-top: 1px solid var(--lg-line);
 }
 .fl-rows > li {
-  border-bottom: 1px solid #172230;
+  border-bottom: 1px solid var(--lg-divider);
 }
 .fl-rows > li:last-child {
   border-bottom: 0;
@@ -1322,12 +1339,27 @@ body:has(.lg-app) {
   cursor: pointer;
   box-shadow: inset 0 0 0 1px transparent;
 }
+.fl-pick .fl-row-value,
+button.fl-lane-figure,
+.fl-amt-pick {
+  text-decoration: underline dotted var(--lg-faint);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.fl-pick:hover .fl-row-value,
+button.fl-lane-figure:hover,
+.fl-amt-pick:hover,
+.fl-pick.on .fl-row-value,
+.fl-pick.on.fl-lane-figure,
+.fl-pick.on.fl-amt-pick {
+  text-decoration-color: var(--lg-teal);
+}
 .fl-pick:hover {
-  background: #0e1620;
+  background: var(--lg-hover);
   box-shadow: inset 0 0 0 1px var(--lg-line);
 }
 .fl-pick.on {
-  background: #1c2c40;
+  background: var(--lg-selected);
   box-shadow: inset 0 0 0 2px var(--lg-teal);
 }
 /* Row buttons bleed into the lane's padding so the text stays aligned with
@@ -1369,7 +1401,7 @@ button.fl-lane-figure {
 .fl-more {
   align-self: flex-start;
   background: transparent;
-  border: 1px solid var(--lg-line);
+  border: 1px solid var(--lg-faint);
   border-radius: 6px;
   color: var(--lg-dim);
   font: inherit;
@@ -1391,6 +1423,7 @@ button.fl-lane-figure {
 }
 .fl-section-title {
   margin: 0;
+  scroll-margin-top: 16px;
   font-size: 16px;
   font-weight: 600;
 }
@@ -1410,7 +1443,7 @@ button.fl-lane-figure {
   min-height: 36px;
   box-sizing: border-box;
   background: var(--lg-panel);
-  border: 1px solid var(--lg-line);
+  border: 1px solid var(--lg-faint);
   border-radius: 8px;
   color: var(--lg-text);
   font: inherit;
@@ -1443,22 +1476,26 @@ button.fl-lane-figure {
   align-items: center;
   gap: 10px;
   padding: 3px 4px 3px 12px;
-  background: #1c2c40;
-  border: 1px solid #2b415c;
+  background: var(--lg-selected);
+  border: 1px solid var(--lg-selected-edge);
   border-radius: 999px;
   font-size: 13px;
   font-weight: 600;
 }
 .fl-chip-clear {
   background: var(--lg-panel);
-  border: 1px solid var(--lg-line);
+  border: 1px solid var(--lg-faint);
   border-radius: 999px;
   color: var(--lg-dim);
   font: inherit;
   font-size: 12px;
   font-weight: 400;
-  padding: 3px 10px;
+  padding: 4px 10px;
   cursor: pointer;
+}
+.fl-chip-period {
+  font-weight: 400;
+  color: var(--lg-dim);
 }
 .fl-chip-clear:hover {
   color: var(--lg-text);
@@ -1519,11 +1556,11 @@ button.fl-lane-figure {
 .fl-table th:nth-child(6) { width: 132px; }
 .fl-table td {
   padding: 7px 8px;
-  border-bottom: 1px solid #172230;
+  border-bottom: 1px solid var(--lg-divider);
   vertical-align: middle;
 }
 .fl-table tbody tr:hover {
-  background: #0e1620;
+  background: var(--lg-hover);
 }
 .fl-table .num {
   text-align: right;
@@ -1531,7 +1568,7 @@ button.fl-lane-figure {
 .fl-sort {
   background: none;
   border: 0;
-  padding: 4px 0;
+  padding: 6px 0;
   color: inherit;
   font: inherit;
   cursor: pointer;
@@ -1573,7 +1610,7 @@ button.fl-lane-figure {
 }
 .fl-pending {
   color: var(--lg-amber);
-  border: 1px solid rgba(251, 191, 36, 0.35);
+  border: 1px solid var(--lg-amber-edge);
 }
 .fl-tag {
   color: var(--lg-dim);
@@ -1588,7 +1625,7 @@ button.fl-lane-figure {
   border: 0;
   border-bottom: 1px dashed var(--lg-faint);
   border-radius: 0;
-  padding: 2px 0;
+  padding: 4px 0;
   color: inherit;
   font: inherit;
   text-align: left;
@@ -1630,12 +1667,12 @@ button.fl-lane-figure {
 }
 .fl-mini {
   background: none;
-  border: 1px solid var(--lg-line);
+  border: 1px solid var(--lg-faint);
   border-radius: 6px;
   color: var(--lg-dim);
   font: inherit;
   font-size: 11px;
-  padding: 3px 8px;
+  padding: 5px 8px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -1671,35 +1708,122 @@ button.fl-lane-figure {
   color: var(--lg-dim);
 }
 
-/* narrow: lanes stack In → Out → Moved; the table keeps date, merchant,
-   category and amount */
+/* Narrow (phones, and desktop at 200% zoom): lanes stack In → Out → Moved,
+   and each transaction becomes two lines so nothing is dropped:
+     merchant ............................ amount
+     date · category · account ......... action
+   The header row stays as the sort controls. */
 @media (max-width: 720px) {
   .fl-lanes {
     grid-template-columns: minmax(0, 1fr);
   }
-  .fl-col-acct,
-  .fl-col-act {
+  .fl-table,
+  .fl-table tbody {
+    display: block;
+  }
+  .fl-table thead tr {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 16px;
+    border-bottom: 1px solid var(--lg-line);
+  }
+  .fl-table thead tr th:nth-child(n) {
+    width: auto;
+    padding: 0;
+    border: 0;
+  }
+  .fl-table thead th.fl-col-acct,
+  .fl-table thead th.fl-col-act {
     display: none;
   }
-}
-@media (max-width: 480px) {
-  .fl-pair dd {
-    font-size: 22px;
+  /* Flex, not grid: the merchant's wide basis fills line 1 next to the
+     amount; date, category, account and action follow and wrap rather
+     than truncate. */
+  .fl-table tbody tr[data-txn] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--lg-divider);
   }
-  .fl-table th:nth-child(1) { width: 52px; }
-  .fl-table th:nth-child(3) { width: 96px; }
-  .fl-table th:nth-child(5) { width: 96px; }
-  .fl-month {
-    min-height: 44px;
+  .fl-table tbody tr[data-txn] > td {
+    padding: 0;
+    border: 0;
+    flex: 0 0 auto;
+    max-width: 100%;
   }
-  /* Tags wrap under the name instead of squeezing it. */
+  .fl-table tr[data-txn] > td.fl-col-merch { order: 1; flex: 1 1 0; min-width: 0; }
+  .fl-table tr[data-txn] > td.fl-amt { order: 2; font-size: 14px; margin-left: auto; }
+  /* line break after the amount */
+  .fl-table tr[data-txn]::after {
+    content: "";
+    order: 3;
+    flex-basis: 100%;
+    height: 0;
+    margin-top: -4px;
+  }
+  .fl-table tr[data-txn] > td.fl-date { order: 4; font-size: 12px; }
+  .fl-table tr[data-txn] > td.fl-cat-cell { order: 5; font-size: 12px; }
+  .fl-table tr[data-txn] > td.fl-col-acct { order: 6; }
+  .fl-table tr[data-txn] > td.fl-col-act { order: 7; margin-left: auto; }
+  /* No room to wait for hover here: the action is always shown. */
+  .fl-table .fl-mini {
+    opacity: 1;
+  }
   .fl-merch {
     flex-wrap: wrap;
     gap: 2px 6px;
   }
   .fl-merch-name {
+    font-weight: 600;
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+  /* card-payment sides: title and subtotal on one line */
+  .fl-table tr.fl-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    border-bottom: 1px solid var(--lg-line);
+  }
+  .fl-table tr.fl-group > th,
+  .fl-table tr.fl-group > td {
+    border: 0;
+    padding: 14px 0 6px;
+  }
+  .fl-table tr.fl-group > td.fl-col-act {
+    display: none;
+  }
+  .fl-table .fl-group-empty {
+    display: block;
+    padding: 9px 0;
+  }
+}
+@media (max-width: 480px) {
+  .fl-pair > div {
+    padding-right: 18px;
+  }
+  .fl-pair > div + div {
+    padding-left: 18px;
+  }
+  .fl-pair dd {
+    font-size: 24px;
+  }
+  .fl-month {
+    min-height: 44px;
+  }
+  /* touch: drill-down targets at 44px */
+  button.fl-row,
+  .fl-amt-pick,
+  button.fl-lane-figure,
+  .fl-more,
+  .fl-chip-clear {
+    min-height: 44px;
+  }
+  .fl-row-split {
+    padding: 0;
   }
 }
 

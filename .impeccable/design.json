@@ -434,6 +434,38 @@
       "description": "Account label tinted by kind: cash, credit, investment.",
       "html": "<span class=\"ds-src cash\">Checking (0000)</span> <span class=\"ds-src credit\">Card (3333)</span> <span class=\"ds-src invest\">Brokerage (2222)</span>",
       "css": ".ds-src{font:600 10.5px -apple-system,BlinkMacSystemFont,sans-serif;padding:1px 6px;border-radius:4px;border:1px solid}.ds-src.cash{color:#7dd3c0;border-color:#1f4a44;background:#0f2420}.ds-src.credit{color:#c4b5fd;border-color:#3b2f66;background:#1a1533}.ds-src.invest{color:#f5d38a;border-color:#4a3a1f;background:#241d0f}"
+    },
+    {
+      "name": "Drill-down figure",
+      "kind": "button",
+      "refersTo": "drill-down-figure",
+      "description": "Flow: a figure with rows behind it. Dotted underline at rest; selected = fill + 2px teal inset ring + aria-pressed.",
+      "html": "<button class=\"ds-pick\"><span>Groceries</span><span class=\"v\">−$338.40</span></button> <button class=\"ds-pick on\" aria-pressed=\"true\"><span>Rent</span><span class=\"v\">−$1,850.00</span></button>",
+      "css": ".ds-pick{font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:space-between;gap:12px;width:240px;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:#e6edf3;cursor:pointer}.ds-pick .v{font-variant-numeric:tabular-nums;text-decoration:underline dotted #5a6675;text-underline-offset:4px}.ds-pick:hover{background:#0e1620;box-shadow:inset 0 0 0 1px #1e2a38}.ds-pick.on{background:#1c2c40;box-shadow:inset 0 0 0 2px #2dd4bf}.ds-pick.on .v,.ds-pick:hover .v{text-decoration-color:#2dd4bf}.ds-pick:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+    },
+    {
+      "name": "Filter chip",
+      "kind": "chip",
+      "refersTo": "filter-chip",
+      "description": "Flow: what the table is drilled into, with the month and a Clear button.",
+      "html": "<div class=\"ds-chip\"><span>Moved › Card payment<span class=\"m\"> · Oct 2026</span></span><button>Clear</button></div>",
+      "css": ".ds-chip{font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:inline-flex;align-items:center;gap:10px;padding:3px 4px 3px 12px;background:#1c2c40;border:1px solid #2b415c;border-radius:999px;font-weight:600;color:#e6edf3}.ds-chip .m{font-weight:400;color:#8b98a9}.ds-chip button{font:12px -apple-system,sans-serif;padding:4px 10px;border-radius:999px;background:#111823;border:1px solid #5a6675;color:#8b98a9;cursor:pointer}"
+    },
+    {
+      "name": "Lane card",
+      "kind": "card",
+      "refersTo": "lane-card",
+      "description": "Flow: one of the three equal lanes (In / Out / Moved): title, figure, note, rows.",
+      "html": "<section class=\"ds-lane\"><h2>Out</h2><p class=\"f\">−$2,870.27</p><p class=\"n\">Spending, after $25.99 of refunds.</p><ul><li><span>Rent</span><span>−$1,850.00</span></li><li><span>Home</span><span>−$475.52</span></li></ul></section>",
+      "css": ".ds-lane{font:13px -apple-system,BlinkMacSystemFont,sans-serif;width:260px;background:#111823;border:1px solid #1e2a38;border-radius:12px;padding:14px 16px 12px;color:#e6edf3}.ds-lane h2{margin:0;font-size:14px;font-weight:600}.ds-lane .f{margin:6px 0;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}.ds-lane .n{margin:0;font-size:12px;color:#8b98a9}.ds-lane ul{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid #1e2a38}.ds-lane li{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #172230;font-variant-numeric:tabular-nums}.ds-lane li:last-child{border-bottom:0}"
+    },
+    {
+      "name": "Side-grouped table",
+      "kind": "table",
+      "refersTo": "side-grouped-table",
+      "description": "Flow: a card payment's two legs, each under a group header with count and subtotal.",
+      "html": "<table class=\"ds-side\"><tbody><tr class=\"g\"><th colspan=\"2\">From checking <span>1 row</span></th><td>−$2,171.00</td></tr><tr><td>Oct 25</td><td>CARD CO AUTOPAY</td><td>−$2,171.00</td></tr><tr class=\"g\"><th colspan=\"2\">Into cards <span>1 row</span></th><td>+$2,171.00</td></tr><tr><td>Oct 25</td><td>Payment Thank You</td><td>+$2,171.00</td></tr></tbody></table>",
+      "css": ".ds-side{font:13px -apple-system,BlinkMacSystemFont,sans-serif;border-collapse:collapse;width:420px;color:#8b98a9}.ds-side td,.ds-side th{padding:7px 8px;border-bottom:1px solid #172230;text-align:left}.ds-side td:last-child{text-align:right;font-variant-numeric:tabular-nums}.ds-side .g th,.ds-side .g td{padding-top:14px;font-size:12px;font-weight:600;color:#e6edf3;border-bottom:1px solid #1e2a38}.ds-side .g span{margin-left:8px;font-weight:400;color:#8b98a9}"
     }
   ],
   "narrative": {

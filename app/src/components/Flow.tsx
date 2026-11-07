@@ -122,6 +122,16 @@ export function Flow({
       return p;
     });
   }, []);
+  // Clearing removes the control that had focus (the chip's Clear button);
+  // send focus back to the figure that was selected, or to the table title.
+  const clearPick = useCallback(() => {
+    const pressed = document.querySelector<HTMLElement>('.fl-lanes .fl-pick[aria-pressed="true"]');
+    setPick(null);
+    window.requestAnimationFrame(() => {
+      const to = pressed?.isConnected ? pressed : document.getElementById("fl-txns-title");
+      to?.focus();
+    });
+  }, []);
 
   const loadFlow = useCallback(async () => {
     try {
@@ -204,9 +214,20 @@ export function Flow({
   }
 
   return (
-    <main className="fl-wrap" aria-labelledby="fl-title">
+    <main
+      className="fl-wrap"
+      aria-labelledby="fl-title"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && pick && !e.defaultPrevented) clearPick();
+      }}
+    >
       <MonthStrip months={months} selected={month} onSelect={onMonth} />
 
+      {!selected && (
+        <h1 id="fl-title" className="fl-sr">
+          Flow
+        </h1>
+      )}
       {selected && (
         <>
           <h1 id="fl-title" className="fl-title">
@@ -238,7 +259,7 @@ export function Flow({
           periodLabel={selected ? monthLabel(selected.year, selected.month) : month}
           month={selected}
           pick={pick}
-          onClearPick={() => setPick(null)}
+          onClearPick={clearPick}
           accounts={accounts}
           vocab={vocab}
           notify={notify}
@@ -267,14 +288,31 @@ function MonthStrip({
   }, [months.length]);
 
   const maxOut = Math.max(1, ...months.map((m) => m.out_cents));
+  // One Tab stop for the whole strip (the archive only grows); arrow keys,
+  // Home and End move between months and select as they go.
+  const keys = months.map((m) => monthKey(m.year, m.month));
+  const current = Math.max(0, selected ? keys.indexOf(selected) : keys.length - 1);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step: Record<string, number> = {
+      ArrowLeft: current - 1,
+      ArrowRight: current + 1,
+      Home: 0,
+      End: keys.length - 1,
+    };
+    if (!(e.key in step)) return;
+    e.preventDefault();
+    const next = Math.min(keys.length - 1, Math.max(0, step[e.key]));
+    onSelect(keys[next]);
+    scroller.current?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
+  };
   return (
     <nav className="fl-strip" aria-label="Month">
       <p className="fl-strip-key" id="fl-strip-key">
-        Out per month
+        Out per month<span className="fl-sr">. Left and right arrow keys change the month.</span>
       </p>
-      <ol ref={scroller} aria-describedby="fl-strip-key">
-        {months.map((m) => {
-          const key = monthKey(m.year, m.month);
+      <ol ref={scroller} aria-describedby="fl-strip-key" onKeyDown={onKeyDown}>
+        {months.map((m, i) => {
+          const key = keys[i];
           const on = key === selected;
           const sofar = isCurrentMonth(m);
           const h = Math.max(2, Math.round((Math.max(0, m.out_cents) / maxOut) * 48));
@@ -283,6 +321,7 @@ function MonthStrip({
               <button
                 className={`fl-month${on ? " on" : ""}`}
                 aria-pressed={on}
+                tabIndex={i === current ? 0 : -1}
                 aria-label={`${monthLabel(m.year, m.month)}${sofar ? " so far" : ""}: ${signedCents(-m.out_cents)} out`}
                 onClick={() => onSelect(key)}
               >
@@ -408,6 +447,7 @@ function Figure({
  *  is a button that drills the table into it. */
 function Row({
   label,
+  name,
   value,
   cents,
   target,
@@ -415,6 +455,8 @@ function Row({
   onPick,
 }: {
   label: React.ReactNode;
+  /** Spoken name when `label` isn't plain text. */
+  name?: string;
   value: string;
   cents: number;
   target?: Pick;
@@ -433,6 +475,7 @@ function Row({
       <button
         className={`fl-row fl-pick${on ? " on" : ""}`}
         aria-pressed={on}
+        aria-label={`${name ?? label} ${value}: show these transactions`}
         onClick={() => onPick(target)}
       >
         <span className="fl-row-label">{label}</span>
@@ -519,6 +562,7 @@ function OutLane({
               <Row
                 key={c.category ?? "\u0000"}
                 label={c.category ?? <i>Not yet categorized</i>}
+                name={c.category ?? "Not yet categorized"}
                 value={signedCents(-c.total_cents)}
                 cents={c.total_cents}
                 target={
@@ -602,6 +646,7 @@ function MovedLaneCard({ m, pick, onPick }: { m: FlowMonth } & PickProps) {
               <span className="fl-sub">counted once: the larger of checking out and cards in</span>
             </>
           }
+          name="Card payment"
           value={mv.card_payment_cents === 0 ? "$0.00" : signedCents(-mv.card_payment_cents)}
           cents={mv.card_payment_cents}
           target={{ lane: "card_payment" }}
@@ -654,6 +699,35 @@ function TxnTable({
   const [offset, setOffset] = useState(0);
   const [blocks, setBlocks] = useState<Load<Block[]>>({ state: "loading" });
   const [editing, setEditing] = useState<string | null>(null);
+  const editingRef = useRef<string | null>(null);
+  // Category picked with the keyboard but not yet saved (Enter or leaving
+  // the field saves it); a pointer pick saves at once.
+  const [draft, setDraft] = useState<string | null>(null);
+  const keyNav = useRef(false);
+
+  // A row action reloads the rows and may drop the row from the drilled
+  // table. Where focus goes next: the same row's control, else the row now
+  // in its place, else the table title.
+  const refocus = useRef<{ id: string; sel: string; index: number } | null>(null);
+  const rowsInTable = () =>
+    Array.from(document.querySelectorAll<HTMLElement>(".fl-table tr[data-txn]"));
+  const markFocus = (id: string, sel: string) => {
+    refocus.current = { id, sel, index: rowsInTable().findIndex((r) => r.dataset.txn === id) };
+  };
+  const applyFocus = (clear: boolean) => {
+    const r = refocus.current;
+    if (!r) return;
+    if (clear) refocus.current = null;
+    const rows = rowsInTable();
+    const row =
+      rows.find((x) => x.dataset.txn === r.id) ??
+      (r.index >= 0 ? rows[Math.min(r.index, rows.length - 1)] : undefined);
+    const to =
+      row?.querySelector<HTMLElement>(r.sel) ??
+      row?.querySelector<HTMLElement>(".fl-mini, .fl-cat") ??
+      document.getElementById("fl-txns-title");
+    to?.focus();
+  };
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebounced(search), 250);
@@ -713,6 +787,10 @@ function TxnTable({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (blocks.state !== "loading") applyFocus(true);
+  }, [blocks]);
+
   const onSort = (k: SortKey) => {
     if (sort === k) setDir((d) => (d === "desc" ? "asc" : "desc"));
     else {
@@ -731,8 +809,32 @@ function TxnTable({
     }
   };
 
+  const startEdit = (t: Transaction) => {
+    editingRef.current = t.id;
+    keyNav.current = false;
+    setDraft(null);
+    setEditing(t.id);
+  };
+  /** Close the category field, saving `value` if it changed. `refocus`:
+   *  put focus back on the row (not when the reader tabbed away). */
+  const endEdit = (t: Transaction, value: string | null, refocusRow: boolean) => {
+    if (editingRef.current !== t.id) return; // already closed (blur after Enter)
+    editingRef.current = null;
+    setEditing(null);
+    setDraft(null);
+    const save = !!value && value !== (t.category ?? "");
+    if (refocusRow) {
+      markFocus(t.id, ".fl-cat");
+      // The button is back after this render; a save then reloads the rows
+      // and the effect above places focus again if the row moved.
+      window.requestAnimationFrame(() => applyFocus(!save));
+    }
+    if (save) void setTxnCategory(t, value);
+  };
+
   const setTxnFlag = async (t: Transaction, flag: TxnFlag) => {
     const before = t.flag;
+    markFocus(t.id, ".fl-mini");
     try {
       await api.setFlag(t.id, flag, false);
       notify({
@@ -778,9 +880,9 @@ function TxnTable({
     const a = acctFor(t.account_id);
     const moved = t.flag !== "Spending";
     return (
-      <tr key={t.id} className={moved ? "fl-moved" : undefined}>
+      <tr key={t.id} data-txn={t.id} className={moved ? "fl-moved" : undefined}>
         <td className="fl-date">{fmtDay(t.transacted_at ?? t.posted)}</td>
-        <td>
+        <td className="fl-col-merch">
           <span className="fl-merch">
             <span className="fl-merch-name">{t.payee ?? t.description}</span>
             {t.pending && <span className="fl-pending">pending</span>}
@@ -795,16 +897,32 @@ function TxnTable({
             </span>
           ) : editing === t.id ? (
             <label>
-              <span className="fl-sr">Category for {t.payee ?? t.description}</span>
+              <span className="fl-sr">
+                Category for {t.payee ?? t.description}. Enter saves, Escape cancels.
+              </span>
               <select
                 autoFocus
                 className="fl-input fl-input-sm"
-                value={t.category ?? ""}
-                onBlur={() => setEditing(null)}
-                onKeyDown={(e) => e.key === "Escape" && setEditing(null)}
+                value={draft ?? t.category ?? ""}
+                onPointerDown={() => (keyNav.current = false)}
+                onBlur={() => endEdit(t, draft, false)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation(); // don't also clear the drill-down
+                    endEdit(t, null, true);
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    endEdit(t, draft, true);
+                  } else if (e.key !== "Tab") {
+                    keyNav.current = true;
+                  }
+                }}
                 onChange={(e) => {
-                  setEditing(null);
-                  if (e.target.value) void setTxnCategory(t, e.target.value);
+                  // Arrow keys on a closed select fire change on some
+                  // platforms: browsing must not save (or learn a rule).
+                  if (keyNav.current) setDraft(e.target.value);
+                  else endEdit(t, e.target.value, true);
                 }}
               >
                 <option value="">—</option>
@@ -818,7 +936,7 @@ function TxnTable({
           ) : (
             <button
               className={`fl-cat${t.category ? "" : " unset"}`}
-              onClick={() => setEditing(t.id)}
+              onClick={() => startEdit(t)}
               aria-label={t.category ? `Category: ${t.category}. Change` : "Set a category"}
             >
               {t.category ?? "Set category"}
@@ -899,8 +1017,8 @@ function TxnTable({
     return (
       single && (
         <>
-          {n} in {periodLabel}, net <b>{signedCents(single.total_cents)}</b>
-          <span className="fl-total-hint">, including moves between your accounts</span>
+          {n} in {periodLabel}.
+          <span className="fl-total-hint"> Select any figure above to see only its rows.</span>
         </>
       )
     );
@@ -908,7 +1026,7 @@ function TxnTable({
 
   return (
     <section className="fl-txns" aria-labelledby="fl-txns-title">
-      <h2 id="fl-txns-title" className="fl-section-title">
+      <h2 id="fl-txns-title" className="fl-section-title" tabIndex={-1}>
         Transactions
       </h2>
 
@@ -945,6 +1063,7 @@ function TxnTable({
           <span>
             <span className="fl-sr">Showing </span>
             {what}
+            <span className="fl-chip-period"> · {periodLabel}</span>
           </span>
           <button className="fl-chip-clear" onClick={onClearPick} aria-label={`Clear ${what}`}>
             Clear
@@ -1012,7 +1131,9 @@ function TxnTable({
                     <th scope="rowgroup" colSpan={4}>
                       {b.title}
                       <span className="fl-group-count">
-                        {b.page.total} {b.page.total === 1 ? "row" : "rows"}
+                        {b.page.items.length < b.page.total
+                          ? `first ${b.page.items.length} of ${b.page.total} rows; the subtotal covers all`
+                          : `${b.page.total} ${b.page.total === 1 ? "row" : "rows"}`}
                       </span>
                     </th>
                     <td className="num fl-amt">{signedCents(b.page.total_cents)}</td>

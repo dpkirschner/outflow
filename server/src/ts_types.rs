@@ -48,11 +48,38 @@ fn render() -> String {
         decls!(
             &cfg,
             out,
-            [AccountKind, CategorySource, TxnFlag, Account, Transaction]
+            [
+                AccountKind,
+                CategorySource,
+                TxnFlag,
+                Account,
+                Transaction,
+                Mark,
+                PlaidItem,
+                SyncEntry,
+            ]
         );
     }
 
     // --- core::query, core::subscriptions ---
+    {
+        use outflow_core::query::*;
+        use outflow_core::subscriptions::*;
+        decls!(
+            &cfg,
+            out,
+            [
+                TxnPage,
+                CategorySpend,
+                MerchantSpend,
+                MovedFlow,
+                MovedLane,
+                FlowMonth,
+                Cadence,
+                Subscription,
+            ]
+        );
+    }
 
     // --- core::ledger ---
 

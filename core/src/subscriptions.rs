@@ -6,19 +6,24 @@ const DAY: i64 = 86400;
 const MIN_OCCURRENCES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum Cadence {
     Monthly,
     Yearly,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Subscription {
+    /// Normalized merchant (`normalize_payee`).
     pub payee: String,
     pub cadence: Cadence,
+    /// Median charge, positive.
     pub typical_amount_cents: i64,
     pub occurrences: usize,
     pub first_seen: i64,
     pub last_seen: i64,
+    /// Sum of all charges, positive.
     pub total_cents: i64,
 }
 

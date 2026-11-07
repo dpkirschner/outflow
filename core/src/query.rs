@@ -122,6 +122,7 @@ impl Default for TxnQuery {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct TxnPage {
     /// Matching rows before pagination.
     pub total: usize,
@@ -211,15 +212,22 @@ pub(crate) fn month_index(secs: i64) -> i64 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CategorySpend {
+    /// `None` = uncategorized.
     pub category: Option<String>,
+    /// Spend net of refunds, positive = money spent.
     pub total_cents: i64,
+    /// Number of purchases (refunds not counted).
     pub count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MerchantSpend {
+    /// Normalized merchant (`normalize_payee`).
     pub merchant: String,
+    /// Outflow total, positive = money spent.
     pub total_cents: i64,
     pub count: usize,
 }
@@ -300,6 +308,7 @@ fn is_refund(t: &Transaction) -> bool {
 /// One Moved group's money, seen from the spending-side accounts (checking
 /// and credit). `out_cents` left them, `in_cents` came back; both positive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MovedFlow {
     pub out_cents: i64,
     pub in_cents: i64,
@@ -317,6 +326,7 @@ impl MovedFlow {
 
 /// The Moved lane, split by group (GLOSSARY: Flow lanes).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct MovedLane {
     /// Card balances paid. Both legs are on spending-side accounts (bank out,
     /// card in), so this is the larger of the two sides for the month: never
@@ -332,6 +342,7 @@ pub struct MovedLane {
 
 /// One month of Flow: the In / Out / Moved lanes and the two summary figures.
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct FlowMonth {
     pub year: i64,
     pub month: u32,

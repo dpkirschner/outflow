@@ -230,6 +230,7 @@ impl CategorySource {
 /// real stream (its spend falls to Notable/Noise); `Kept` = force back into the
 /// main streams list, overriding a committed-by-category classification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum Mark {
     Committed,
     Dismissed,
@@ -345,6 +346,7 @@ pub struct Transaction {
 /// cursor lives here because it must commit atomically with the transaction
 /// batch it produced.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct PlaidItem {
     pub item_id: String,
     pub institution: String,
@@ -428,6 +430,7 @@ pub struct TxnMatch {
 
 /// One row of the sync history (`sync_log`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct SyncEntry {
     pub id: i64,
     pub started: i64,

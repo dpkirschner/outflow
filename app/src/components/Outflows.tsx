@@ -4,11 +4,10 @@
 // matches, not just the visible page). Card payments/transfers stay excluded
 // unless the "show excluded" chip is on — that's the whole double-count story.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "../api";
+import { api, type SortKey } from "../api";
 import type {
   Account,
   FlowMonth,
-  SortKey,
   Transaction,
   TxnFlag,
   TxnPage,

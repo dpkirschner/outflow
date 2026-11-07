@@ -6,16 +6,15 @@ import type {
   Account,
   BalancesView,
   DayTotals,
+  ExchangeResult,
   CategorizeResult,
   CategorySpend,
-  Filter,
   LedgerView,
   Mark,
   MatchView,
   MerchantSpend,
   FlowMonth,
   PlaidItem,
-  PullResult,
   Stream,
   Subscription,
   SyncEntry,
@@ -23,9 +22,49 @@ import type {
   Transaction,
   TxnFlag,
   TxnPage,
-  TxnSearch,
-  Window,
 } from "./types";
+
+// Request-side shapes. types.ts is generated from the Rust response DTOs;
+// these are browser-side query parameters and client-built results, so they
+// live here, next to the calls that use them.
+
+export type Window = "3mo" | "6mo" | "12mo" | "all";
+
+export type SortKey = "date" | "amount" | "merchant" | "category";
+
+export interface Filter {
+  since?: number; // epoch seconds, inclusive
+  until?: number; // epoch seconds, exclusive
+  includePending?: boolean;
+  includeNonSpending?: boolean; // charts hide transfers/card payments by default
+}
+
+// Search/sort/filter over the transaction list (GET /api/transactions).
+export interface TxnSearch {
+  since?: number;
+  until?: number;
+  includePending?: boolean;
+  includeNonSpending?: boolean;
+  q?: string;
+  account?: string;
+  category?: string;
+  source?: string;
+  flag?: TxnFlag;
+  minCents?: number;
+  maxCents?: number;
+  sort?: SortKey;
+  dir?: "asc" | "desc";
+  offset?: number;
+  limit?: number;
+}
+
+// pullLive's summary, folded from the SyncReport that POST /pull returns.
+export interface PullResult {
+  added: number;
+  updated: number;
+  accounts: number;
+  warnings: string[];
+}
 
 // A Plaid Link error as forwarded to /api/plaid/link_event (see
 // server/src/plaid_routes.rs `LinkEventBody`). Snake_case, all optional.
@@ -209,13 +248,7 @@ export const api = {
       investments_only: investmentsOnly,
     }),
   plaidExchange: (publicToken: string, institution: string | null) =>
-    post<{
-      item_id: string;
-      institution: string;
-      added: number;
-      updated: number;
-      sync_error: string | null;
-    }>(
+    post<ExchangeResult>(
       "/plaid/exchange",
       { public_token: publicToken, institution },
     ),

@@ -8,7 +8,7 @@ APP_DIR := app
 DB ?= $(HOME)/outflow-dev.db
 
 .DEFAULT_GOAL := help
-.PHONY: help dev web server run serve prod deps test check fmt lint pull clean
+.PHONY: help dev web server run serve prod deps test check types fmt lint pull clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' \
@@ -39,10 +39,16 @@ deps: ## Install frontend dependencies (first-time setup)
 test: ## Run the core + net test suites
 	cargo test -p outflow-core -p outflow-net
 
-check: ## Fast pre-commit gate: format check, clippy, tests
+check: ## Pre-commit gate: fmt, clippy, tests, types.ts + API contract freshness, tsc
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy -p outflow-server --features ts --all-targets -- -D warnings
 	cargo test -p outflow-core -p outflow-net
+	cargo test -p outflow-server --features ts
+	cd $(APP_DIR) && npx tsc --noEmit
+
+types: ## Regenerate app/src/types.ts + the API contract snapshot from the Rust DTOs
+	UPDATE_TYPES=1 cargo test -p outflow-server --features ts -- types_ts contract
 
 fmt: ## Format all Rust code
 	cargo fmt

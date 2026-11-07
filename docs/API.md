@@ -17,7 +17,11 @@ doc is for when you want the raw endpoints.
   their **variant names** as strings (`"Rule"`, `"CardPayment"`, `"High"`), and
   `Money` / every `*_cents` field crosses as a bare JSON **number of cents**
   (never an object). There is no camelCase layer. Response DTO shapes are
-  defined in [DATA_MODEL.md](DATA_MODEL.md); `app/src/types.ts` mirrors them.
+  defined in [DATA_MODEL.md](DATA_MODEL.md). `app/src/types.ts` is
+  **generated** from the Rust structs (`server/src/ts_types.rs`, ts-rs behind
+  the `ts` feature); `server/contract/responses.json` snapshots one instance
+  of every response DTO. `make types` regenerates both; `make check` fails
+  when either is stale.
 - **Timestamps** in query params and bodies are **epoch seconds** (`i64`).
 - **Errors** return the matching 4xx/5xx status with a JSON body
   `{ "error": "<message>" }`. An unknown `/api/*` path is a JSON `404`
@@ -139,5 +143,7 @@ An RO token gets **403** on all of these.
 Routes are registered in `server/src/routes.rs::api_router` (+ `plaid_routes.rs`
 and `match_routes.rs`). Response types are the core domain types — see
 [DATA_MODEL.md](DATA_MODEL.md) for `Account`, `Transaction`, `TxnPage`,
-`LedgerView`, `Subscription`, `MonthlyFlow`, `SyncEntry`, and the enums. If this
-table and the code ever disagree, the code wins — update this doc.
+`LedgerView`, `Subscription`, `FlowMonth`, `SyncEntry`, and the enums. The
+exact JSON shapes are in `app/src/types.ts` (generated) and
+`server/contract/responses.json` (one example of each). If this table and the
+code ever disagree, the code wins — update this doc.

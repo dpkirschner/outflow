@@ -1,5 +1,6 @@
 // Display helpers for the rhythm ledger.
-import type { Account, Coverage, Source, StreamCadence, Trend, Window } from "../../types";
+import type { Window } from "../../api";
+import type { Account, Coverage, Source, StreamCadence, Trend } from "../../types";
 import { formatDate } from "../../format";
 
 const WINDOW_SPAN: Record<Window, string> = {

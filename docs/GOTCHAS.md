@@ -10,6 +10,16 @@ boundary, Plaid, secrets, encryption, or the demo setup.
   client) sends Rust field names (`txn_id`, `public_token`).
 - **`Money` is a number in JS.** serde-transparent newtype → bare number
   (cents). Never expect an object.
+- **`app/src/types.ts` is generated; don't edit it.** Change the Rust DTO,
+  then `make types` (`UPDATE_TYPES=1 cargo test -p outflow-server --features
+  ts -- types_ts contract`). A new response type needs three things: derive
+  `#[cfg_attr(feature = "ts", derive(ts_rs::TS))]`, list it in
+  `server/src/ts_types.rs`, and add a fixture in `server/src/contract.rs` so
+  `tsc` checks real JSON against it (`app/src/contract.gen.ts`). Request-side
+  shapes (query params, `PullResult`) are hand-written in `api.ts`.
+- **ts-rs maps `i64` to `bigint` by default.** The generator sets it to
+  `number`, and `Money` has a manual impl. A plain `cargo test` without
+  `--features ts` skips the types check; `make check` passes the feature.
 - **`Store` is not `Sync`** (holds a rusqlite `Connection`). The server keeps
   it in `Arc<Mutex<Store>>` and does all store work inside `spawn_blocking`;
   network calls happen **outside** the lock so reads stay responsive mid-sync.

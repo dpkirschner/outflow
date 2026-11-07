@@ -114,7 +114,8 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
   sortable/filterable table, `components/Outflows.tsx`), **Review**
   (card-payment matches, `components/MatchReview.tsx`), and **Connections**
   (Plaid Link + item health + sync log, `components/Connections.tsx`).
-  `api.ts` is the single HTTP client; `types.ts` mirrors the serde DTOs. See
+  `api.ts` is the single HTTP client; `types.ts` is generated from the serde
+  DTOs (`server/src/ts_types.rs`). See
   DATA_MODEL.md for the serialization boundary.
 
 ## Config resolution (headless server)

@@ -1,4 +1,5 @@
-import type { Account, Window } from "../../types";
+import type { Window } from "../../api";
+import type { Account } from "../../types";
 
 const WINDOWS: Window[] = ["3mo", "6mo", "12mo", "all"];
 const WIN_LABEL: Record<Window, string> = { "3mo": "3mo", "6mo": "6mo", "12mo": "12mo", all: "All" };

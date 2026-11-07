@@ -27,7 +27,7 @@ export function StreamSlideOver({
   /// Called with the merchant key when the candidate is promoted. The parent
   /// owns the reload + open-the-new-stream flow (this panel just closes).
   onPromote?: (merchantKey: string) => void | Promise<void>;
-  win: import("../../types").Window;
+  win: import("../../api").Window;
   accounts: Account[];
   vocab: string[];
   hasCard: boolean;

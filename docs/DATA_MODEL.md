@@ -190,8 +190,8 @@ categories only; manual fixes overwrite anything).
 ## Serialization boundary (Rust → TS)
 
 - serde serializes struct fields as **snake_case** and enums as their
-  **variant names** (`"Rule"`, `"CardPayment"`). `app/src/types.ts` mirrors
-  this exactly; the HTTP API carries these shapes verbatim (there is no
+  **variant names** (`"Rule"`, `"CardPayment"`). `app/src/types.ts` is
+  generated from these structs (`server/src/ts_types.rs`), so it matches; the HTTP API carries these shapes verbatim (there is no
   camelCase translation layer — that died with Tauri).
 - `Money` and all `*_cents: i64` fields cross as JS **numbers** (cents).
 - CLI `--json` emits the same serde shapes, so local and `--server` output are

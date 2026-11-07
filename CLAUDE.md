@@ -64,7 +64,8 @@ gotcha the raw commands hide: **`make run` rebuilds `app/dist` first, then
 serves** (reach for it after a UI change); **`make serve` skips the rebuild**
 and serves whatever's already in `app/dist` (backend-only iteration). Running
 the bare server binary never rebuilds the frontend, so a stale `app/dist`
-serves the old bundle. `make check` is the fmt-check + clippy + test gate.
+serves the old bundle. `make check` is the gate: fmt-check, clippy, tests (server included), the
+types.ts/contract freshness check and `tsc`.
 
 Server env: `OUTFLOW_DB`, `OUTFLOW_LISTEN` (default 127.0.0.1:8080),
 `OUTFLOW_WEB_DIR` (default app/dist), `OUTFLOW_PLAID_CLIENT_ID`,
@@ -162,6 +163,9 @@ Violating these breaks data integrity or the domain contract:
 - **The wire format is snake_case** (serde field names straight over HTTP).
   The old Tauri camelCase translation is gone; `app/src/api.ts` is the single
   client and sends Rust field names (`txn_id`, `public_token`).
+- **`app/src/types.ts` is generated** from the Rust DTOs: change the struct,
+  then `make types`. `make check` fails when it or the API contract snapshot
+  is stale.
 - **`None` filter must mean "everything"** (`TxnFilter::all()`). A derived
   `Default` would set `include_pending = false` and silently drop pending rows
   — `FilterParams::to_filter` defaults pending=true explicitly.

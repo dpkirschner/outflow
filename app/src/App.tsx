@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { Account, LedgerView, Stream, Window } from "./types";
+import type { Window } from "./api";
+import type { Account, LedgerView, Stream } from "./types";
 import { Toast, type ToastMsg } from "./components/Toast";
 import { ActionBar } from "./components/ledger/ActionBar";
 import { StatStrip, LedgerZones } from "./components/ledger/Zones";

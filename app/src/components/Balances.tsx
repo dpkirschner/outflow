@@ -1,9 +1,18 @@
 // Balances: the current state of every visible account — not money movement.
-// Totals, a net-worth/cash trend from per-sync snapshots, an idle-cash
-// callout (investment accounts sitting on cash), and per-group account rows;
-// investment rows expand to their holdings. All math is server-side
-// (core::balances); this only renders it.
+// Totals, net-worth and cash trend charts from per-sync snapshots, an
+// idle-cash callout (investment accounts sitting on cash), and per-group
+// account rows; investment rows expand to their holdings. All math is
+// server-side (core::balances); this only renders it.
 import { useCallback, useEffect, useState } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { api } from "../api";
 import type { AccountBalance, BalanceGroup, BalancesView, DayTotals, HoldingRow } from "../types";
 import { accountSource, agoLabel } from "./ledger/labels";
@@ -253,9 +262,83 @@ function AccountRow({
   );
 }
 
-// Net worth + cash over time as a small inline SVG (no chart library). Both
-// lines share one y-scale so the gap between them reads as "invested".
+// Net worth and cash over time: two side-by-side charts, each on its own
+// y-scale (fit to the visible data, not anchored at $0) so small moves on a
+// large total still show. X is real dates, so sync gaps read as gaps. A range
+// longer than the history clips to the first snapshot and fills the chart.
+const RANGES = [
+  { key: "1W", days: 7 },
+  { key: "1M", days: 30 },
+  { key: "3M", days: 91 },
+  { key: "6M", days: 182 },
+  { key: "1Y", days: 365 },
+] as const;
+type RangeKey = (typeof RANGES)[number]["key"];
+
+const DAY_MS = 86_400_000;
+// SVG presentation attributes don't resolve CSS vars; these mirror ledger.css.
+const C_LINE = "#1e2a38";
+const C_DIM = "#8b98a9";
+const C_NW = "#2dd4bf";
+const C_CASH = "#f5d38a";
+
+type Field = "net_worth" | "cash";
+type Pt = { t: number; day: string; net_worth: number; cash: number };
+
+// "YYYY-MM-DD" → UTC midnight ms; formatting below is UTC too, so no TZ drift.
+const dayMs = (day: string) => Date.parse(`${day}T00:00:00Z`);
+
+// "Nov 3", or "Nov '26" for long ranges.
+function tickDate(t: number, long: boolean): string {
+  const d = new Date(t);
+  const mon = d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  return long ? `${mon} '${String(d.getUTCFullYear()).slice(2)}` : `${mon} ${d.getUTCDate()}`;
+}
+
+// Compact axis dollars: "$412k", "$322.5k", "$1.25M", "−$950". Up to two
+// decimals, trailing zeros dropped, so round-number ticks read exactly.
+function axisMoney(cents: number): string {
+  const d = Math.abs(cents) / 100;
+  const sign = cents < 0 ? "−" : "";
+  const short = (n: number) => String(Number(n.toFixed(2)));
+  if (d >= 1e6) return `${sign}$${short(d / 1e6)}M`;
+  if (d >= 1e3) return `${sign}$${short(d / 1e3)}k`;
+  return `${sign}$${Math.round(d)}`;
+}
+
+// ~5 evenly spaced whole-day ticks, counted back from the newest day so the
+// latest snapshot is always labelled; the oldest day gets a label too unless
+// it would crowd its neighbour.
+function dayTicks(lo: number, hi: number): number[] {
+  const days = Math.round((hi - lo) / DAY_MS);
+  const step = Math.max(1, Math.ceil(days / 4));
+  const out: number[] = [];
+  for (let k = 0; k <= days; k += step) out.unshift(hi - k * DAY_MS);
+  if (out[0] !== lo && out[0] - lo >= step * DAY_MS * 0.6) out.unshift(lo);
+  return out;
+}
+
+// Round-number y ticks (1/2/2.5/5 × 10ⁿ) covering [min, max] in ~3 steps.
+// Returns the ticks; the axis domain is their first and last.
+function moneyTicks(min: number, max: number): number[] {
+  // Flat or near-flat data: still show a band of at least ~$50 or 0.5%.
+  const span = Math.max(max - min, Math.abs(max) * 0.005, 5_000);
+  const raw = span / 3;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw)!;
+  const mid = (min + max) / 2;
+  let lo = Math.floor(Math.min(min, mid - span / 2) / step) * step;
+  let hi = Math.ceil(Math.max(max, mid + span / 2) / step) * step;
+  // Keep lines off the very edge: pad by a step only if they sit on it.
+  if (min - lo < step * 0.03) lo -= step;
+  if (hi - max < step * 0.03) hi += step;
+  const out: number[] = [];
+  for (let v = lo; v <= hi + step / 2; v += step) out.push(Math.round(v));
+  return out;
+}
+
 function Trend({ days }: { days: DayTotals[] }) {
+  const [range, setRange] = useState<RangeKey>("1M");
   if (days.length < 2) {
     return (
       <div className="bl-trend bl-dim">
@@ -265,41 +348,148 @@ function Trend({ days }: { days: DayTotals[] }) {
       </div>
     );
   }
-  const W = 600;
-  const H = 90;
-  const vals = days.flatMap((d) => [d.net_worth, d.cash]);
-  const lo = Math.min(0, ...vals);
-  const hi = Math.max(...vals);
-  const span = hi - lo || 1;
-  const pts = (pick: (d: DayTotals) => number) =>
-    days
-      .map((d, i) => {
-        const x = (i / (days.length - 1)) * W;
-        const y = H - ((pick(d) - lo) / span) * H;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
-  const first = days[0];
-  const last = days[days.length - 1];
-  const delta = last.net_worth - first.net_worth;
+  const all: Pt[] = days.map((d) => ({
+    t: dayMs(d.day),
+    day: d.day,
+    net_worth: d.net_worth,
+    cash: d.cash,
+  }));
+  const end = all[all.length - 1].t;
+  const want = end - RANGES.find((r) => r.key === range)!.days * DAY_MS;
+  const clipped = want < all[0].t;
+  const start = clipped ? all[0].t : want;
+  const pts = all.filter((p) => p.t >= start);
+  const spanDays = Math.round((end - start) / DAY_MS) + 1;
+
   return (
     <div className="bl-trend">
-      <div className="bl-trend-legend">
-        <span>
-          <i className="bl-key nw" /> net worth
-        </span>
-        <span>
-          <i className="bl-key cash" /> cash
-        </span>
-        <span className="bl-dim">
-          {first.day} → {last.day} · {delta >= 0 ? "+" : ""}
-          {money(delta)}
-        </span>
+      <div className="bl-trend-head">
+        <div className="lg-win bl-range" role="group" aria-label="Trend range">
+          {RANGES.map((r) => (
+            <button
+              key={r.key}
+              className={r.key === range ? "on" : ""}
+              aria-pressed={r.key === range}
+              onClick={() => setRange(r.key)}
+            >
+              {r.key}
+            </button>
+          ))}
+        </div>
+        {clipped && <span className="bl-dim">showing all {spanDays} days of history</span>}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="bl-trend-svg">
-        <polyline className="nw" points={pts((d) => d.net_worth)} />
-        <polyline className="cash" points={pts((d) => d.cash)} />
-      </svg>
+      {pts.length < 2 ? (
+        <div className="bl-dim bl-trend-empty">
+          Only one snapshot in this range ({pts[0]?.day ?? "none"}) — pick a longer range.
+        </div>
+      ) : (
+        <div className="bl-charts">
+          <TrendChart label="Net worth" field="net_worth" color={C_NW} pts={pts} lo={start} hi={end} />
+          <TrendChart label="Cash" field="cash" color={C_CASH} pts={pts} lo={start} hi={end} />
+        </div>
+      )}
     </div>
   );
 }
+
+function TrendChart({
+  label,
+  field,
+  color,
+  pts,
+  lo,
+  hi,
+}: {
+  label: string;
+  field: Field;
+  color: string;
+  pts: Pt[];
+  lo: number;
+  hi: number;
+}) {
+  const vals = pts.map((p) => p[field]);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const yTicks = moneyTicks(min, max);
+  const delta = vals[vals.length - 1] - vals[0];
+  const longTicks = hi - lo > 180 * DAY_MS;
+  return (
+    <div className="bl-chart">
+      <div className="bl-chart-head">
+        <span>
+          <i className="bl-key" style={{ background: color }} /> {label}
+        </span>
+        <span className={delta < 0 ? "bl-neg" : delta > 0 ? "bl-pos" : "bl-dim"}>
+          {delta > 0 ? "+" : ""}
+          {money(delta)}
+        </span>
+      </div>
+      <ResponsiveContainer width="100%" height={180}>
+        <LineChart data={pts} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke={C_LINE} vertical={false} />
+          <XAxis
+            dataKey="t"
+            type="number"
+            scale="time"
+            domain={[lo, hi]}
+            ticks={dayTicks(lo, hi)}
+            tickFormatter={(t: number) => tickDate(t, longTicks)}
+            tick={{ fill: C_DIM, fontSize: 11 }}
+            stroke={C_LINE}
+            tickLine={false}
+          />
+          <YAxis
+            domain={[yTicks[0], yTicks[yTicks.length - 1]]}
+            ticks={yTicks}
+            interval={0}
+            tickFormatter={axisMoney}
+            tick={{ fill: C_DIM, fontSize: 11 }}
+            tickLine={false}
+            axisLine={false}
+            width={52}
+          />
+          <Tooltip
+            content={<TrendTip title={label} field={field} />}
+            cursor={{ stroke: C_DIM, strokeDasharray: "3 3" }}
+            isAnimationActive={false}
+          />
+          <Line
+            type="monotone"
+            dataKey={field}
+            stroke={color}
+            strokeWidth={2}
+            dot={pts.length <= 31 ? { r: 2, fill: color, strokeWidth: 0 } : false}
+            activeDot={{ r: 4 }}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// `active`/`payload` are injected by recharts' Tooltip. So is `label` (the raw
+// x value), which would clobber a prop of that name, hence `title`.
+function TrendTip({
+  active,
+  payload,
+  title,
+  field,
+}: {
+  active?: boolean;
+  payload?: { payload: Pt }[];
+  title: string;
+  field: Field;
+}) {
+  if (!active || !payload?.length) return null;
+  const p = payload[0].payload;
+  return (
+    <div className="bl-tip">
+      <div className="bl-dim">{p.day}</div>
+      <div>
+        {title} <b>{money(p[field])}</b>
+      </div>
+    </div>
+  );
+}
+

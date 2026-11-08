@@ -336,15 +336,18 @@ those capsules.
 ### Change equation (Holdings)
 - The Holdings focal moment, open on the page like Flow's headline pair:
   "Net worth change = Markets + Added" as three figures (34px for the
-  change, 24px for the parts, tabular) joined by Text Faint operators, the
+  change, 24px for the parts, tabular) joined by Text Dim operators, the
   change's percent beside it in Text Dim. Under it, the start and end in
-  words, a one-line Text Dim definition, and a note when Markets can't
+  words, the definitions behind a closed `<details>` ("What Markets and
+  Added mean · show", dotted Text Dim underline, the state spelled out
+  rather than a caret), and a note when Markets can't
   cover every investment account (it names them and says their whole
   change is in Added). Below 480px the change takes its own line.
 
 ### Breakdown sum (Holdings)
 - Stat tiles joined by their signs: Cash + Invested − Credit owed − Loans
-  = Net worth, owed amounts shown as positive magnitudes after a minus,
+  = Net worth, owed amounts shown as positive magnitudes after a minus
+  (Text Dim operators: the sign carries the meaning, so it needs AA),
   never in Out Red. The Net worth tile carries the Selected edge. Below
   480px the tiles become a column sum, key left and value right.
 
@@ -354,15 +357,31 @@ those capsules.
   total sits in the Value column. A stale sync is an Attention Amber note
   beside the account. Investment rows open their positions with a real
   button ("Show 4 positions" / "Hide positions", `aria-expanded`), never a
-  caret. Position rows never get a total: they don't sum to the account
-  gain. Below 720px figures move under the name with their own keys, and
+  caret ("Show 3 positions and cash" when it holds uninvested cash).
+  Position rows never get a total: they don't sum to the account gain, but
+  their values do sum to the account's value (uninvested cash is its own
+  "Cash · cash" row). Position tables use fixed figure columns so every
+  account's positions line up. A sold position says "sold" under Shares.
+- **Owed rows** speak in their own frame: Change reads "up $763.14" /
+  "down $410.00" (what's owed), not the net-worth sign beside an "owed"
+  value, which reads backwards.
+- **Reasons are visible, never `title`-only.** A missing figure is "—"
+  with an sr-only reason, and the table carries one Text Dim footnote
+  ("— under Unrealized: the broker reports no cost basis"). "from first
+  snapshot" shows only on accounts that started later than the rest; when
+  all did, the hero says it once.
+- **Range switches keep the old figures** dimmed (`hd-busy`, 0.55 opacity
+  after 150ms, `aria-busy`) until the new ones land; only the newest
+  request may write. "Loading…" (`role=status`) appears only on first load.
+- Below 720px figures move under the name with their own keys, and
   each position becomes two lines (holding and value, then labelled
-  shares, gain and unrealized).
+  shares, gain and unrealized, the basis under the unrealized gain).
 
 ### Holdings charts
 - Net worth (Field Teal) and Invested vs contributed (Kind-invest solid,
   Text Dim dashed for the contributed baseline, with a legend). Linear
-  lines, no smoothing, one y-axis each, `role=img` with a sentence summary,
+  lines, no smoothing, one y-axis each, `role=img` with a sentence summary
+  (dates, start, end, change, and the same caveat as the visible note),
   tooltip dates in the axis's month-day order. Cash is a margin note under
   the net worth chart, not a third line.
 

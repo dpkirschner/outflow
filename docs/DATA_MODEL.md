@@ -288,6 +288,11 @@ change`. Visible accounts only.
   value − end basis (None without a basis). `by=position` combines a ticker,
   else a security id (warrants stay apart), across accounts; a sum is None
   when any part lacks it. Nothing is dropped for being worth $0.
+  Each investment account also gets a synthetic `cash:uninvested` row
+  (`is_cash`, gain reason `cash`): its balance snapshot less its holdings
+  at the start and end snapshot times, so an account's positions sum to its
+  value. Omitted when there was no uninvested cash at either end; combined
+  across accounts under `by=position`.
   **Position gains do not sum to the account's gain**, by design: the
   reinvested dividend counts as a position contribution but nets to zero at
   account level, and positions and balance are priced at different moments.

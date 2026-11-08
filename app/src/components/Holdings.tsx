@@ -4,7 +4,7 @@
 //
 // The month is App state shared with Flow; longer ranges (3M / YTD / 1Y /
 // All) are remembered between visits in this browser.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -120,6 +120,14 @@ function signedPct(bp: number): string {
   return bp > 0 ? `+${body}` : bp < 0 ? `−${body}` : body;
 }
 
+/** An error as a sentence: the message, without "Error: " in front. */
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** Share quantity without trailing zeros: "936.0000" → "936", "1.2500" → "1.25". */
+function qtyLabel(q: string): string {
+  return q.includes(".") ? q.replace(/\.?0+$/, "") : q;
+}
+
 const tone = (cents: number | null) =>
   cents === null || cents === 0 ? "" : cents > 0 ? " hd-up" : " hd-down";
 
@@ -139,6 +147,13 @@ export function Holdings({
   const [change, setChange] = useState<Load<NetWorthChange>>({ state: "loading" });
   const [positions, setPositions] = useState<Load<PositionChange[]>>({ state: "loading" });
   const [combined, setCombined] = useState<Load<PositionChange[]>>({ state: "loading" });
+  // A range switch keeps the last figures on screen (dimmed) until the new
+  // ones land; only the newest request may write, so a slow earlier
+  // response can't overwrite a later month.
+  const [busy, setBusy] = useState(false);
+  const [combinedBusy, setCombinedBusy] = useState(false);
+  const changeSeq = useRef(0);
+  const combinedSeq = useRef(0);
 
   const setView = (v: View) => {
     setViewState(v);
@@ -152,7 +167,7 @@ export function Holdings({
       setHistory({ state: "ok", data: h });
       setBalances(b);
     } catch (err) {
-      setHistory({ state: "error", error: String(err) });
+      setHistory({ state: "error", error: errText(err) });
     }
   }, []);
   useEffect(() => {
@@ -189,18 +204,23 @@ export function Holdings({
   const rangeKey = JSON.stringify(range);
 
   const loadChange = useCallback(async () => {
-    setChange({ state: "loading" });
-    setPositions({ state: "loading" });
+    const seq = ++changeSeq.current;
+    setBusy(true);
+    setChange((c) => (c.state === "ok" ? c : { state: "loading" }));
     try {
       const [c, p] = await Promise.all([
         api.netWorthChange(range),
         api.holdingsChange(range, "account"),
       ]);
+      if (seq !== changeSeq.current) return;
       setChange({ state: "ok", data: c });
       setPositions({ state: "ok", data: p });
     } catch (err) {
-      setChange({ state: "error", error: String(err) });
-      setPositions({ state: "error", error: String(err) });
+      if (seq !== changeSeq.current) return;
+      setChange({ state: "error", error: errText(err) });
+      setPositions({ state: "error", error: errText(err) });
+    } finally {
+      if (seq === changeSeq.current) setBusy(false);
     }
     // rangeKey stands for range (a fresh object each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -211,11 +231,16 @@ export function Holdings({
   }, [loadChange, view, month]);
 
   const loadCombined = useCallback(async () => {
-    setCombined({ state: "loading" });
+    const seq = ++combinedSeq.current;
+    setCombinedBusy(true);
+    setCombined((c) => (c.state === "ok" ? c : { state: "loading" }));
     try {
-      setCombined({ state: "ok", data: await api.holdingsChange(range, "position") });
+      const data = await api.holdingsChange(range, "position");
+      if (seq === combinedSeq.current) setCombined({ state: "ok", data });
     } catch (err) {
-      setCombined({ state: "error", error: String(err) });
+      if (seq === combinedSeq.current) setCombined({ state: "error", error: errText(err) });
+    } finally {
+      if (seq === combinedSeq.current) setCombinedBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rangeKey]);
@@ -225,7 +250,16 @@ export function Holdings({
 
   // ── states ──
   if (history.state === "loading") {
-    return <div className="lg-empty">Loading holdings…</div>;
+    return (
+      <main className="hd-wrap" aria-labelledby="hd-title">
+        <h1 id="hd-title" className="lg-sr">
+          Holdings
+        </h1>
+        <p className="lg-empty" role="status">
+          Loading holdings…
+        </p>
+      </main>
+    );
   }
   if (history.state === "error") {
     return (
@@ -308,7 +342,11 @@ export function Holdings({
         </div>
       </div>
 
-      {change.state === "loading" && <div className="hd-state hd-quiet">Loading…</div>}
+      {change.state === "loading" && (
+        <p className="hd-state hd-quiet" role="status">
+          Loading…
+        </p>
+      )}
       {change.state === "error" && (
         <div className="hd-state" role="alert">
           <p>Couldn't load the change: {change.error}</p>
@@ -318,7 +356,7 @@ export function Holdings({
         </div>
       )}
       {change.state === "ok" && (
-        <>
+        <div className={busy ? "hd-body hd-busy" : "hd-body"} aria-busy={busy}>
           <Hero
             c={change.data}
             phrase={view === "month" ? title : VIEW_PHRASE[view]}
@@ -352,10 +390,14 @@ export function Holdings({
             {lens === "account" ? (
               <AccountGroups c={change.data} positions={positions} acctById={acctById} live={live} />
             ) : (
-              <CombinedPositions load={combined} onRetry={() => void loadCombined()} />
+              <CombinedPositions
+                load={combined}
+                busy={combinedBusy}
+                onRetry={() => void loadCombined()}
+              />
             )}
           </section>
-        </>
+        </div>
       )}
     </main>
   );
@@ -424,10 +466,13 @@ function Hero({
         From <b>{formatCents(c.start.net_worth)}</b> on {start} to{" "}
         <b>{formatCents(c.end.net_worth)}</b> on {end}.
       </p>
-      <p className="hd-note hd-quiet">
-        Markets: what investments earned beyond the money put in. Added: saved from income, less
-        spending.
-      </p>
+      <details className="hd-defs hd-note">
+        <summary>What Markets and Added mean</summary>
+        <p className="hd-quiet">
+          Markets: what investments earned beyond the money put in. Added: saved from income, less
+          spending.
+        </p>
+      </details>
       {c.added_includes_unmeasured && (
         <p className="hd-note">
           Markets covers {measured} of {invest.length} investment accounts.{" "}
@@ -555,11 +600,15 @@ function Charts({ c, history }: { c: NetWorthChange; history: DayTotals[] }) {
             { key: "contributed", label: "Contributed", color: C_CONTRIB, dash: "5 4" },
           ]}
           pts={inv}
-          summary={`Invested from ${formatCents(firstInv.invested)} to ${formatCents(
-            lastInv.invested,
-          )}; contributions add ${signedCents(
+          summary={`Invested from ${dayLabel(firstInv.day)} to ${dayLabel(lastInv.day)}: ${formatCents(
+            firstInv.invested,
+          )} to ${formatCents(lastInv.invested)}; contributions add ${signedCents(
             lastInv.contributed - firstInv.contributed,
-          )} over the range. The gap between the lines is market gain.`}
+          )}. ${
+            c.contributed_complete
+              ? "The gap between the lines is what the market did."
+              : "Some contributions aren't reported, so the gap overstates the market."
+          }`}
           note={
             c.contributed_complete ? (
               <>The gap between the lines is what the market did.</>
@@ -783,6 +832,8 @@ function AccountGroups({
       else next.add(id);
       return next;
     });
+  // Every account starting at its first snapshot is said once, in the hero.
+  const allPartial = c.accounts.every((a) => a.partial_start);
   const posOf = (id: string) =>
     positions.state === "ok" ? positions.data.filter((p) => p.account_ids[0] === id) : [];
   return (
@@ -817,6 +868,7 @@ function AccountGroups({
                     bal={acctById.get(a.account_id)}
                     owed={owed}
                     live={live}
+                    partialNote={a.partial_start && !allPartial}
                     positions={posOf(a.account_id)}
                     expanded={open.has(a.account_id)}
                     onToggle={() => toggle(a.account_id)}
@@ -837,6 +889,7 @@ function AccountRow({
   bal,
   owed,
   live,
+  partialNote,
   positions,
   expanded,
   onToggle,
@@ -845,6 +898,8 @@ function AccountRow({
   bal: AccountBalance | undefined;
   owed: boolean;
   live: boolean;
+  /** This account started later than the rest. */
+  partialNote: boolean;
   positions: PositionChange[];
   expanded: boolean;
   onToggle: () => void;
@@ -860,12 +915,7 @@ function AccountRow({
       a.gain !== null ? (
         <span className={`hd-num${tone(a.gain)}`}>{signedCents(a.gain)}</span>
       ) : a.gain_reason === "contributions_unknown" ? (
-        <span
-          className="hd-quiet"
-          title="This account doesn't report its contributions, so its gain can't be measured."
-        >
-          contributions unknown
-        </span>
+        <span className="hd-quiet">contributions unknown</span>
       ) : a.gain_reason === "cash" ? (
         <span className="hd-quiet">cash</span>
       ) : (
@@ -885,7 +935,7 @@ function AccountRow({
           {stale && account && (
             <span className="hd-stale">synced {agoLabel(account.last_synced)}</span>
           )}
-          {a.partial_start && <span className="hd-quiet">from first snapshot</span>}
+          {partialNote && <span className="hd-quiet">from first snapshot</span>}
         </span>
         <span className="hd-fig">
             <span className="hd-fig-key">Value</span>
@@ -895,12 +945,15 @@ function AccountRow({
           </span>
           <span className="hd-fig">
             <span className="hd-fig-key">Change</span>
-            {a.change !== null ? (
-              <span className="hd-num">{signedCents(a.change)}</span>
-            ) : (
-              <span className="hd-quiet" title="Only one snapshot in this range">
-                —
+            {a.change === null ? (
+              <span className="hd-quiet">
+                <span aria-hidden="true">—</span>
+                <span className="lg-sr">no change: one snapshot in this range</span>
               </span>
+            ) : owed ? (
+              <OwedChange cents={a.change} />
+            ) : (
+              <span className="hd-num">{signedCents(a.change)}</span>
             )}
           </span>
         {invest ? (
@@ -920,7 +973,7 @@ function AccountRow({
             aria-controls={panel}
             onClick={onToggle}
           >
-            {expanded ? "Hide positions" : `Show ${held.length} position${held.length === 1 ? "" : "s"}`}
+            {expanded ? "Hide positions" : showLabel(held)}
           </button>
           {expanded && (
             <div id={panel}>
@@ -933,15 +986,44 @@ function AccountRow({
   );
 }
 
+/** "Show 3 positions", "Show 3 positions and cash". */
+function showLabel(held: PositionChange[]): string {
+  const n = held.filter((p) => !p.is_cash).length;
+  const cash = held.some((p) => p.is_cash);
+  if (n === 0) return "Show cash";
+  return `Show ${n} position${n === 1 ? "" : "s"}${cash ? " and cash" : ""}`;
+}
+
+/** A liability's change in its own frame: what's owed went up or down.
+ * `cents` is the effect on net worth (paying down is positive). */
+function OwedChange({ cents }: { cents: number }) {
+  if (cents === 0) return <span className="hd-num">{formatCents(0)}</span>;
+  return (
+    <span className="hd-num">
+      <span className="lg-sr">owed </span>
+      {cents < 0 ? "up " : "down "}
+      {formatCents(Math.abs(cents))}
+    </span>
+  );
+}
+
 // ── By position ────────────────────────────────────────────────────────────
 function CombinedPositions({
   load,
+  busy,
   onRetry,
 }: {
   load: Load<PositionChange[]>;
+  busy: boolean;
   onRetry: () => void;
 }) {
-  if (load.state === "loading") return <p className="hd-quiet hd-pad">Loading positions…</p>;
+  if (load.state === "loading") {
+    return (
+      <p className="hd-quiet hd-pad" role="status">
+        Loading positions…
+      </p>
+    );
+  }
   if (load.state === "error") {
     return (
       <div className="hd-state" role="alert">
@@ -956,19 +1038,32 @@ function CombinedPositions({
     return <p className="hd-quiet hd-pad">No positions in this range.</p>;
   }
   return (
-    <>
+    <div className={busy ? "hd-busy" : undefined} aria-busy={busy}>
       <p className="hd-meta hd-pad">
         Each security combined across accounts. Position gains count a reinvested dividend as money
         put in, so they don't add up to the account gains.
       </p>
       <PositionTable rows={load.data} showAccounts />
-    </>
+    </div>
   );
 }
 
 function PositionTable({ rows, showAccounts }: { rows: PositionChange[]; showAccounts: boolean }) {
+  // Reasons are footnotes under the table, not hover-only titles.
+  const noBasis = rows.some((p) => !p.is_cash && !p.sold && p.cost_basis === null);
+  const unknown = rows.some(
+    (p) => p.gain === null && p.gain_reason !== "cash" && p.change_reason !== "one_snapshot",
+  );
   return (
+    <>
     <table className="hd-pos">
+      <colgroup>
+        <col />
+        <col className="hd-col-qty" />
+        <col className="hd-col-val" />
+        <col className="hd-col-gain" />
+        <col className="hd-col-unr" />
+      </colgroup>
       <thead>
         <tr>
           <th scope="col">Holding</th>
@@ -1002,7 +1097,9 @@ function PositionTable({ rows, showAccounts }: { rows: PositionChange[]; showAcc
                 {p.label !== p.name && p.name && <span className="hd-quiet hd-hname">{p.name}</span>}
                 {showAccounts && <span className="hd-quiet hd-hname">{p.account}</span>}
               </td>
-              <td className="r hd-c-qty" data-label="Shares">{p.end_quantity}</td>
+              <td className="r hd-c-qty" data-label="Shares">
+                {p.sold ? <span className="hd-quiet">sold</span> : p.is_cash ? "—" : qtyLabel(p.end_quantity)}
+              </td>
               <td className="r hd-c-val" data-label="Value">
                 {formatCents(p.end_value)}
                 {stalePrice && <span className="hd-stale hd-sub">priced {dayLabel(p.price_as_of!)}</span>}
@@ -1012,16 +1109,19 @@ function PositionTable({ rows, showAccounts }: { rows: PositionChange[]; showAcc
               </td>
               <td className="r hd-c-unr" data-label="Unrealized">
                 {p.unrealized_gain !== null && p.cost_basis !== null ? (
-                  <>
+                  <span className="hd-unr">
                     <span className={tone(p.unrealized_gain).trim()}>
                       {signedCents(p.unrealized_gain)}
                       {p.unrealized_bp !== null && ` ${signedPct(p.unrealized_bp)}`}
                     </span>
                     <span className="hd-quiet hd-sub">basis {formatCents(p.cost_basis)}</span>
-                  </>
+                  </span>
                 ) : (
-                  <span className="hd-quiet" title="The broker reports no cost basis">
-                    no basis
+                  <span className="hd-unr hd-quiet">
+                    <span aria-hidden="true">—</span>
+                    <span className="lg-sr">
+                      {p.sold || p.is_cash ? "none" : "no cost basis reported"}
+                    </span>
                   </span>
                 )}
               </td>
@@ -1030,6 +1130,13 @@ function PositionTable({ rows, showAccounts }: { rows: PositionChange[]; showAcc
         })}
       </tbody>
     </table>
+      {(noBasis || unknown) && (
+        <p className="hd-meta hd-pos-notes">
+          {noBasis && "— under Unrealized: the broker reports no cost basis. "}
+          {unknown && "Unknown gain: shares changed without reported trades."}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -1045,17 +1152,11 @@ function PositionGain({ p }: { p: PositionChange }) {
   if (p.gain_reason === "cash") return <span className="hd-quiet">cash</span>;
   if (p.change_reason === "one_snapshot") {
     return (
-      <span className="hd-quiet" title="Only one snapshot in this range">
-        —
+      <span className="hd-quiet">
+        <span aria-hidden="true">—</span>
+        <span className="lg-sr">no change: one snapshot in this range</span>
       </span>
     );
   }
-  return (
-    <span
-      className="hd-quiet"
-      title="Shares changed without reported trades, so the gain can't be measured."
-    >
-      unknown
-    </span>
-  );
+  return <span className="hd-quiet">unknown</span>;
 }

@@ -238,12 +238,16 @@ async fn holdings_change(
         let snaps = s
             .holding_snapshots(None, until)
             .map_err(|e| e.to_string())?;
+        let bals = s
+            .balance_snapshots(None, until)
+            .map_err(|e| e.to_string())?;
         let current = s.current_holdings_synced().map_err(|e| e.to_string())?;
         let txns = s.investment_txns().map_err(|e| e.to_string())?;
         Ok(outflow_core::position_change(
             &accounts,
             &securities,
             &snaps,
+            &bals,
             &current,
             &txns,
             since,

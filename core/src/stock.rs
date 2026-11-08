@@ -26,9 +26,10 @@
 //! Activity counts when its date is after the start snapshot's local day, up
 //! to and including the end snapshot's day.
 
-use crate::balances::{local_day, parse_decimal, Group, Totals};
+use crate::balances::{local_day, parse_decimal, Group, Totals, UNINVESTED_CASH_ID};
 use crate::model::{
-    account_display_label, Account, BalanceSnapshot, HoldingSnapshot, InvestmentTxn, Security,
+    account_display_label, Account, AccountKind, BalanceSnapshot, HoldingSnapshot, InvestmentTxn,
+    Security,
 };
 use crate::money::Money;
 use chrono::NaiveDate;
@@ -1238,6 +1239,7 @@ pub fn position_change(
     accounts: &[Account],
     securities: &[Security],
     holdings: &[HoldingSnapshot],
+    balances: &[BalanceSnapshot],
     current: &[(crate::model::Holding, Option<i64>)],
     activity: &[InvestmentTxn],
     since: Option<i64>,
@@ -1383,6 +1385,17 @@ pub fn position_change(
                 unrealized_bp: None,
             }));
         }
+        if a.kind == AccountKind::Investment
+            && filter.keeps(&a.id, &label, UNINVESTED_CASH_ID, None)
+        {
+            if let Some(r) = uninvested_row(a, &label, balances, &start, &end, start_t, end_t) {
+                rows.push(finish(PositionChange {
+                    partial_start: partial,
+                    change_reason: one.then_some(ChangeReason::OneSnapshot),
+                    ..r
+                }));
+            }
+        }
     }
     if lens == PositionLens::Position {
         rows = combine(rows);
@@ -1402,6 +1415,60 @@ pub fn position_change(
             ))
     });
     rows
+}
+
+/// The synthetic `cash:uninvested` row for one investment account: its
+/// balance snapshot less its holdings at the start and end snapshot times,
+/// as `account_cash` does, so the positions sum to the account's value.
+/// None when the account had no uninvested cash at either end.
+fn uninvested_row(
+    a: &Account,
+    label: &str,
+    balances: &[BalanceSnapshot],
+    start: &BTreeMap<&str, &HoldingSnapshot>,
+    end: &BTreeMap<&str, &HoldingSnapshot>,
+    start_t: i64,
+    end_t: i64,
+) -> Option<PositionChange> {
+    let at = |t: i64, held: &BTreeMap<&str, &HoldingSnapshot>| -> Option<i64> {
+        let bal = balances
+            .iter()
+            .filter(|b| b.account_id == a.id && b.taken_at <= t)
+            .max_by_key(|b| b.taken_at)?;
+        let held: i64 = held.values().map(|h| h.value.cents()).sum();
+        Some((bal.balance.cents() - held).max(0))
+    };
+    let (s, e) = (at(start_t, start).unwrap_or(0), at(end_t, end)?);
+    if s == 0 && e == 0 {
+        return None;
+    }
+    let dollars = |c: i64| format!("{}.{:02}", c / 100, c % 100);
+    Some(PositionChange {
+        account_ids: vec![a.id.clone()],
+        account: label.to_string(),
+        security_id: UNINVESTED_CASH_ID.into(),
+        ticker: None,
+        label: "Cash".into(),
+        name: "Uninvested cash".into(),
+        is_cash: true,
+        start_quantity: dollars(s),
+        end_quantity: dollars(e),
+        price: Some("1".into()),
+        priced_at: Some(end_t),
+        price_as_of: None,
+        start_value: Money::from_cents(s),
+        end_value: Money::from_cents(e),
+        contributions: None,
+        gain: None,
+        gain_bp: None,
+        gain_reason: Some(GainReason::Cash),
+        change_reason: None,
+        partial_start: false,
+        sold: false,
+        cost_basis: None,
+        unrealized_gain: None,
+        unrealized_bp: None,
+    })
 }
 
 /// A position's money in (positive) or out from one activity row: buys and
@@ -1669,6 +1736,7 @@ mod position_tests {
             &[acct("brk"), acct("ira")],
             &secs(),
             h,
+            &[],
             &[],
             act,
             since,
@@ -1966,6 +2034,7 @@ mod position_tests {
             &[acct("brk"), acct("ira")],
             &secs(),
             &h,
+            &[],
             &current,
             &[],
             since,
@@ -1975,5 +2044,137 @@ mod position_tests {
         );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].price_as_of.as_deref(), Some("2026-09-30"));
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::inconsistent_digit_grouping)] // dollars_cents literals
+mod uninvested_tests {
+    use super::*;
+    use crate::balances::PositionFilter;
+    use chrono::{Local, TimeZone};
+
+    fn at(m: u32, d: u32) -> i64 {
+        Local
+            .with_ymd_and_hms(2026, m, d, 12, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp()
+    }
+    fn mid(m: u32, d: u32) -> i64 {
+        Local
+            .with_ymd_and_hms(2026, m, d, 0, 0, 0)
+            .earliest()
+            .unwrap()
+            .timestamp()
+    }
+    fn acct(id: &str, kind: AccountKind) -> Account {
+        Account {
+            id: id.into(),
+            org: "Broker".into(),
+            name: id.into(),
+            kind,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: "plaid".into(),
+            nickname: None,
+            hidden: false,
+        }
+    }
+    fn pos(ts: i64, a: &str, cents: i64) -> HoldingSnapshot {
+        HoldingSnapshot {
+            taken_at: ts,
+            account_id: a.into(),
+            security_id: "vti".into(),
+            quantity: "10".into(),
+            value: Money::from_cents(cents),
+            cost_basis: None,
+            price: Some("1".into()),
+        }
+    }
+    fn bal(ts: i64, a: &str, cents: i64) -> BalanceSnapshot {
+        BalanceSnapshot {
+            taken_at: ts,
+            account_id: a.into(),
+            balance: Money::from_cents(cents),
+            cash: Money::from_cents(0),
+        }
+    }
+    fn vti() -> Security {
+        Security {
+            security_id: "vti".into(),
+            ticker: Some("VTI".into()),
+            name: "Total Market".into(),
+            sec_type: "etf".into(),
+            is_cash: false,
+            cusip: None,
+            isin: None,
+            close_price: None,
+            close_price_as_of: None,
+        }
+    }
+
+    #[test]
+    fn positions_plus_uninvested_cash_sum_to_the_balance() {
+        let h = [
+            pos(at(10, 31), "brk", 1_000_00),
+            pos(at(11, 30), "brk", 1_100_00),
+        ];
+        let b = [
+            bal(at(10, 31), "brk", 1_250_00),
+            bal(at(11, 30), "brk", 1_400_00),
+            bal(at(11, 30), "chk", 9_00),
+        ];
+        let rows = position_change(
+            &[
+                acct("brk", AccountKind::Investment),
+                acct("chk", AccountKind::Checking),
+            ],
+            &[vti()],
+            &h,
+            &b,
+            &[],
+            &[],
+            Some(mid(11, 1)),
+            Some(mid(12, 1)),
+            &PositionFilter::default(),
+            PositionLens::Account,
+        );
+        assert_eq!(rows.len(), 2, "VTI + one cash row, nothing for checking");
+        let cash = rows.iter().find(|r| r.is_cash).unwrap();
+        assert_eq!(cash.security_id, UNINVESTED_CASH_ID);
+        assert_eq!(cash.start_value.cents(), 250_00);
+        assert_eq!(cash.end_value.cents(), 300_00);
+        assert_eq!(cash.end_quantity, "300.00");
+        assert_eq!(cash.gain_reason, Some(GainReason::Cash));
+        assert_eq!(cash.gain, None);
+        let total: i64 = rows.iter().map(|r| r.end_value.cents()).sum();
+        assert_eq!(total, 1_400_00);
+    }
+
+    #[test]
+    fn fully_invested_account_has_no_cash_row() {
+        let h = [
+            pos(at(10, 31), "brk", 1_000_00),
+            pos(at(11, 30), "brk", 1_100_00),
+        ];
+        let b = [
+            bal(at(10, 31), "brk", 1_000_00),
+            bal(at(11, 30), "brk", 1_100_00),
+        ];
+        let rows = position_change(
+            &[acct("brk", AccountKind::Investment)],
+            &[vti()],
+            &h,
+            &b,
+            &[],
+            &[],
+            Some(mid(11, 1)),
+            Some(mid(12, 1)),
+            &PositionFilter::default(),
+            PositionLens::Account,
+        );
+        assert!(rows.iter().all(|r| !r.is_cash));
     }
 }

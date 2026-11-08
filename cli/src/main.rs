@@ -1280,11 +1280,15 @@ fn holdings_change(
     let current = store
         .current_holdings_synced()
         .map_err(|e| format!("{e}"))?;
+    let bals = store
+        .balance_snapshots(None, Some(until))
+        .map_err(|e| format!("{e}"))?;
     let txns = store.investment_txns().map_err(|e| format!("{e}"))?;
     let rows = position_change(
         accounts,
         securities,
         &snaps,
+        &bals,
         &current,
         &txns,
         Some(since),

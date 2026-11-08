@@ -1655,7 +1655,7 @@ button.fl-lane-figure {
 }
 .hd-eq-op {
   font-size: 22px;
-  color: var(--lg-faint);
+  color: var(--lg-dim);
   padding-bottom: 3px;
 }
 .hd-say {
@@ -1673,6 +1673,33 @@ button.fl-lane-figure {
   font-size: 13px;
   line-height: 1.45;
   max-width: 72ch;
+}
+/* definitions behind a disclosure: closed by default, state spelled out */
+.hd-defs summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  cursor: pointer;
+  color: var(--lg-dim);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  list-style: none;
+}
+.hd-defs summary::-webkit-details-marker {
+  display: none;
+}
+.hd-defs summary::after {
+  content: " · show";
+  white-space: pre;
+}
+.hd-defs[open] summary::after {
+  content: " · hide";
+}
+.hd-defs summary:hover {
+  color: var(--lg-text);
+}
+.hd-defs p {
+  margin: 4px 0 0;
 }
 
 /* breakdown: tiles joined by their signs, summing to net worth */
@@ -1694,7 +1721,7 @@ button.fl-lane-figure {
   width: 22px;
   text-align: center;
   font-size: 18px;
-  color: var(--lg-faint);
+  color: var(--lg-dim);
 }
 .hd-tile {
   display: flex;
@@ -1926,8 +1953,39 @@ button.fl-lane-figure {
 .hd-pos {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   margin-top: 8px;
   font-size: 13px;
+}
+/* Fixed figure columns, so every account's positions line up. */
+.hd-col-qty {
+  width: 96px;
+}
+.hd-col-val {
+  width: 128px;
+}
+.hd-col-gain,
+.hd-col-unr {
+  width: 168px;
+}
+.hd-unr {
+  display: block;
+}
+.hd-pos-notes {
+  margin: 6px 0 0;
+}
+.hd-section .hd-pos-notes {
+  padding: 0 16px 12px;
+}
+/* A range switch keeps the old figures, dimmed, until the new ones land. */
+.hd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.hd-busy {
+  opacity: 0.55;
+  transition: opacity 120ms ease-out 150ms;
 }
 .hd-section > .hd-pos {
   margin-top: 0;
@@ -2010,6 +2068,12 @@ button.fl-lane-figure {
     font-size: 11px;
     color: var(--lg-dim);
   }
+  .hd-pos {
+    table-layout: auto;
+  }
+  .hd-pos colgroup {
+    display: none;
+  }
   .hd-pos thead {
     position: absolute;
     width: 1px;
@@ -2058,7 +2122,7 @@ button.fl-lane-figure {
     font-size: 11.5px;
     text-align: left;
   }
-  .hd-pos .hd-c-unr > span:first-of-type {
+  .hd-pos .hd-unr {
     margin-left: auto;
   }
 }

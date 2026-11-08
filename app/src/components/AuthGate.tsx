@@ -33,27 +33,28 @@ export function AuthGate({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="auth-gate">
-      <form className="card auth-card" onSubmit={unlock}>
-        <h2>outflow</h2>
+    <main className="lg-auth">
+      <form className="lg-auth-card" onSubmit={unlock}>
+        <h1>outflow</h1>
         <p>This server requires an API token.</p>
+        <label htmlFor="lg-auth-token">API token</label>
         <input
+          id="lg-auth-token"
           type="password"
           name="outflow-api-token"
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="API token"
           autoComplete="current-password"
           autoFocus
         />
-        <button className="btn primary" type="submit" disabled={!value.trim()}>
+        <button className="lg-pill key" type="submit" disabled={!value.trim()}>
           Unlock
         </button>
-        <p className="auth-hint">
+        <p className="lg-auth-hint">
           The <code>OUTFLOW_API_TOKEN</code> from the server's launchd plist. Stored in this
           browser only — a wrong token just asks again.
         </p>
       </form>
-    </div>
+    </main>
   );
 }

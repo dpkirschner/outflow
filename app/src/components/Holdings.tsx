@@ -15,7 +15,7 @@ import {
   YAxis,
 } from "recharts";
 import { api, type StockRange } from "../api";
-import { formatCents, formatCentsShort, monthLabel, monthLabelShort, signedCents } from "../format";
+import { formatCents, formatCentsShort, monthLabel, monthLabelShort, signedCents, errMessage } from "../format";
 import { onLinkClick, pathOf } from "../route";
 import type {
   Account,
@@ -121,7 +121,6 @@ function signedPct(bp: number): string {
 }
 
 /** An error as a sentence: the message, without "Error: " in front. */
-const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** Share quantity without trailing zeros: "936.0000" → "936", "1.2500" → "1.25". */
 function qtyLabel(q: string): string {
@@ -167,7 +166,7 @@ export function Holdings({
       setHistory({ state: "ok", data: h });
       setBalances(b);
     } catch (err) {
-      setHistory({ state: "error", error: errText(err) });
+      setHistory({ state: "error", error: errMessage(err) });
     }
   }, []);
   useEffect(() => {
@@ -217,8 +216,8 @@ export function Holdings({
       setPositions({ state: "ok", data: p });
     } catch (err) {
       if (seq !== changeSeq.current) return;
-      setChange({ state: "error", error: errText(err) });
-      setPositions({ state: "error", error: errText(err) });
+      setChange({ state: "error", error: errMessage(err) });
+      setPositions({ state: "error", error: errMessage(err) });
     } finally {
       if (seq === changeSeq.current) setBusy(false);
     }
@@ -238,7 +237,7 @@ export function Holdings({
       const data = await api.holdingsChange(range, "position");
       if (seq === combinedSeq.current) setCombined({ state: "ok", data });
     } catch (err) {
-      if (seq === combinedSeq.current) setCombined({ state: "error", error: errText(err) });
+      if (seq === combinedSeq.current) setCombined({ state: "error", error: errMessage(err) });
     } finally {
       if (seq === combinedSeq.current) setCombinedBusy(false);
     }
@@ -549,12 +548,18 @@ function Breakdown({ c, fallback }: { c: NetWorthChange; fallback: Totals | null
 }
 
 // ── Charts ─────────────────────────────────────────────────────────────────
-// SVG presentation attributes don't resolve CSS vars; these mirror ledger.css.
-const C_LINE = "#1e2a38";
-const C_DIM = "#8b98a9";
-const C_NW = "#2dd4bf"; // field-teal: the net worth line
-const C_INVEST = "#f5d38a"; // kind-invest
-const C_CONTRIB = "#8b98a9"; // text-dim, dashed: a reference baseline
+// SVG presentation attributes don't resolve CSS vars, so the charts read the
+// --lg-* tokens from ledger.css when they first render (not at module load:
+// main.tsx imports the app before the stylesheet).
+let palette: { line: string; dim: string; nw: string; invest: string } | null = null;
+function colors() {
+  if (!palette) {
+    const css = getComputedStyle(document.documentElement);
+    const v = (name: string) => css.getPropertyValue(name).trim();
+    palette = { line: v("--lg-line"), dim: v("--lg-dim"), nw: v("--lg-teal"), invest: v("--lg-kind-invest") };
+  }
+  return palette;
+}
 
 type Pt = { t: number; day: string; [k: string]: number | string };
 type Series = { key: string; label: string; color: string; dash?: string };
@@ -580,7 +585,7 @@ function Charts({ c, history }: { c: NetWorthChange; history: DayTotals[] }) {
     <section className="hd-charts" aria-label="Over time">
       <Chart
         title="Net worth"
-        series={[{ key: "net_worth", label: "Net worth", color: C_NW }]}
+        series={[{ key: "net_worth", label: "Net worth", color: colors().nw }]}
         pts={nw}
         summary={`Net worth from ${dayLabel(first.day)} to ${dayLabel(last.day)}: ${formatCents(
           first.net_worth,
@@ -596,8 +601,8 @@ function Charts({ c, history }: { c: NetWorthChange; history: DayTotals[] }) {
         <Chart
           title="Invested vs contributed"
           series={[
-            { key: "invested", label: "Invested", color: C_INVEST },
-            { key: "contributed", label: "Contributed", color: C_CONTRIB, dash: "5 4" },
+            { key: "invested", label: "Invested", color: colors().invest },
+            { key: "contributed", label: "Contributed", color: colors().dim, dash: "5 4" },
           ]}
           pts={inv}
           summary={`Invested from ${dayLabel(firstInv.day)} to ${dayLabel(lastInv.day)}: ${formatCents(
@@ -713,7 +718,7 @@ function Chart({
       <div role="img" aria-label={summary}>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={pts} margin={{ top: 6, right: 12, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={C_LINE} vertical={false} />
+            <CartesianGrid stroke={colors().line} vertical={false} />
             <XAxis
               dataKey="t"
               type="number"
@@ -721,8 +726,8 @@ function Chart({
               domain={[lo, hi]}
               ticks={dayTicks(lo, hi)}
               tickFormatter={(t: number) => tickDate(t, long)}
-              tick={{ fill: C_DIM, fontSize: 11 }}
-              stroke={C_LINE}
+              tick={{ fill: colors().dim, fontSize: 11 }}
+              stroke={colors().line}
               tickLine={false}
             />
             <YAxis
@@ -730,14 +735,14 @@ function Chart({
               ticks={yTicks}
               interval={0}
               tickFormatter={axisMoney}
-              tick={{ fill: C_DIM, fontSize: 11 }}
+              tick={{ fill: colors().dim, fontSize: 11 }}
               tickLine={false}
               axisLine={false}
               width={56}
             />
             <Tooltip
               content={<ChartTip series={series} />}
-              cursor={{ stroke: C_DIM, strokeDasharray: "3 3" }}
+              cursor={{ stroke: colors().dim, strokeDasharray: "3 3" }}
               isAnimationActive={false}
             />
             {series.map((s) => (

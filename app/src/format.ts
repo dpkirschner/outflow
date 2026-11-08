@@ -55,3 +55,14 @@ export function formatDate(epochSecs: number): string {
     day: "numeric",
   });
 }
+
+/** Plain words for a failed call: the server's own message when it sent one,
+ *  never a raw "TypeError: ..." prefix, and a sentence a person can act on
+ *  when the server didn't answer at all. */
+export function errMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const msg = raw.replace(/^[A-Za-z]*Error:\s*/, "").trim();
+  if (!msg || /failed to fetch|networkerror|load failed/i.test(msg))
+    return "the server didn't answer. Check that it's running, then try again.";
+  return msg;
+}

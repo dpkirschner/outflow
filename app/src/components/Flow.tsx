@@ -24,7 +24,7 @@ import type {
   TxnFlag,
   TxnPage,
 } from "../types";
-import { formatCentsShort, monthLabel, monthLabelShort, signedCents, unsignedCents } from "../format";
+import { formatCentsShort, monthLabel, monthLabelShort, signedCents, unsignedCents, errMessage } from "../format";
 import { onLinkClick, pathOf } from "../route";
 import { SourceChip, accountDisplayLabel, accountSource } from "./accounts";
 import { MonthStrip, type StripMonth } from "./MonthStrip";
@@ -164,7 +164,7 @@ export function Flow({
     try {
       setFlow({ state: "ok", data: await api.flow() });
     } catch (err) {
-      setFlow({ state: "error", error: String(err) });
+      setFlow({ state: "error", error: errMessage(err) });
     }
   }, []);
 
@@ -188,7 +188,7 @@ export function Flow({
       setCats(await api.spendCategories({ period: month }));
     } catch (err) {
       setCats(null);
-      notify({ kind: "err", text: `Couldn't load categories: ${String(err)}` });
+      notify({ kind: "err", text: `Couldn't load categories: ${errMessage(err)}` });
     }
   }, [month, notify]);
 
@@ -203,7 +203,7 @@ export function Flow({
     try {
       setRecurring({ state: "ok", data: await api.recurring(month) });
     } catch (err) {
-      setRecurring({ state: "error", error: String(err) });
+      setRecurring({ state: "error", error: errMessage(err) });
     }
   }, [month]);
 
@@ -232,7 +232,7 @@ export function Flow({
       try {
         await api.setRecurringIgnored(r.merchant, ignored);
       } catch (err) {
-        notifyOther({ kind: "err", text: String(err) });
+        notifyOther({ kind: "err", text: errMessage(err) });
         return false;
       }
       if (ignored) {
@@ -251,7 +251,7 @@ export function Flow({
               ignoredBatch.current = [];
               void Promise.all(batch.map((x) => api.setRecurringIgnored(x.merchant, false)))
                 .then(loadRecurring)
-                .catch((err) => notify({ kind: "err", text: String(err) }));
+                .catch((err) => notify({ kind: "err", text: errMessage(err) }));
             },
           },
         });
@@ -816,7 +816,7 @@ function TxnTable({
         : [{ key: "all", page: await api.transactions({ ...base, offset, limit: PAGE }) }];
       if (mine === seq.current) setBlocks({ state: "ok", data: next });
     } catch (err) {
-      if (mine === seq.current) setBlocks({ state: "error", error: String(err) });
+      if (mine === seq.current) setBlocks({ state: "error", error: errMessage(err) });
     }
   }, [base, bySide, offset]);
 
@@ -842,7 +842,7 @@ function TxnTable({
       notify({ kind: "ok", text: `${t.payee ?? t.description} → ${cat} (rule learned)` });
       await Promise.all([load(), onFiguresChanged()]);
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     }
   };
 
@@ -884,7 +884,7 @@ function TxnTable({
       });
       await Promise.all([load(), onFiguresChanged()]);
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     }
   };
 

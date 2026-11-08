@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { MatchView } from "../types";
-import { unsignedCents } from "../format";
+import { unsignedCents, errMessage } from "../format";
 import { agoLabel } from "./accounts";
 import type { ToastMsg } from "./Toast";
 
@@ -37,7 +37,7 @@ export function MatchReview({
       setProposed(p);
       setAccepted(a.slice(0, 20));
     } catch (err) {
-      notify({ kind: "err", text: `Load failed: ${String(err)}` });
+      notify({ kind: "err", text: `Load failed: ${errMessage(err)}` });
     }
   }, [notify]);
 
@@ -54,7 +54,7 @@ export function MatchReview({
       await refresh();
       onChanged();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     } finally {
       setBusy(false);
     }

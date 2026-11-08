@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Account } from "./types";
-import { Toast, type ToastMsg } from "./components/Toast";
+import { Toast, toastPersists, type ToastMsg } from "./components/Toast";
 import { Flow } from "./components/Flow";
 import { Holdings } from "./components/Holdings";
 import { Settings } from "./components/Settings";
 import { SCREENS, onLinkClick, useScreen } from "./route";
+import { errMessage } from "./format";
 
 export default function App() {
   // The screen comes from the URL (route.ts); /oauth-return maps to Settings
@@ -33,9 +34,10 @@ export default function App() {
     // earlier timeout would otherwise fire and clear the newest toast early.
     window.clearTimeout(toastTimer.current);
     setToast(msg);
-    // A toast with an action (Undo) waits to be used or dismissed: no time
-    // limit on reaching it from the keyboard (WCAG 2.2.1).
-    if (!msg.action) toastTimer.current = window.setTimeout(() => setToast(null), 3200);
+    // A toast with an action (Undo) or an error waits to be dismissed: no
+    // time limit on reaching or reading it (WCAG 2.2.1).
+    if (!toastPersists(msg))
+      toastTimer.current = window.setTimeout(() => setToast(null), 3200);
   }, []);
 
   const reload = useCallback(async () => {
@@ -50,7 +52,7 @@ export default function App() {
       setVocab(cats);
       setAttention(pending.length + items.filter((it) => it.status !== "ok").length);
     } catch (err) {
-      notify({ kind: "err", text: `Load failed: ${String(err)}` });
+      notify({ kind: "err", text: `Load failed: ${errMessage(err)}` });
     }
   }, [notify]);
 
@@ -76,9 +78,8 @@ export default function App() {
 
   return (
     <div className="lg-app">
-      <div className="lg-top">
+      <header className="lg-top">
         <span className="lg-wm">outflow</span>
-        <span className="lg-sub">where did my money go?</span>
         <nav className="lg-nav" aria-label="Screens">
           {SCREENS.map(({ screen, path, label }) => {
             const on = tab === screen;
@@ -90,16 +91,25 @@ export default function App() {
                 className={on ? "on" : "lg-navlink"}
                 aria-current={on ? "page" : undefined}
                 onClick={(e) => onLinkClick(e, path)}
-                title={badge ? `${attention} thing(s) need a look` : undefined}
               >
                 {label}
-                {badge && <span className="st-badge">{attention}</span>}
+                {badge && (
+                  <>
+                    <span className="st-badge" aria-hidden="true">
+                      {attention}
+                    </span>
+                    <span className="lg-sr">
+                      , {attention} {attention === 1 ? "item needs" : "items need"} a look
+                    </span>
+                  </>
+                )}
               </a>
             );
           })}
         </nav>
-      </div>
+      </header>
 
+      {/* Each screen renders its own <main> with its h1. */}
       {tab === "settings" ? (
         <Settings notify={notify} onChanged={() => void reload()} />
       ) : tab === "holdings" ? (
@@ -114,9 +124,13 @@ export default function App() {
           onMonth={setMonth}
         />
       )}
-      {/* Always in the page so screen readers announce what appears in it. */}
-      <div className="toast-region" role="status" aria-live="polite">
-        {toast && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+      {/* Always in the page so screen readers announce what appears in them:
+          confirmations politely, errors at once. */}
+      <div className="toast-region" role="status">
+        {toast?.kind === "ok" && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+      </div>
+      <div className="toast-region" role="alert">
+        {toast?.kind === "err" && <Toast msg={toast} onDismiss={() => setToast(null)} />}
       </div>
     </div>
   );

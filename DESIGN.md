@@ -11,7 +11,7 @@ colors:
   selected-fill: "#1c2c40"
   text: "#e6edf3"
   text-dim: "#8b98a9"
-  text-faint: "#5a6675"
+  text-faint: "#7a8696"
   field-teal: "#2dd4bf"
   teal-wash: "#0f2e29"
   teal-edge: "#1f5850"
@@ -184,10 +184,14 @@ each mean one thing.
 - **Row Divider / Row Hover / Selected Fill** (row-divider, row-hover,
   selected-fill): list row separators, hover wash, and the selected segment
   or active nav tab. In CSS these are `--lg-divider`, `--lg-hover`,
-  `--lg-selected` and its edge `--lg-selected-edge` (Flow uses them; older
-  screens still repeat the hex values).
+  `--lg-selected` and its edge `--lg-selected-edge`.
 - **Text / Text Dim / Text Faint** (text, text-dim, text-faint): primary
-  copy, secondary copy and labels, and metadata.
+  copy, secondary copy and labels, and metadata. Text Faint is the floor:
+  it holds 4.5:1 (WCAG AA) on the page, panels and the hover fill, so any
+  text may use it. Never dim text further with opacity.
+- **Every colour is a token.** `ledger.css` has no hex value outside
+  `:root`: washes and edges have their own tokens (`--lg-teal-wash`,
+  `--lg-kind-cash-edge`, `--lg-blue-wash`, ...).
 
 ### Named Rules
 **The Meaning-Only Rule.** Every hue other than Field Teal encodes data
@@ -216,8 +220,10 @@ the numbers. Hierarchy comes from weight and size, not from a second family.
 - **Row name** (600, 14px): the merchant or account name that leads a row.
 - **Body** (400, 13px): table cells, explanations, button text.
 - **Meta** (400, 11.5–12px): dates, sources, coverage lines, sync status.
-- **Label** (600, 10.5–11px, uppercase, 0.06–0.1em tracking): card headers
+- **Label** (600, 11px, uppercase, 0.06–0.1em tracking): card headers
   and stat-tile keys.
+
+Nothing is set below 11px. Sizes are written in rem in `ledger.css`.
 
 ### Named Rules
 **The Tabular Rule.** Every money figure uses `font-variant-numeric:
@@ -288,15 +294,16 @@ those capsules.
   small Text Dim.
 
 ### Account chips
-- Small (10.5px, 600) text in a 4px-radius outline chip, tinted by account
+- Small (12px, 600) text in a 4px-radius outline chip, tinted by account
   kind: ink text, a dark edge of the same hue and a near-black wash. The
   last four digits stay in the label.
 
 ### Navigation
 - Text tabs at 12px, pushed to the right of the wordmark. At rest they're
   Text Faint; hover goes to Text Dim; the current tab gets the Selected
-  Fill and Text colour. A count that needs attention sits in an Attention
-  Amber capsule beside the label.
+  Fill, its edge and Text colour. Each tab is at least 28px tall. A count
+  that needs attention sits in an Attention Amber capsule beside the label;
+  screen readers hear it as words ("Settings, 2 items need a look").
 
 ### Recurring list (Flow)
 - A table between the lanes and the transaction table: merchant (Row name,
@@ -440,14 +447,14 @@ those capsules.
 - **Do** put focus somewhere sensible after an action removes the control
   that had it, and keep an Undo toast up until it's used or dismissed.
 - **Do** put one Key button per action group, at most.
-- **Do** mirror token values into constants when SVG presentation
-  attributes can't read CSS variables (as `Holdings.tsx` does), and keep
-  them in sync.
+- **Do** read token values with `getComputedStyle` when SVG presentation
+  attributes can't take CSS variables (as `Holdings.tsx`'s charts do),
+  never copy the hex.
 
 ### Don't:
-- **Don't** use the legacy `theme.css` palette (`--bg`, `--card`,
-  `--accent`, the teal-to-blue gradient) for new work. Only the auth gate,
-  toast and a few fallbacks still read it.
+- **Don't** write a hex value outside `:root`, or a font size in px:
+  sizes are rem (13px = 0.8125rem) so text follows the browser's font-size
+  setting. The px figures in this file are at the 16px default.
 - **Don't** add drop shadows to content surfaces.
 - **Don't** use colour for decoration; see the Meaning-Only Rule.
 - **Don't** signal in versus out by colour alone.

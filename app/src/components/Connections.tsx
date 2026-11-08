@@ -11,6 +11,7 @@ import type { Account, PlaidItem, SyncEntry } from "../types";
 import { SourceChip, accountDisplayLabel, accountSource, agoLabel } from "./accounts";
 import type { ToastMsg } from "./Toast";
 import { isOauthReturn, navigate, pathOf } from "../route";
+import { errMessage } from "../format";
 
 const LINK_TOKEN_KEY = "outflow_plaid_link_token";
 const LINK_ITEM_KEY = "outflow_plaid_link_item";
@@ -116,7 +117,7 @@ export function Connections({
       setLog(lg);
       setAccounts(accts);
     } catch (err) {
-      notify({ kind: "err", text: `Load failed: ${String(err)}` });
+      notify({ kind: "err", text: `Load failed: ${errMessage(err)}` });
     }
   }, [notify]);
 
@@ -149,7 +150,7 @@ export function Connections({
       else localStorage.removeItem(LINK_ITEM_KEY);
       setSession({ token: r.link_token });
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -197,7 +198,7 @@ export function Connections({
       }
       await refresh();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -216,7 +217,7 @@ export function Connections({
       notify({ kind: "ok", text: `${item.institution} unlinked.` });
       await refresh();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -236,7 +237,7 @@ export function Connections({
       });
       await refresh();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -254,7 +255,7 @@ export function Connections({
       await refresh();
       onChanged();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     }
   };
 
@@ -269,7 +270,7 @@ export function Connections({
       await refresh();
       onChanged();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     }
   };
 

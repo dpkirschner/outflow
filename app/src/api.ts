@@ -146,13 +146,15 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   }
   const text = await res.text();
   if (!res.ok) {
+    // The server's JSON `error` when there is one; a proxy's HTML or empty
+    // body (a 502) falls back to the status line, never a SyntaxError.
+    let message: string | undefined;
     try {
-      const parsed = JSON.parse(text) as { error?: string };
-      throw new Error(parsed.error ?? `${res.status} ${res.statusText}`);
-    } catch (e) {
-      if (e instanceof Error && e.message !== text) throw e;
-      throw new Error(`${res.status} ${res.statusText}`);
+      message = (JSON.parse(text) as { error?: string }).error;
+    } catch {
+      /* not JSON */
     }
+    throw new Error(message || `${res.status} ${res.statusText}`.trim());
   }
   return (text ? JSON.parse(text) : undefined) as T;
 }

@@ -7,6 +7,7 @@ import { api } from "../api";
 import { Connections } from "./Connections";
 import { MatchReview } from "./MatchReview";
 import type { ToastMsg } from "./Toast";
+import { errMessage } from "../format";
 
 export function Settings({
   notify,
@@ -23,7 +24,7 @@ export function Settings({
       notify({ kind: "ok", text: await fn() });
       onChanged();
     } catch (err) {
-      notify({ kind: "err", text: String(err) });
+      notify({ kind: "err", text: errMessage(err) });
     } finally {
       setBusy(false);
     }
@@ -54,7 +55,10 @@ export function Settings({
   };
 
   return (
-    <div className="st-wrap">
+    <main className="st-wrap" aria-labelledby="st-title">
+      <h1 id="st-title" className="lg-sr">
+        Settings
+      </h1>
       <section className="st-section">
         <Connections notify={notify} onChanged={onChanged} />
       </section>
@@ -97,6 +101,6 @@ export function Settings({
           what Plaid still serves; transactions older than its window are gone for good.
         </p>
       </section>
-    </div>
+    </main>
   );
 }

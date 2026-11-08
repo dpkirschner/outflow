@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-07T07:28:01+00:00",
+  "generatedAt": "2026-11-08T00:28:34+00:00",
   "title": "Design System: outflow",
   "extensions": {
     "colorMeta": {
@@ -337,36 +337,29 @@
     },
     "shadows": [
       {
-        "name": "active-row-marker",
-        "value": "inset 3px 0 0 #2dd4bf",
-        "purpose": "Leading-edge marker on the selected row; not a lift."
-      }
-    ],
-    "motion": [
-      {
-        "name": "state-fast",
-        "value": "0.15s",
-        "purpose": "Hover and chevron rotation."
+        "name": "selection-ring",
+        "value": "inset 0 0 0 2px #2dd4bf",
+        "purpose": "The selected figure or row: Selected Fill plus this ring, never a lift."
       },
       {
-        "name": "slide-over",
-        "value": "transform 0.22s ease",
-        "purpose": "Detail panel sliding in."
-      },
-      {
-        "name": "scrim",
-        "value": "opacity 0.2s",
-        "purpose": "Scrim fade behind the slide-over."
+        "name": "hover-hairline",
+        "value": "inset 0 0 0 1px #1e2a38",
+        "purpose": "Hover on a drill-down figure, with Row Hover."
       }
     ],
+    "motion": [],
     "breakpoints": [
       {
         "name": "narrow",
-        "value": "640px"
+        "value": "720px"
       },
       {
         "name": "compact",
         "value": "560px"
+      },
+      {
+        "name": "phone",
+        "value": "480px"
       }
     ]
   },
@@ -396,12 +389,12 @@
       "css": ".ds-btn-ghost{font:13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#111823;border:1px solid #1e2a38;color:#8b98a9;cursor:pointer}.ds-btn-ghost:hover{color:#e6edf3;background:#16202e}.ds-btn-ghost:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
     },
     {
-      "name": "Window Picker",
+      "name": "Segmented control",
       "kind": "custom",
       "refersTo": "segmented",
-      "description": "Segmented control for the time window.",
-      "html": "<span class=\"ds-seg\"><button>3mo</button><button class=\"on\">6mo</button><button>12mo</button><button>All</button></span>",
-      "css": ".ds-seg{display:inline-flex;background:#0e141d;border:1px solid #1e2a38;border-radius:8px;padding:2px;font:11.5px -apple-system,BlinkMacSystemFont,sans-serif}.ds-seg button{border:0;background:none;color:#8b98a9;padding:4px 9px;border-radius:6px;cursor:pointer;font:inherit}.ds-seg button:hover{color:#e6edf3}.ds-seg button.on{background:#1c2c40;color:#e6edf3}.ds-seg button:focus-visible{outline:2px solid #2dd4bf}"
+      "description": "Recessed track; the selected option gets the Selected Fill. Holdings range and lens.",
+      "html": "<span class=\"ds-seg\" role=\"group\" aria-label=\"Range\"><button class=\"on\" aria-pressed=\"true\">Month</button><button aria-pressed=\"false\">3M</button><button aria-pressed=\"false\">YTD</button><button aria-pressed=\"false\">1Y</button><button aria-pressed=\"false\">All</button></span>",
+      "css": ".ds-seg{display:inline-flex;background:#0e141d;border:1px solid #1e2a38;border-radius:8px;padding:2px;font:11.5px -apple-system,BlinkMacSystemFont,sans-serif}.ds-seg button{border:0;background:none;color:#8b98a9;padding:4px 9px;border-radius:6px;cursor:pointer;font:inherit}.ds-seg button:hover:not(.on){color:#e6edf3}.ds-seg button.on{background:#1c2c40;color:#e6edf3}.ds-seg button:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
     },
     {
       "name": "Navigation",
@@ -410,22 +403,6 @@
       "description": "Header tabs with an attention badge.",
       "html": "<nav class=\"ds-nav\"><a>Ledger</a><a>Balances</a><a class=\"on\">Settings<span class=\"ds-badge\">2</span></a></nav>",
       "css": ".ds-nav{display:flex;gap:6px;font:12px -apple-system,BlinkMacSystemFont,sans-serif}.ds-nav a{padding:5px 11px;border-radius:7px;color:#5a6675;cursor:pointer}.ds-nav a:hover{color:#8b98a9}.ds-nav a.on{background:#152233;color:#e6edf3}.ds-badge{display:inline-block;margin-left:6px;min-width:16px;padding:0 5px;border-radius:8px;background:#fbbf24;color:#0a0e14;font-size:10px;font-weight:700;line-height:16px;text-align:center}"
-    },
-    {
-      "name": "Stat Tile",
-      "kind": "card",
-      "refersTo": "stat-tile",
-      "description": "Uppercase key over a tabular headline figure.",
-      "html": "<div class=\"ds-stat\"><div class=\"k\">Net worth</div><div class=\"v\">$48,210 <small>+1.8%</small></div></div>",
-      "css": ".ds-stat{background:#0e141d;border:1px solid #1e2a38;border-radius:10px;padding:12px 14px;color:#e6edf3;font-family:-apple-system,BlinkMacSystemFont,sans-serif;width:200px}.ds-stat .k{font-size:10.5px;letter-spacing:.09em;color:#5a6675;text-transform:uppercase}.ds-stat .v{font-size:20px;font-weight:650;margin-top:5px;font-variant-numeric:tabular-nums}.ds-stat small{font-size:12px;color:#8b98a9;font-weight:500}"
-    },
-    {
-      "name": "Merchant Row",
-      "kind": "card",
-      "refersTo": "card",
-      "description": "A card with a labelled header and clickable rows.",
-      "html": "<div class=\"ds-card\"><div class=\"ds-head\">Recurring</div><div class=\"ds-row active\"><b>Synthetic Grocer</b><span class=\"amt\">$412</span></div><div class=\"ds-row\"><b>Example Streaming</b><span class=\"amt\">$16</span></div></div>",
-      "css": ".ds-card{background:#111823;border:1px solid #1e2a38;border-radius:12px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3;width:360px}.ds-head{padding:15px 16px 13px;border-bottom:1px solid #1e2a38;font-size:11px;letter-spacing:.1em;color:#8b98a9;text-transform:uppercase;font-weight:600}.ds-row{display:flex;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #172230;font-size:14px;cursor:pointer}.ds-row:last-child{border-bottom:0}.ds-row:hover{background:#0e1620}.ds-row.active{background:#0d1a26;box-shadow:inset 3px 0 0 #2dd4bf}.ds-row .amt{font-variant-numeric:tabular-nums;color:#f87171}"
     },
     {
       "name": "Account Chip",
@@ -460,12 +437,36 @@
       "css": ".ds-lane{font:13px -apple-system,BlinkMacSystemFont,sans-serif;width:260px;background:#111823;border:1px solid #1e2a38;border-radius:12px;padding:14px 16px 12px;color:#e6edf3}.ds-lane h2{margin:0;font-size:14px;font-weight:600}.ds-lane .f{margin:6px 0;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}.ds-lane .n{margin:0;font-size:12px;color:#8b98a9}.ds-lane ul{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid #1e2a38}.ds-lane li{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #172230;font-variant-numeric:tabular-nums}.ds-lane li:last-child{border-bottom:0}"
     },
     {
-      "name": "Side-grouped table",
-      "kind": "table",
-      "refersTo": "side-grouped-table",
-      "description": "Flow: a card payment's two legs, each under a group header with count and subtotal.",
-      "html": "<table class=\"ds-side\"><tbody><tr class=\"g\"><th colspan=\"2\">From checking <span>1 row</span></th><td>−$2,171.00</td></tr><tr><td>Oct 25</td><td>CARD CO AUTOPAY</td><td>−$2,171.00</td></tr><tr class=\"g\"><th colspan=\"2\">Into cards <span>1 row</span></th><td>+$2,171.00</td></tr><tr><td>Oct 25</td><td>Payment Thank You</td><td>+$2,171.00</td></tr></tbody></table>",
-      "css": ".ds-side{font:13px -apple-system,BlinkMacSystemFont,sans-serif;border-collapse:collapse;width:420px;color:#8b98a9}.ds-side td,.ds-side th{padding:7px 8px;border-bottom:1px solid #172230;text-align:left}.ds-side td:last-child{text-align:right;font-variant-numeric:tabular-nums}.ds-side .g th,.ds-side .g td{padding-top:14px;font-size:12px;font-weight:600;color:#e6edf3;border-bottom:1px solid #1e2a38}.ds-side .g span{margin-left:8px;font-weight:400;color:#8b98a9}"
+      "name": "Month strip",
+      "kind": "nav",
+      "refersTo": "month-strip",
+      "description": "Shared by Flow and Holdings: one button per month, roving tabindex. Flow adds an Out bar; Holdings shows month-end net worth.",
+      "html": "<nav class=\"ds-strip\" aria-label=\"Month\"><p>Net worth at month end</p><ol><li><button class=\"ds-m\" aria-pressed=\"false\"><b>Sep '26</b><span>$70.4k</span></button></li><li><button class=\"ds-m\" aria-pressed=\"false\" tabindex=\"-1\"><b>Oct '26</b><span>$72.1k</span></button></li><li><button class=\"ds-m on\" aria-pressed=\"true\"><b>Nov '26</b><span>$75.4k</span><i>so far</i></button></li></ol></nav>",
+      "css": ".ds-strip{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#8b98a9}.ds-strip p{margin:0 0 4px;font-size:12px}.ds-strip ol{list-style:none;margin:0;padding:0;display:flex;gap:4px}.ds-m{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:60px;padding:8px 6px 6px;background:transparent;border:1px solid transparent;border-radius:8px;color:#8b98a9;font:inherit;cursor:pointer}.ds-m:hover{background:#0e141d;border-color:#1e2a38}.ds-m.on{background:#1c2c40;border-color:#2b415c;color:#e6edf3}.ds-m b{font-size:11px;font-weight:600}.ds-m span{font-size:11px;font-variant-numeric:tabular-nums}.ds-m.on span{color:#e6edf3}.ds-m i{font-style:normal;font-size:11px;font-weight:600;color:#fbbf24}.ds-m:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+    },
+    {
+      "name": "Change equation",
+      "kind": "custom",
+      "refersTo": "change-equation",
+      "description": "Holdings focal moment, open on the page: Net worth change = Markets + Added, signed and tabular.",
+      "html": "<dl class=\"ds-eq\"><div class=\"main\"><dt>Net worth change</dt><dd>+$3,303.13<span>+4.6%</span></dd></div><div class=\"op\" aria-hidden=\"true\">=</div><div><dt>Markets</dt><dd>+$257.13</dd></div><div class=\"op\" aria-hidden=\"true\">+</div><div><dt>Added</dt><dd>+$3,046.00</dd></div></dl>",
+      "css": ".ds-eq{margin:0;display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:20px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3}.ds-eq dt{font-size:13px;color:#8b98a9}.ds-eq dd{margin:2px 0 0;font-size:24px;font-weight:650;line-height:1.15;font-variant-numeric:tabular-nums}.ds-eq .main dd{font-size:34px;letter-spacing:-.02em}.ds-eq dd span{margin-left:10px;font-size:15px;font-weight:600;color:#8b98a9}.ds-eq .op{font-size:22px;color:#5a6675;padding-bottom:3px}"
+    },
+    {
+      "name": "Breakdown sum",
+      "kind": "card",
+      "refersTo": "stat-tile",
+      "description": "Stat tiles joined by their signs, summing to net worth. Owed amounts are magnitudes after a minus, never red.",
+      "html": "<ol class=\"ds-sum\"><li><span class=\"t\"><span class=\"k\">Cash</span><span class=\"v\">$16,535.00</span></span></li><li><span class=\"o\">+</span><span class=\"t\"><span class=\"k\">Invested</span><span class=\"v\">$72,056.74</span><span class=\"s\">incl. $8,148.03 uninvested</span></span></li><li><span class=\"o\">−</span><span class=\"t\"><span class=\"k\">Credit owed</span><span class=\"v\">$578.00</span></span></li><li class=\"total\"><span class=\"o\">=</span><span class=\"t\"><span class=\"k\">Net worth</span><span class=\"v\">$88,013.74</span></span></li></ol>",
+      "css": ".ds-sum{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;row-gap:8px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3}.ds-sum li{display:flex;align-items:stretch}.ds-sum .o{align-self:center;width:22px;text-align:center;font-size:18px;color:#5a6675}.ds-sum .t{display:flex;flex-direction:column;gap:2px;background:#0e141d;border:1px solid transparent;border-radius:10px;padding:12px 14px;min-width:120px}.ds-sum .total .t{border-color:#2b415c}.ds-sum .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8b98a9}.ds-sum .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}.ds-sum .s{font-size:11.5px;color:#8b98a9}"
+    },
+    {
+      "name": "Account row",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Holdings: name, then Value / Change / Gain in fixed columns under one header; positions open with a real button.",
+      "html": "<div class=\"ds-acc\"><div class=\"cols\" aria-hidden=\"true\"><span></span><span>Value</span><span>Change</span><span>Gain</span></div><div class=\"row\"><span class=\"n\"><span class=\"chip\">Brokerage (4444)</span><span class=\"d\">Demo Broker</span></span><span>$16,170.67</span><span>+$486.19</span><span class=\"up\">+$186.19</span></div><div class=\"pad\"><button aria-expanded=\"false\">Show 4 positions</button></div><div class=\"row\"><span class=\"n\"><span class=\"chip\">Workplace 401(k) (6666)</span></span><span>$46,080.00</span><span>+$2,880.00</span><span class=\"d\">contributions unknown</span></div></div>",
+      "css": ".ds-acc{background:#111823;border:1px solid #1e2a38;border-radius:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3;width:640px}.ds-acc .cols,.ds-acc .row{display:grid;grid-template-columns:minmax(0,1fr) 110px 110px 150px;column-gap:12px;align-items:center;padding:10px 16px;text-align:right;font-variant-numeric:tabular-nums}.ds-acc .cols{font-size:11px;color:#8b98a9;padding-bottom:0}.ds-acc .row+.pad,.ds-acc .pad+.row{border-top:0}.ds-acc .row{border-top:1px solid #172230}.ds-acc .n{display:flex;gap:8px;align-items:center;text-align:left;font-size:12px}.ds-acc .chip{font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:4px;color:#f5d38a;border:1px solid #4a3a1f;background:#241d0f}.ds-acc .d{color:#8b98a9}.ds-acc .up{color:#34d399}.ds-acc .pad{padding:0 16px 10px}.ds-acc button{background:#111823;color:#8b98a9;border:1px solid #5a6675;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}.ds-acc button:hover{background:#0e1620;color:#e6edf3}.ds-acc button[aria-expanded=true]{background:#1c2c40;border-color:#2b415c;color:#e6edf3}.ds-acc button:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
     }
   ],
   "narrative": {
@@ -501,18 +502,19 @@
       }
     ],
     "dos": [
-      "Do use the `--lg-*` custom properties in `app/src/ledger.css` for every new colour; they are the live token set.",
-      "Do keep money figures tabular and right-aligned.",
-      "Do give every control a visible border and a pressed and focused state, so it reads as pressable on the dark page.",
-      "Do put one Key button per action group, at most.",
-      "Do mirror token values into constants when SVG presentation attributes can't read CSS variables (as `Balances.tsx` does), and keep them in sync."
+      "**Do** use the `--lg-*` custom properties in `app/src/ledger.css` for every new colour; they are the live token set.",
+      "**Do** keep money figures tabular and right-aligned.",
+      "**Do** give every control a visible border and a pressed and focused state, so it reads as pressable on the dark page. Form fields and small outline buttons use Text Faint for that edge: Hairline is about 1.3:1, and a control's boundary needs 3:1 (WCAG 1.4.11).",
+      "**Do** put focus somewhere sensible after an action removes the control that had it, and keep an Undo toast up until it's used or dismissed.",
+      "**Do** put one Key button per action group, at most.",
+      "**Do** mirror token values into constants when SVG presentation attributes can't read CSS variables (as `Holdings.tsx` does), and keep them in sync."
     ],
     "donts": [
-      "Don't use the legacy `theme.css` palette (`--bg`, `--card`, `--accent`, the teal-to-blue gradient) for new work. Only the auth gate, toast and a few fallbacks still read it.",
-      "Don't add drop shadows to content surfaces.",
-      "Don't use colour for decoration; see the Meaning-Only Rule.",
-      "Don't signal in versus out by colour alone.",
-      "Don't put destructive or upkeep actions on an analysis screen; they belong in Settings."
+      "**Don't** use the legacy `theme.css` palette (`--bg`, `--card`, `--accent`, the teal-to-blue gradient) for new work. Only the auth gate, toast and a few fallbacks still read it.",
+      "**Don't** add drop shadows to content surfaces.",
+      "**Don't** use colour for decoration; see the Meaning-Only Rule.",
+      "**Don't** signal in versus out by colour alone.",
+      "**Don't** put destructive or upkeep actions on an analysis screen; they belong in Settings."
     ]
   }
 }

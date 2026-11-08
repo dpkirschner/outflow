@@ -10,6 +10,7 @@ pub mod perks;
 pub mod plaid;
 pub mod query;
 pub mod recurring;
+pub mod reset;
 pub mod stock;
 pub mod store;
 pub mod subscriptions;
@@ -50,6 +51,7 @@ pub use query::{
     TxnQuery,
 };
 pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
+pub use reset::{preview as reset_preview, ResetPreview, PLAID_REFETCH_DAYS};
 pub use stock::{
     net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,

@@ -749,6 +749,17 @@ async fn upkeep(State(state): State<AppState>) -> ApiResult<outflow_core::Upkeep
     .map(Json)
 }
 
+/// What `POST /reset_data` would delete and what the next sync can't bring
+/// back (core::reset), for the confirm step.
+async fn reset_preview(State(state): State<AppState>) -> ApiResult<outflow_core::ResetPreview> {
+    let today = today_local();
+    with_store(&state, move |s| {
+        outflow_core::reset_preview(s, today).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
 async fn reset_data(State(state): State<AppState>) -> ApiResult<()> {
     with_store(&state, |s| s.reset_data().map_err(|e| e.to_string()))
         .await
@@ -861,6 +872,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/apply_flags", post(apply_flags))
         .route("/pull", post(pull))
         .route("/reset_data", post(reset_data))
+        .route("/reset/preview", get(reset_preview))
 }
 
 #[cfg(test)]
@@ -1029,6 +1041,21 @@ mod tests {
         let (_, v) = get_json(app, "/upkeep").await;
         assert_eq!(v["proposed_matches"], 0);
         assert_eq!(v["total"], 0);
+    }
+
+    #[tokio::test]
+    async fn reset_preview_counts_without_deleting() {
+        let app = app_with_two_accounts();
+        let (status, v) = get_json(app.clone(), "/reset/preview").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["transactions"], 2);
+        assert_eq!(v["accounts"], 2);
+        assert_eq!(v["refetch_days"], outflow_core::PLAID_REFETCH_DAYS);
+        // The seed rows are from 2024: older than any 90-day window.
+        assert_eq!(v["lost_for_good"], 2);
+        assert_eq!(v["oldest_day"].as_str().map(|d| &d[..7]), Some("2024-07"));
+        let (_, again) = get_json(app, "/reset/preview").await;
+        assert_eq!(again["transactions"], 2, "a preview deletes nothing");
     }
 
     /// /balances groups accounts, counts a money-market holding and an

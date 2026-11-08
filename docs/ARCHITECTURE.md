@@ -73,6 +73,8 @@ money            i64-cents type, decimal parse, display
           │                flow_over, recurring::build)
           ├ upkeep         summary() → Upkeep: connections not ok, matches to
           │                review, last sync (Settings, status, check-in)
+          ├ reset          preview() → ResetPreview: what reset_data loses
+          │                for good (Plaid's 90-day re-fetch window)
           ├ categorize     RuleSet, precedence
           ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
           │                flag/category seeding from personal_finance_category)

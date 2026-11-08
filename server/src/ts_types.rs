@@ -111,6 +111,12 @@ fn render() -> String {
         decls!(&cfg, out, [ConnectionIssue, Upkeep]);
     }
 
+    // --- core::reset ---
+    {
+        use outflow_core::reset::*;
+        decls!(&cfg, out, [ResetPreview]);
+    }
+
     // --- core::recurring ---
     {
         use outflow_core::recurring::*;

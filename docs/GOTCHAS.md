@@ -158,8 +158,10 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 
 - **`/tmp` gets purged by macOS.** Don't stage the DB or secrets there — use a
   durable path (`$HOME/...` or the data dir).
-- **The DB is the permanent archive.** Plaid only serves a window (up to
-  ~24 months on first sync). `reset_data`
+- **The DB is the permanent archive.** Plaid only serves a window: the link
+  token never sets `transactions.days_requested`, so items get Plaid's
+  default of 90 days of transactions (`core::reset::PLAID_REFETCH_DAYS`;
+  investment transactions are fetched 24 months back). `reset_data`
   clears transactions/accounts/sync_log/matches and resets Plaid cursors (so
   the next sync replays what Plaid still has) but **cannot recover anything
   older than the provider window** — back up the DB file before resetting.

@@ -709,6 +709,21 @@ fn upkeep() -> outflow_core::Upkeep {
     }
 }
 
+fn reset_preview() -> outflow_core::ResetPreview {
+    outflow_core::ResetPreview {
+        transactions: 1_200,
+        oldest_day: Some("2024-01-15".into()),
+        refetch_days: 90,
+        refetch_from: "2025-10-17".into(),
+        lost_for_good: 1_050,
+        manual_categories: 14,
+        decided_matches: 6,
+        accounts: 4,
+        nicknamed_accounts: 1,
+        hidden_accounts: 1,
+    }
+}
+
 fn categorize_result() -> CategorizeResult {
     CategorizeResult {
         rule: 18,
@@ -752,6 +767,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("SyncEntry", j(sync_entry())),
         ("SyncReport", j(sync_report())),
         ("Upkeep", j(upkeep())),
+        ("ResetPreview", j(reset_preview())),
         ("CategorizeResult", j(categorize_result())),
         // perks_routes.rs
         ("PerksReport", j(perks_report())),

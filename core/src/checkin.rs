@@ -148,8 +148,9 @@ pub struct Unusual {
     pub label: String,
     /// The charge (large charge), or the month's spend (recurring), positive.
     pub cents: Option<i64>,
-    /// What it's compared with: the merchant's usual monthly cost, or the
-    /// large-charge threshold.
+    /// What it's compared with: for a recurring change, the mean of up to 3
+    /// months before (`change_pct`'s base); for a large charge, the
+    /// threshold; for a new merchant, unset.
     pub usual_cents: Option<i64>,
     /// Signed % against the usual (recurring up/down).
     pub change_pct: Option<f64>,
@@ -500,7 +501,7 @@ fn recurring_changes(view: &RecurringView, month: NaiveDate) -> Vec<Unusual> {
             };
             let mut u = Unusual::new(kind, r.name.clone());
             u.cents = r.spark_cents.last().copied();
-            u.usual_cents = Some(r.monthly_cents);
+            u.usual_cents = r.change_base_cents;
             u.change_pct = r.change_pct;
             u.merchant = Some(r.merchant.clone());
             u.account_id = Some(r.account_id.clone());
@@ -698,6 +699,14 @@ mod tests {
         assert_eq!(up.month.as_deref(), Some("2026-10"));
         assert_eq!(up.cents, Some(22_99));
         assert!(up.change_pct.unwrap() > 25.0);
+        // The usual shown beside the % is the base the % was taken against.
+        let base = up.usual_cents.unwrap() as f64;
+        let pct = (22_99.0 - base) / base * 100.0;
+        assert!(
+            (pct - up.change_pct.unwrap()).abs() < 0.1,
+            "{pct} vs {:?}",
+            up.change_pct
+        );
 
         let new = c
             .unusual

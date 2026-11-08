@@ -57,9 +57,12 @@ pub struct RecurringMerchant {
     /// charge in the window (months with no charge count as $0). Positive.
     pub monthly_cents: i64,
     pub change: Change,
-    /// Signed % of the last completed month against its usual; `None` with
-    /// fewer than two completed months.
+    /// Signed % of the last completed month against `change_base_cents`;
+    /// `None` with fewer than two completed months.
     pub change_pct: Option<f64>,
+    /// What `change_pct` compares with: the mean of up to 3 completed months
+    /// before the last one. Positive.
+    pub change_base_cents: Option<i64>,
     /// Behavioral date (epoch seconds) of the first and last charge in the
     /// window.
     pub first_seen: i64,
@@ -210,13 +213,16 @@ fn merchant_row(
         completed.iter().sum::<i64>() / completed.len() as i64
     };
 
-    let change_pct = match completed.split_last() {
+    let (change_pct, change_base_cents) = match completed.split_last() {
         Some((&latest, prior)) if !prior.is_empty() => {
             let prior = &prior[prior.len().saturating_sub(3)..];
             let base = prior.iter().sum::<i64>() as f64 / prior.len() as f64;
-            (base > 0.0).then(|| (latest as f64 - base) / base * 100.0)
+            (
+                (base > 0.0).then(|| (latest as f64 - base) / base * 100.0),
+                Some(base.round() as i64),
+            )
         }
-        _ => None,
+        _ => (None, None),
     };
     // New only when there is history before it to be new against.
     let is_new = start > last - NEW_MONTHS && earliest.is_some_and(|e| e < start);
@@ -239,6 +245,7 @@ fn merchant_row(
         monthly_cents,
         change,
         change_pct,
+        change_base_cents,
         first_seen: items.first().map(|t| t.effective_date()).unwrap_or(0),
         last_seen: items.last().map(|t| t.effective_date()).unwrap_or(0),
         spark_cents: (last - SPARK_MONTHS + 1..=last).map(spent).collect(),
@@ -389,6 +396,9 @@ mod tests {
         let find = |k: &str| v.items.iter().find(|r| r.merchant == k).unwrap();
         assert_eq!(find("streamflix").change, Change::Up);
         assert_eq!(find("streamflix").change_pct, Some(30.0));
+        // The % is against the 3 months before, not the whole-window usual.
+        assert_eq!(find("streamflix").change_base_cents, Some(1000));
+        assert_eq!(find("streamflix").monthly_cents, 1060);
         assert_eq!(find("gym co").change, Change::Down);
         assert_eq!(find("gym co").change_pct, Some(-50.0));
     }

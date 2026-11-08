@@ -2,9 +2,10 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState, type CSSPrope
 import { api } from "./api";
 import type { Account } from "./types";
 import { Toast, toastPersists, type ToastMsg } from "./components/Toast";
-import { Flow } from "./components/Flow";
+import { Flow, type Pick } from "./components/Flow";
+import { CheckIn, type CheckinNav } from "./components/CheckIn";
 import { Settings } from "./components/Settings";
-import { SCREENS, onLinkClick, useScreen } from "./route";
+import { SCREENS, navigate, onLinkClick, pathOf, useScreen } from "./route";
 import { errMessage } from "./format";
 
 // Holdings carries the chart library (recharts, most of the bundle); load it
@@ -29,6 +30,19 @@ export default function App() {
   // The selected calendar month (`YYYY-MM`), shared across screens so Flow
   // and Holdings read the same one. null = the latest with data.
   const [month, setMonth] = useState<string | null>(null);
+  // Check-in's view (week / month / quarter) and its week and quarter.
+  const [checkin, setCheckin] = useState<CheckinNav>({ view: "month", week: null, quarter: null });
+  // A drill-down from Check-in into Flow: Flow reads it once as it opens.
+  const [flowPick, setFlowPick] = useState<Pick | null>(null);
+  const drill = useCallback((pick: Pick, m: string) => {
+    setMonth(m);
+    setFlowPick(pick);
+    navigate(pathOf("flow"));
+  }, []);
+  // Leaving Flow drops the handed-over pick, so the next visit opens plain.
+  useEffect(() => {
+    if (tab !== "flow") setFlowPick(null);
+  }, [tab]);
   // Bumped when a sync on open brings new rows, so Flow reloads its figures.
   const [dataVersion, setDataVersion] = useState(0);
   const [toast, setToast] = useState<ToastMsg | null>(null);
@@ -137,7 +151,16 @@ export default function App() {
       </header>
 
       {/* Each screen renders its own <main> with its h1. */}
-      {tab === "settings" ? (
+      {tab === "checkin" ? (
+        <CheckIn
+          key={dataVersion}
+          month={month}
+          onMonth={setMonth}
+          nav={checkin}
+          onNav={setCheckin}
+          onDrill={drill}
+        />
+      ) : tab === "settings" ? (
         <Settings notify={notify} onChanged={() => void reload()} />
       ) : tab === "holdings" ? (
         <Suspense
@@ -157,6 +180,7 @@ export default function App() {
           notify={notify}
           month={month}
           onMonth={setMonth}
+          initialPick={flowPick}
         />
       )}
       {/* Always in the page so screen readers announce what appears in them:

@@ -190,6 +190,7 @@ fn recurring_merchant() -> RecurringMerchant {
         monthly_cents: 7_800,
         change: Change::Up,
         change_pct: Some(31.5),
+        change_base_cents: Some(7_605),
         first_seen: T0 - 330 * DAY,
         last_seen: T0,
         spark_cents: vec![7_100, 7_400, 7_900, 7_600, 10_000, 3_200],
@@ -204,6 +205,7 @@ fn recurring_view() -> RecurringView {
     ignored.name = "SAMPLE PARKING 0042".into();
     ignored.change = Change::Steady;
     ignored.change_pct = None;
+    ignored.change_base_cents = None;
     ignored.category = None;
     RecurringView {
         month: "2026-11".into(),

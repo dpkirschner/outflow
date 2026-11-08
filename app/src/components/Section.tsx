@@ -4,6 +4,7 @@
 import { useId, useState, type ReactNode } from "react";
 
 export function Section({
+  id,
   title,
   status,
   open: initial,
@@ -11,6 +12,8 @@ export function Section({
   danger,
   children,
 }: {
+  /** Anchor for links into Settings (`/settings#connections`). */
+  id?: string;
   title: string;
   /** One line shown beside the title, open or closed ("2 connections, all fine"). */
   status?: ReactNode;
@@ -23,7 +26,7 @@ export function Section({
   const [open, setOpen] = useState(initial);
   const body = useId();
   return (
-    <section className={`st-section${danger ? " st-danger" : ""}`}>
+    <section id={id} className={`st-section${danger ? " st-danger" : ""}`}>
       <div className="cx-head">
         <h2>
           <button

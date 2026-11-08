@@ -507,8 +507,9 @@ export type Unusual = {
    */
   cents: number | null,
   /**
-   * What it's compared with: the merchant's usual monthly cost, or the
-   * large-charge threshold.
+   * What it's compared with: for a recurring change, the mean of up to 3
+   * months before (`change_pct`'s base); for a large charge, the
+   * threshold; for a new merchant, unset.
    */
   usual_cents: number | null,
   /**
@@ -671,10 +672,15 @@ export type RecurringMerchant = {
   monthly_cents: number,
   change: Change,
   /**
-   * Signed % of the last completed month against its usual; `None` with
-   * fewer than two completed months.
+   * Signed % of the last completed month against `change_base_cents`;
+   * `None` with fewer than two completed months.
    */
   change_pct: number | null,
+  /**
+   * What `change_pct` compares with: the mean of up to 3 completed months
+   * before the last one. Positive.
+   */
+  change_base_cents: number | null,
   /**
    * Behavioral date (epoch seconds) of the first and last charge in the
    * window.

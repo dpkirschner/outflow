@@ -90,6 +90,7 @@ export function MatchReview({
 
   return (
     <Section
+      id="card-payment-review"
       title="Card-payment review"
       status={
         waiting > 0 ? (

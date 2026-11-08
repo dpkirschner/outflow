@@ -143,6 +143,9 @@ export interface Pick {
   merchant?: string;
   /** Display name for `merchant`. */
   name?: string;
+  /** The merchant's charges in the selected month only, not the recurring
+   *  window (a large charge from Check-in). */
+  inMonth?: boolean;
 }
 
 function samePick(a: Pick | null, b: Pick | null): boolean {
@@ -153,7 +156,8 @@ function samePick(a: Pick | null, b: Pick | null): boolean {
     a.direction === b.direction &&
     !!a.uncategorized === !!b.uncategorized &&
     a.category === b.category &&
-    a.merchant === b.merchant
+    a.merchant === b.merchant &&
+    !!a.inMonth === !!b.inMonth
   );
 }
 
@@ -169,6 +173,7 @@ const LANE_PATH: Record<Lane, string[]> = {
 
 /** "Moved › Save › back", for the chip and the empty state. */
 function pickLabel(p: Pick): string {
+  if (p.merchant && p.inMonth) return `Out › ${p.name ?? p.merchant}`;
   if (p.merchant) return `Recurring › ${p.name ?? p.merchant}`;
   const parts = [...LANE_PATH[p.lane]];
   if (p.uncategorized) parts.push("Not yet categorized");
@@ -187,6 +192,7 @@ export function Flow({
   notify,
   month,
   onMonth,
+  initialPick,
 }: {
   accounts: Account[];
   vocab: string[];
@@ -194,12 +200,14 @@ export function Flow({
   /** Selected month, `YYYY-MM`; null until the first load picks the latest. */
   month: string | null;
   onMonth: (m: string) => void;
+  /** A drill-down handed over from another screen (Check-in), read once. */
+  initialPick?: Pick | null;
 }) {
   const [flow, setFlow] = useState<Load<FlowMonth[]>>({ state: "loading" });
   const [cats, setCats] = useState<CategorySpend[] | null>(null);
   const [allCats, setAllCats] = useState(false);
   // Survives a month change (Flow stays mounted); resets on leaving Flow.
-  const [pick, setPick] = useState<Pick | null>(null);
+  const [pick, setPick] = useState<Pick | null>(initialPick ?? null);
   const onPick = useCallback((p: Pick) => {
     setPick((cur) => {
       if (samePick(cur, p)) return null; // selecting it again clears it
@@ -324,9 +332,17 @@ export function Flow({
     [notify, notifyOther, loadRecurring],
   );
 
+  // Arriving with a pick: once the table is on the page, bring it into view.
+  const arrived = useRef(!!initialPick);
+  useEffect(() => {
+    if (!arrived.current || flow.state !== "ok" || !month) return;
+    arrived.current = false;
+    window.requestAnimationFrame(() => bringTableIntoView());
+  }, [flow.state, month]);
+
   // A merchant pick reads the recurring window, not the month.
   const range =
-    pick?.merchant && recurring.state === "ok"
+    pick?.merchant && !pick.inMonth && recurring.state === "ok"
       ? { since: recurring.data.since, until: recurring.data.until, label: windowLabel(recurring.data) }
       : null;
 

@@ -386,6 +386,7 @@ export function Connections({
 
   return (
     <Section
+      id="connections"
       title="Connections"
       status={<span className={attention > 0 ? "st-warn" : undefined}>{status}</span>}
       open={attention > 0 || items.length === 0}

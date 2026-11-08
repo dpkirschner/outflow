@@ -332,16 +332,51 @@ those capsules.
 - Below 720px each merchant becomes two lines: name and cost, then spark,
   change, last charge and Ignore.
 
-### Month strip (Flow, Holdings)
+### Answer in words (Check-in)
+- Check-in's focal moment: one sentence at 22px (450, money in 650,
+  tabular) saying what the period did ("In October, net worth rose $309.88
+  and you kept $172.51 of what you earned."), then a Text Dim tail that
+  counts what needs you and what looks unusual. Nothing above it but the
+  strip and the title bar, so the figures under it read as the evidence.
+  Below 720px it drops to 19px.
+
+### Check-in figures
+- Three figures open on the page (no card), split by Hairlines like the
+  Flow headline pair but at 24px: Net worth change, Earned − spent, Saved.
+  Each has one Text Dim line of parts (Markets · Added, in · out, what
+  stayed as cash) and one "usually" line with the usual in Text and 600.
+  One Text Faint footnote says what "usually" means. In Month view each
+  figure is a link (dotted Text Faint underline) to Holdings or Flow for
+  that month; week and quarter figures are plain, since those screens
+  don't show weeks or quarters. Below 720px they stack with Hairlines
+  between.
+
+### Unusual list (Check-in)
+- One card of rows. Each row: the margin note in words ("reconnect",
+  "review", "new", "up 44%", "large" in Attention Amber; "down 33%" in
+  Text Dim), the name as a link with the dotted underline whose hit area
+  covers the row, a Text Dim detail line saying what it's compared with,
+  the signed amount when there is one, and the destination (Flow /
+  Settings) in Text Faint. Rows open the destination already filtered:
+  Flow drilled to the merchant (recurring window, or the charge's month
+  for a large charge), Settings scrolled to the section.
+- Checks that didn't run are a Text Faint list under the card, in words
+  ("Recurring cost changes wait for a finished month.").
+- Below 720px each row is note and destination, then name and detail with
+  the amount at the right.
+
+### Month strip (Flow, Holdings, Check-in)
 - One shared component (`MonthStrip.tsx`, `lg-strip`): one button per
   month with the short month and a short figure. Flow adds a 20px bar (Out,
   scaled to the largest month, from zero: months that spent about the same
   look about the same, because they did; the exact figure is on the button,
   so no cropped baseline to exaggerate small changes); Holdings shows net worth at month end with
-  no bar (a level, not an amount to compare by height). The selected month
+  no bar (a level, not an amount to compare by height); Check-in shows
+  earned − spent, signed and with no bar (it crosses zero). The selected month
   gets the Selected Fill, its edge and a Field Teal bar. The strip is one
   Tab stop (roving tabindex): arrow keys, Home and End move and select. The
-  month is App state, so both screens follow the same one; a month Holdings
+  month is App state, so every screen follows the same one (Check-in
+  picks the last finished month when none is chosen yet); a month Holdings
   has no snapshots for stays selected and the screen says so.
 
 ### Change equation (Holdings)

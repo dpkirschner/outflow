@@ -6,15 +6,16 @@
 // View state (the selected month, open panels) stays in app memory, not the URL.
 import { useEffect, useState } from "react";
 
-export type Screen = "flow" | "holdings" | "settings";
+export type Screen = "checkin" | "flow" | "holdings" | "settings";
 
 export const SCREENS: { screen: Screen; path: string; label: string }[] = [
+  { screen: "checkin", path: "/", label: "Check-in" },
   { screen: "flow", path: "/flow", label: "Flow" },
   { screen: "holdings", path: "/holdings", label: "Holdings" },
   { screen: "settings", path: "/settings", label: "Settings" },
 ];
 
-const DEFAULT: Screen = "flow";
+const DEFAULT: Screen = "checkin";
 
 // Plaid sends OAuth banks back here. It shows Settings, and the URL is left
 // alone until Connections has read it (Link needs the full return URL).
@@ -33,7 +34,7 @@ function screenAt(pathname: string): Screen | null {
   return SCREENS.find((s) => s.path === pathname)?.screen ?? null;
 }
 
-// `/` and unknown paths become the default screen without adding a history
+// Unknown paths become the default screen (Check-in, at `/`) without adding a history
 // entry.
 function resolve(): Screen {
   const s = screenAt(window.location.pathname);

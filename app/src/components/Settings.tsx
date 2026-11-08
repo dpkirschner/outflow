@@ -72,6 +72,30 @@ export function Settings({
     void loadUpkeep();
   }, [loadUpkeep]);
 
+  // A link into Settings (`/settings#connections`, from Check-in) names a
+  // section: once the sections are on the page, scroll to it and put focus
+  // on its title, then drop the anchor so a reload starts at the top.
+  const loaded = upkeep !== null;
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!loaded || !id) return;
+    let tries = 0;
+    let frame = 0;
+    const find = () => {
+      const el = document.getElementById(id);
+      if (!el) {
+        if (++tries < 60) frame = window.requestAnimationFrame(find);
+        return;
+      }
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+      el.querySelector<HTMLElement>(".st-fold")?.focus({ preventScroll: true });
+      window.history.replaceState(null, "", window.location.pathname);
+    };
+    frame = window.requestAnimationFrame(find);
+    return () => window.cancelAnimationFrame(frame);
+  }, [loaded]);
+
   // A change in any section can change the counts: refresh the line here
   // and the app's badge.
   const changed = useCallback(() => {

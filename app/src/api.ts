@@ -4,6 +4,7 @@
 // directly (snake_case): there is no camelCase translation layer anymore.
 import type {
   Account,
+  CheckIn,
   BalancesView,
   DayTotals,
   ExchangeResult,
@@ -272,6 +273,9 @@ export const api = {
   resetPreview: () => get<ResetPreview>("/reset/preview"),
   // What needs the owner: connections not ok, card payments to review, last sync.
   upkeep: () => get<Upkeep>("/upkeep"),
+  // One week, month or quarter (`2026-W45`, `2026-11`, `2026-Q4`,
+  // `last-month`...): net worth change, earned − spent, saved, usuals, unusual.
+  checkin: (period: string) => get<CheckIn>(`/checkin?period=${encodeURIComponent(period)}`),
 
   // Sync all linked Plaid items.
   pull: () => post<SyncReport>("/pull"),

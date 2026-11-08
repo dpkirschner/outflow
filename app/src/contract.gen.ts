@@ -249,6 +249,7 @@ export const recurringView: RecurringView = {
       "monthly_cents": 7800,
       "change": "Up",
       "change_pct": 31.5,
+      "change_base_cents": 7605,
       "first_seen": 1739923200,
       "last_seen": 1768435200,
       "spark_cents": [
@@ -273,6 +274,7 @@ export const recurringView: RecurringView = {
       "monthly_cents": 7800,
       "change": "Steady",
       "change_pct": null,
+      "change_base_cents": null,
       "first_seen": 1739923200,
       "last_seen": 1768435200,
       "spark_cents": [

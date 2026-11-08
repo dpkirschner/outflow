@@ -1126,7 +1126,7 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
                 u.day.as_deref().unwrap_or("?")
             ),
             UnusualKind::RecurringUp | UnusualKind::RecurringDown => format!(
-                "{}        {}  {} in {} vs usual {}{}",
+                "{}        {}  {} in {} vs {} a month before{}",
                 if u.kind == UnusualKind::RecurringUp {
                     "up  "
                 } else {

@@ -136,7 +136,7 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
 
 **Styling:** plain CSS in one file, `app/src/ledger.css` (tokens are the
 `--lg-*` properties on `:root`; no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
-`fl-*` = Flow tab (`fl-rc-*` its recurring list), `hd-*` = Holdings tab, `lg-*` = shell and shared (incl. the `lg-strip` month strip), `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
+`ci-*` = Check-in (home), `fl-*` = Flow tab (`fl-rc-*` its recurring list), `hd-*` = Holdings tab, `lg-*` = shell and shared (incl. the `lg-strip` month strip), `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
 match review. For styling/visual questions, trace
 `className` → rule with `rtk grep` in `ledger.css` (graphify doesn't index CSS).
 

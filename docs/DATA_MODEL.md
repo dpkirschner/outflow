@@ -322,6 +322,8 @@ of the module.
   - Recurring (months and quarters, from `recurring::build`): a new
     merchant whose first charge falls in the period; Up/Down (> 25%) on
     each completed month of the period, latest month kept per merchant.
+    `usual_cents` is the base the % was taken against (the mean of up to
+    3 completed months before), not the merchant's whole-window monthly cost.
     A month in progress gets new merchants only; a week gets neither.
   - Large charges: an Out charge (negative, Out lane, pending included)
     from a merchant not on the recurring list, at or above the nearest-rank

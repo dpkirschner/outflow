@@ -22,6 +22,10 @@ import type {
   Lane,
   Direction,
   TxnPage,
+  Upkeep,
+  ResetPreview,
+  CategoryEdit,
+  CategoryUndo,
 } from "./types";
 
 // Request-side shapes. types.ts is generated from the Rust response DTOs;
@@ -233,7 +237,11 @@ export const api = {
     post<void>("/recurring/ignored", { merchant, ignored }),
   categories: () => get<string[]>("/categories"),
   setCategory: (txnId: string, category: string, learn: boolean) =>
-    post<number | null>(`/txn/${encodeURIComponent(txnId)}/category`, { category, learn }),
+    post<CategoryEdit>(`/txn/${encodeURIComponent(txnId)}/category`, { category, learn }),
+  // Reverse one category edit (and the rule it learned) with the undo it
+  // returned. 409 = something changed since; nothing was touched.
+  undoCategory: (txnId: string, undo: CategoryUndo) =>
+    post<void>(`/txn/${encodeURIComponent(txnId)}/category/undo`, undo),
   // flag is the serde variant name, e.g. "Transfer" | "CardPayment" | "Spending".
   setFlag: (txnId: string, flag: TxnFlag, learn: boolean) =>
     post<number | null>(`/txn/${encodeURIComponent(txnId)}/flag`, { flag, learn }),
@@ -246,6 +254,9 @@ export const api = {
   applyFlags: () => post<number>("/apply_flags"),
   hasCreditAccount: () => get<boolean>("/has_credit_account"),
   resetData: () => post<void>("/reset_data"),
+  resetPreview: () => get<ResetPreview>("/reset/preview"),
+  // What needs the owner: connections not ok, card payments to review, last sync.
+  upkeep: () => get<Upkeep>("/upkeep"),
 
   // Sync all linked Plaid items.
   pull: () => post<SyncReport>("/pull"),
@@ -287,4 +298,6 @@ export const api = {
     get<MatchView[]>(`/matches${status ? `?status=${status}` : ""}`),
   acceptMatch: (id: number) => post<void>(`/matches/${id}/accept`),
   rejectMatch: (id: number) => post<void>(`/matches/${id}/reject`),
+  // An accepted pair goes back to proposed (its legs count as spending again).
+  unacceptMatch: (id: number) => post<void>(`/matches/${id}/unaccept`),
 };

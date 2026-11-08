@@ -20,7 +20,8 @@ import type {
   MovedFlow,
   RecurringMerchant,
   RecurringView,
-  Transaction,
+  TxnRow,
+  CategoryUndo,
   TxnFlag,
   TxnPage,
 } from "../types";
@@ -839,17 +840,37 @@ function TxnTable({
     }
   };
 
-  const setTxnCategory = async (t: Transaction, cat: string) => {
+  const setTxnCategory = async (t: TxnRow, cat: string) => {
     try {
-      await api.setCategory(t.id, cat, true);
-      notify({ kind: "ok", text: `${t.payee ?? t.description} → ${cat} (rule learned)` });
+      const edit = await api.setCategory(t.id, cat, true);
+      notify({
+        kind: "ok",
+        text: edit.undo.rule
+          ? `${t.display_name} → ${cat}; future ${t.display_name} charges will be too.`
+          : `${t.display_name} → ${cat}.`,
+        // Undo puts back the old category and the rule as it was.
+        action: { label: "Undo", run: () => void undoCategory(t, edit.undo) },
+      });
       await Promise.all([load(), onFiguresChanged()]);
     } catch (err) {
       notify({ kind: "err", text: errMessage(err) });
     }
   };
 
-  const startEdit = (t: Transaction) => {
+  const undoCategory = async (t: TxnRow, undo: CategoryUndo) => {
+    try {
+      await api.undoCategory(t.id, undo);
+      notify({
+        kind: "ok",
+        text: `${t.display_name} is back to ${undo.prev_category ?? "not yet categorized"}.`,
+      });
+      await Promise.all([load(), onFiguresChanged()]);
+    } catch (err) {
+      notify({ kind: "err", text: `Couldn't undo: ${errMessage(err)}` });
+    }
+  };
+
+  const startEdit = (t: TxnRow) => {
     editingRef.current = t.id;
     keyNav.current = false;
     setDraft(null);
@@ -857,7 +878,7 @@ function TxnTable({
   };
   /** Close the category field, saving `value` if it changed. `refocus`:
    *  put focus back on the row (not when the reader tabbed away). */
-  const endEdit = (t: Transaction, value: string | null, refocusRow: boolean) => {
+  const endEdit = (t: TxnRow, value: string | null, refocusRow: boolean) => {
     if (editingRef.current !== t.id) return; // already closed (blur after Enter)
     editingRef.current = null;
     setEditing(null);
@@ -872,7 +893,7 @@ function TxnTable({
     if (save) void setTxnCategory(t, value);
   };
 
-  const setTxnFlag = async (t: Transaction, flag: TxnFlag) => {
+  const setTxnFlag = async (t: TxnRow, flag: TxnFlag) => {
     const before = t.flag;
     markFocus(t.id, ".fl-mini");
     try {
@@ -916,7 +937,7 @@ function TxnTable({
     </th>
   );
 
-  const row = (t: Transaction) => {
+  const row = (t: TxnRow) => {
     const a = acctFor(t.account_id);
     const moved = t.flag !== "Spending";
     return (
@@ -924,7 +945,7 @@ function TxnTable({
         <td className="fl-date">{fmtDay(t.transacted_at ?? t.posted)}</td>
         <td className="fl-col-merch">
           <span className="fl-merch">
-            <span className="fl-merch-name">{t.payee ?? t.description}</span>
+            <span className="fl-merch-name">{t.display_name}</span>
             {t.pending && <span className="fl-pending">pending</span>}
           </span>
         </td>
@@ -939,7 +960,7 @@ function TxnTable({
           ) : editing === t.id ? (
             <label>
               <span className="fl-sr">
-                Category for {t.payee ?? t.description}. Enter saves, Escape cancels.
+                Category for {t.display_name}. Enter saves, Escape cancels.
               </span>
               <select
                 autoFocus

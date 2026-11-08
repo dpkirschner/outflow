@@ -9,6 +9,7 @@ import type {
   ActivityRow,
   BalancesView,
   CategorizeResult,
+  CategoryEdit,
   CategorySpend,
   CheckIn,
   DayTotals,
@@ -23,10 +24,12 @@ import type {
   PositionPoint,
   PositionRow,
   RecurringView,
+  ResetPreview,
   SyncEntry,
   SyncReport,
   Transaction,
   TxnPage,
+  Upkeep,
 } from "./types";
 
 export const account: Account = {
@@ -79,7 +82,8 @@ export const txnPage: TxnPage = {
       "raw": "{}",
       "source": "plaid",
       "pfc_primary": null,
-      "pfc_detailed": null
+      "pfc_detailed": null,
+      "display_name": "Example Coffee Co"
     },
     {
       "id": "txn-demo-002",
@@ -96,7 +100,8 @@ export const txnPage: TxnPage = {
       "raw": "{}",
       "source": "plaid",
       "pfc_primary": null,
-      "pfc_detailed": null
+      "pfc_detailed": null,
+      "display_name": "Demo Card Payment"
     }
   ]
 };
@@ -598,9 +603,48 @@ export const syncReport: SyncReport = {
   "matches_proposed": 2
 };
 
+export const upkeep: Upkeep = {
+  "connections": [
+    {
+      "item_id": "item-demo-001",
+      "institution": "Demo Bank",
+      "status": "login_required"
+    }
+  ],
+  "proposed_matches": 2,
+  "last_synced": 1768521600,
+  "total": 3
+};
+
+export const resetPreview: ResetPreview = {
+  "transactions": 1200,
+  "oldest_day": "2024-01-15",
+  "refetch_days": 90,
+  "refetch_from": "2025-10-17",
+  "lost_for_good": 1050,
+  "manual_categories": 14,
+  "decided_matches": 6,
+  "accounts": 4,
+  "nicknamed_accounts": 1,
+  "hidden_accounts": 1
+};
+
 export const categorizeResult: CategorizeResult = {
   "rule": 18,
   "remaining": 5
+};
+
+export const categoryEdit: CategoryEdit = {
+  "rule_id": 12,
+  "undo": {
+    "category": "Coffee",
+    "prev_category": "Dining",
+    "prev_source": "Plaid",
+    "rule": {
+      "id": 12,
+      "prev_category": null
+    }
+  }
 };
 
 export const perksReport: PerksReport = {

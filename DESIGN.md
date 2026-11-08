@@ -434,6 +434,21 @@ those capsules.
   wrapping rather than truncating. The header row stays as the sort
   controls. Nothing is hidden at narrow widths or 200% zoom.
 
+### Settings sections
+- Settings opens with one upkeep line from core (`GET /api/upkeep`, the
+  same numbers as the nav badge): what needs a look in Attention Amber,
+  the rest in Text Dim, "Nothing needs you." when the total is zero.
+- Each block is a foldable section: the title is a button with a chevron
+  and `aria-expanded`; a one-line status sits beside it; the section's
+  actions stay outside the button and work while it's closed. Sections
+  that need nothing start closed.
+- Row-level actions (nickname, hide, unlink) are small outline buttons:
+  28px tall, Text Faint edge, Text Dim label. Never Note Blue.
+- Anything that can't be undone confirms on the page, never with a
+  browser dialog. Unlink asks once inline. Clearing data is the Danger
+  zone: a red-edged panel listing what's lost (counts from core), a
+  checkbox naming what can't be fetched again, then the red button.
+
 ## Do's and Don'ts
 
 ### Do:

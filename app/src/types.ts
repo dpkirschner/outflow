@@ -111,6 +111,55 @@ export type SyncEntry = {
   note: string | null,
 };
 
+/**
+ * What `Store::set_manual_category` did: the learned rule, and the token
+ * that reverses exactly this edit.
+ */
+export type CategoryEdit = {
+  /**
+   * The exact rule on the merchant when `learn` (new or re-pointed);
+   * None without `learn` or with an empty merchant.
+   */
+  rule_id: number | null,
+  /**
+   * Send back to `POST /txn/{txn_id}/category/undo` as is.
+   */
+  undo: CategoryUndo,
+};
+
+/**
+ * The state one category edit replaced. Undo restores it only while the
+ * edit is still in place.
+ */
+export type CategoryUndo = {
+  /**
+   * The category the edit set (checked: still the row's manual category).
+   */
+  category: string,
+  /**
+   * The row's category and source before the edit.
+   */
+  prev_category: string | null,
+  prev_source: CategorySource | null,
+  /**
+   * The rule the edit wrote; None when it wrote none (no `learn`, or the
+   * merchant's rule already said this category).
+   */
+  rule: RuleUndo | null,
+};
+
+/**
+ * The rule half of a category edit.
+ */
+export type RuleUndo = {
+  id: number,
+  /**
+   * None: the edit created the rule, undo deletes it. Some: the edit
+   * re-pointed the merchant's existing rule, undo puts this back.
+   */
+  prev_category: string | null,
+};
+
 export type PeriodKind = "Week" | "Month" | "Quarter" | "Year" | "Custom";
 
 /**
@@ -137,7 +186,46 @@ export type TxnPage = {
    * Signed sum over ALL matching rows (not just this page).
    */
   total_cents: number,
-  items: Array<Transaction>,
+  items: Array<TxnRow>,
+};
+
+/**
+ * A transaction as the list shows it: every `Transaction` field, plus the
+ * merchant's display name.
+ */
+export type TxnRow = {
+  /**
+   * `display_merchant(merchant())`: `SQ *BLUE BOTTLE 0042` → `Blue
+   * Bottle`. Display only; filter by `normalize_payee` keys.
+   */
+  display_name: string,
+  id: string,
+  account_id: string,
+  posted: number,
+  /**
+   * When the purchase actually happened (Plaid `authorized_date`), if the
+   * bank supplied it. `None` when only the posting date is known.
+   */
+  transacted_at: number | null,
+  amount: number,
+  description: string,
+  payee: string | null,
+  category: string | null,
+  category_source: CategorySource | null,
+  pending: boolean,
+  /**
+   * The effective flag: the user's override when there is one, else the
+   * one Plaid's category gives (`plaid::flag_from_pfc`, worked out on read).
+   */
+  flag: TxnFlag,
+  raw: string,
+  source: string,
+  /**
+   * Plaid `personal_finance_category.primary` / `.detailed`, as sent.
+   * `None` for rows from other sources or when Plaid sent none.
+   */
+  pfc_primary: string | null,
+  pfc_detailed: string | null,
 };
 
 export type CategorySpend = {
@@ -349,7 +437,8 @@ export type UnusualKind = "connection" | "match_review" | "new_recurring" | "rec
 export type Unusual = {
   kind: UnusualKind,
   /**
-   * Merchant as the bank writes it, institution, or a short phrase.
+   * Merchant display name (`display_merchant`), institution, or a short
+   * phrase.
    */
   label: string,
   /**
@@ -400,6 +489,93 @@ export type NotChecked = {
 };
 
 /**
+ * A connection that needs the owner.
+ */
+export type ConnectionIssue = {
+  item_id: string,
+  institution: string,
+  /**
+   * `login_required` or `error`.
+   */
+  status: string,
+};
+
+/**
+ * What needs the owner now.
+ */
+export type Upkeep = {
+  /**
+   * Connections whose status isn't `ok`, oldest link first.
+   */
+  connections: Array<ConnectionIssue>,
+  /**
+   * Card-payment matches waiting for review.
+   */
+  proposed_matches: number,
+  /**
+   * Newest successful sync across connections, epoch seconds; None when
+   * nothing has synced (or nothing is linked).
+   */
+  last_synced: number | null,
+  /**
+   * Things to do: each connection plus each match waiting.
+   */
+  total: number,
+};
+
+/**
+ * What a reset deletes, and which of it the next sync can't bring back.
+ */
+export type ResetPreview = {
+  /**
+   * Every stored transaction, hidden accounts' included.
+   */
+  transactions: number,
+  /**
+   * Local day of the oldest stored transaction (posted date),
+   * `YYYY-MM-DD`; None when there are none.
+   */
+  oldest_day: string | null,
+  /**
+   * How many days back Plaid re-serves (`PLAID_REFETCH_DAYS`).
+   */
+  refetch_days: number,
+  /**
+   * The first local day the next sync re-fetches, `YYYY-MM-DD`
+   * (today − `refetch_days`).
+   */
+  refetch_from: string,
+  /**
+   * Transactions posted before `refetch_from`: gone for good.
+   */
+  lost_for_good: number,
+  /**
+   * Transactions whose category the owner set by hand. Re-fetched rows
+   * come back without it (a learned rule re-applies on the next
+   * categorize; a one-off edit is gone).
+   */
+  manual_categories: number,
+  /**
+   * Card-payment pairs the owner or the detector decided (accepted or
+   * rejected). Re-fetched pairs are detected again; high confidence
+   * re-accepts, the rest come back for review.
+   */
+  decided_matches: number,
+  /**
+   * Every account, hidden ones included.
+   */
+  accounts: number,
+  /**
+   * Accounts with a nickname: cleared.
+   */
+  nicknamed_accounts: number,
+  /**
+   * Hidden accounts: they come back visible.
+   */
+  hidden_accounts: number,
+};
+
+/**
  * How a recurring merchant's cost moved.
  */
 export type Change = "New" | "Up" | "Down" | "Steady";
@@ -414,7 +590,8 @@ export type RecurringMerchant = {
    */
   merchant: string,
   /**
-   * The merchant as the bank writes it most often, for display.
+   * Display name (`display_merchant`) of the spelling the bank uses most
+   * often: `SQ *BLUE BOTTLE 0042` shows as `Blue Bottle`.
    */
   name: string,
   cadence: StreamCadence,

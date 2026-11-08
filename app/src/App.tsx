@@ -21,8 +21,8 @@ export default function App() {
     const label = SCREENS.find((s) => s.screen === tab)?.label;
     document.title = label ? `outflow · ${label}` : "outflow";
   }, [tab]);
-  // Upkeep that needs a look: proposed card-payment matches + connections
-  // not "ok". Shown as a badge on the Settings tab.
+  // Upkeep that needs a look (core's upkeep total: connections to reconnect
+  // + card payments to review). Shown as a badge on the Settings tab.
   const [attention, setAttention] = useState(0);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vocab, setVocab] = useState<string[]>([]);
@@ -47,15 +47,14 @@ export default function App() {
 
   const reload = useCallback(async () => {
     try {
-      const [accts, cats, pending, items] = await Promise.all([
+      const [accts, cats, upkeep] = await Promise.all([
         api.accounts(),
         api.categories(),
-        api.matches("proposed").catch(() => []),
-        api.plaidItems().catch(() => []),
+        api.upkeep().catch(() => null),
       ]);
       setAccounts(accts);
       setVocab(cats);
-      setAttention(pending.length + items.filter((it) => it.status !== "ok").length);
+      setAttention(upkeep?.total ?? 0);
     } catch (err) {
       notify({ kind: "err", text: `Load failed: ${errMessage(err)}` });
     }
@@ -71,7 +70,7 @@ export default function App() {
       try {
         const r = await api.pullLive();
         if (r.added || r.updated) {
-          notify({ kind: "ok", text: `Refreshed: ${r.added} added, ${r.updated} updated` });
+          notify({ kind: "ok", text: `Synced: ${r.added} new, ${r.updated} updated` });
           await reload();
           setDataVersion((v) => v + 1);
         }

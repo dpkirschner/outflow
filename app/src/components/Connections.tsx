@@ -12,6 +12,7 @@ import { SourceChip, accountDisplayLabel, accountSource, agoLabel } from "./acco
 import type { ToastMsg } from "./Toast";
 import { isOauthReturn, navigate, pathOf } from "../route";
 import { errMessage } from "../format";
+import { Section } from "./Section";
 
 const LINK_TOKEN_KEY = "outflow_plaid_link_token";
 const LINK_ITEM_KEY = "outflow_plaid_link_item";
@@ -87,12 +88,18 @@ function LinkSession({
 export function Connections({
   notify,
   onChanged,
+  attention,
 }: {
   notify: (msg: ToastMsg) => void;
   /// Re-fetch app-wide state after a nickname or hide change so the other
   /// tabs (which read the shared, visible-only accounts list) update too.
   onChanged: () => void;
+  /// Connections that need reconnecting (core's upkeep): the section starts
+  /// open when there are any.
+  attention: number;
 }) {
+  const [loaded, setLoaded] = useState(false);
+  const [confirmUnlink, setConfirmUnlink] = useState<string | null>(null);
   const [items, setItems] = useState<PlaidItem[]>([]);
   // Every account, hidden included — this is the one screen that can un-hide.
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -117,7 +124,9 @@ export function Connections({
       setLog(lg);
       setAccounts(accts);
     } catch (err) {
-      notify({ kind: "err", text: `Load failed: ${errMessage(err)}` });
+      notify({ kind: "err", text: `Couldn't load connections: ${errMessage(err)}` });
+    } finally {
+      setLoaded(true);
     }
   }, [notify]);
 
@@ -205,12 +214,7 @@ export function Connections({
   };
 
   const onRemove = async (item: PlaidItem) => {
-    if (
-      !window.confirm(
-        `Unlink ${item.institution}? Pulled history is kept; new transactions stop syncing.`,
-      )
-    )
-      return;
+    setConfirmUnlink(null);
     setBusy(true);
     try {
       await api.plaidRemoveItem(item.item_id);
@@ -232,8 +236,8 @@ export function Connections({
       notify({
         kind: errs.length ? "err" : "ok",
         text: errs.length
-          ? `Synced with errors: ${errs.map((l) => `${l.source}: ${l.error}`).join("; ")}`
-          : `Synced ${r.legs.length} source(s): ${added} added`,
+          ? `Sync didn't finish for ${errs.map((l) => l.source).join(", ")}: ${errs.map((l) => l.error).join("; ")}`
+          : `Synced: ${added} new transaction${added === 1 ? "" : "s"}`,
       });
       await refresh();
     } catch (err) {
@@ -274,15 +278,84 @@ export function Connections({
     }
   };
 
-  // Accounts grouped by institution; org === PlaidItem.institution on the live
-  // path, so headers line up with the items above (fixture accounts group too).
+  // Accounts sit under their connection. Accounts carry no item id yet, so
+  // they're matched by institution name (org === PlaidItem.institution on
+  // the live path); anything unmatched (a fixture pull) is listed after.
   const byOrg = accounts.reduce<Record<string, Account[]>>((m, a) => {
     (m[a.org] ??= []).push(a);
     return m;
   }, {});
+  const linked = new Set(items.map((it) => it.institution));
+  const unmatched = accounts.filter((a) => !linked.has(a.org));
+
+  if (!loaded) return null;
+
+  const accountRow = (a: Account) => (
+    <li className="cx-acct-row" key={a.id}>
+      <SourceChip s={accountSource(a)} />
+      {a.hidden && <span className="cx-hidden-tag">hidden</span>}
+      <span className="cx-acct-acts">
+      {editing === a.id ? (
+        <input
+          className="cx-nick-input"
+          type="text"
+          autoFocus
+          aria-label={`Nickname for ${accountDisplayLabel(a.name, a.nickname)}`}
+          defaultValue={a.nickname ?? ""}
+          maxLength={40}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              cancelEdit.current = true;
+              e.currentTarget.blur();
+            }
+          }}
+          onBlur={(e) => {
+            if (cancelEdit.current) {
+              cancelEdit.current = false;
+              setEditing(null);
+              return;
+            }
+            void saveNickname(a, e.target.value);
+          }}
+        />
+      ) : (
+        <button className="cx-mini" onClick={() => setEditing(a.id)}>
+          {a.nickname ? "Rename" : "Add nickname"}
+        </button>
+      )}
+      <button className="cx-mini" onClick={() => void toggleHidden(a)}>
+        {a.hidden ? "Show" : "Hide"}
+      </button>
+      </span>
+    </li>
+  );
+
+  const okCount = items.filter((it) => it.status === "ok").length;
+  const status =
+    items.length === 0
+      ? "none linked yet"
+      : attention > 0
+        ? `${attention} of ${items.length} need${attention === 1 ? "s" : ""} reconnecting`
+        : `${items.length === 1 ? "1 connection" : `${okCount} connections`}, all fine`;
 
   return (
-    <div className="cx-wrap">
+    <Section
+      title="Connections"
+      status={<span className={attention > 0 ? "st-warn" : undefined}>{status}</span>}
+      open={attention > 0 || items.length === 0}
+      actions={
+        <>
+          <button className="lg-pill" disabled={busy} onClick={() => void startLink()}>
+            Connect a bank
+          </button>
+          <button className="lg-pill" disabled={busy} onClick={() => void onPull()}>
+            Sync now
+          </button>
+        </>
+      }
+    >
       {session && (
         <LinkSession
           token={session.token}
@@ -290,161 +363,137 @@ export function Connections({
           onDone={onLinkDone}
         />
       )}
+      <div className="cx-wrap">
+        {items.length === 0 ? (
+          <p className="st-blurb">
+            No banks linked yet. <b>Connect a bank</b> opens Plaid Link. Amex, Capital One and
+            Chase work once the server's OAuth redirect is configured.
+          </p>
+        ) : (
+          <>
+            <p className="st-blurb">
+              Give an account a nickname to spot it at a glance; the last four digits stay. Hide one
+              to drop it and its transactions from every view. It keeps syncing, and you can show it
+              again here.
+            </p>
+            <ul className="cx-items">
+              {items.map((it) => (
+                <li key={it.item_id} className="cx-item">
+                  <div className="cx-item-head">
+                    <div className="cx-inst">
+                      <h3>{it.institution}</h3>
+                      <span className={`cx-status cx-${it.status}`}>
+                        {it.status === "ok"
+                          ? "connected"
+                          : it.status === "login_required"
+                            ? "reconnect needed"
+                            : "error"}
+                      </span>
+                    </div>
+                    <div className="cx-meta">
+                      {it.last_synced ? `last sync ${agoLabel(it.last_synced)}` : "never synced"}
+                    </div>
+                    <div className="cx-actions">
+                      {it.status !== "ok" && (
+                        <button
+                          className="lg-pill key"
+                          disabled={busy}
+                          onClick={() => void startLink(it.item_id)}
+                        >
+                          Reconnect
+                        </button>
+                      )}
+                      {it.investments_consent ? (
+                        <span className="lg-src investment">holdings allowed</span>
+                      ) : (
+                        byOrg[it.institution]?.some((a) => a.kind === "Investment") && (
+                          // Items linked before outflow requested Investments consent
+                          // need this update-mode pass before holdings can be fetched.
+                          <button
+                            className="lg-src investment cx-holdings-btn"
+                            disabled={busy}
+                            onClick={() => void startLink(it.item_id, true)}
+                          >
+                            Allow holdings
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                  {(byOrg[it.institution]?.length ?? 0) > 0 && (
+                    <ul className="cx-acct-list" aria-label={`${it.institution} accounts`}>
+                      {byOrg[it.institution].map(accountRow)}
+                    </ul>
+                  )}
+                  <div className="cx-item-foot">
+                    {confirmUnlink === it.item_id ? (
+                      <div className="cx-confirm" role="group" aria-label={`Unlink ${it.institution}`}>
+                        <span>
+                          Unlink {it.institution}? Pulled history stays; new transactions stop
+                          syncing.
+                        </span>
+                        <button
+                          className="cx-mini cx-danger"
+                          disabled={busy}
+                          onClick={() => void onRemove(it)}
+                        >
+                          Unlink
+                        </button>
+                        <button className="cx-mini" onClick={() => setConfirmUnlink(null)}>
+                          Keep it
+                        </button>
+                      </div>
+                    ) : (
+                      <button className="cx-mini" onClick={() => setConfirmUnlink(it.item_id)}>
+                        Unlink…
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
 
-      <div className="cx-head">
-        <h2>Connections</h2>
-        <div className="cx-actions">
-          <button className="lg-pill" disabled={busy} onClick={() => void startLink()}>
-            Connect a bank
-          </button>
+        {unmatched.length > 0 && (
+          <div className="cx-accts">
+            <h3>Other accounts</h3>
+            <ul className="cx-acct-list">{unmatched.map(accountRow)}</ul>
+          </div>
+        )}
+
+        <p className="st-blurb">
+          A brokerage, retirement or HSA provider that <b>Connect a bank</b> can't find?{" "}
           <button
-            className="lg-pill"
+            className="cx-mini"
             disabled={busy}
-            title="For brokerage, retirement or HSA providers that Connect a bank can't find"
             onClick={() => void startLink(undefined, false, true)}
           >
             Connect investments only
           </button>
-          <button className="lg-pill" disabled={busy} onClick={() => void onPull()}>
-            Sync now
-          </button>
-        </div>
-      </div>
+        </p>
 
-      {items.length === 0 ? (
-        <div className="lg-empty">
-          No banks linked yet. <b>Connect a bank</b> opens Plaid Link — Amex, Capital One and
-          Chase all work once the server's OAuth redirect is configured.
-        </div>
-      ) : (
-        <ul className="cx-items">
-          {items.map((it) => (
-            <li key={it.item_id} className="cx-item">
-              <div className="cx-inst">
-                <b>{it.institution}</b>
-                <span className={`cx-status cx-${it.status}`}>
-                  {it.status === "ok"
-                    ? "connected"
-                    : it.status === "login_required"
-                      ? "reconnect needed"
-                      : "error"}
-                </span>
-              </div>
-              <div className="cx-meta">
-                {it.last_synced ? `last sync ${agoLabel(it.last_synced)}` : "never synced"}
-              </div>
-              <div className="cx-actions">
-                {it.status !== "ok" && (
-                  <button
-                    className="lg-pill"
-                    disabled={busy}
-                    onClick={() => void startLink(it.item_id)}
-                  >
-                    Reconnect
-                  </button>
-                )}
-                {it.investments_consent ? (
-                  <span className="lg-src investment" title="Holdings access granted">
-                    ✓ HOLDINGS
+        {log.length > 0 && (
+          <div className="cx-log">
+            <h3>Recent syncs</h3>
+            <ul>
+              {log.map((s) => (
+                <li key={s.id}>
+                  <span className="cx-log-src">{s.source}</span>
+                  <span>{agoLabel(s.started)}</span>
+                  <span className={s.note && s.finished !== null ? "cx-log-fail" : undefined}>
+                    {s.finished === null
+                      ? "running…"
+                      : s.note
+                        ? `didn't finish (${s.note})`
+                        : `${s.added ?? 0} new, ${s.updated ?? 0} updated`}
                   </span>
-                ) : byOrg[it.institution]?.some((a) => a.kind === "Investment") && (
-                  // Items linked before outflow requested Investments consent
-                  // need this update-mode pass before holdings can be fetched.
-                  <button
-                    className="lg-src investment cx-holdings-btn"
-                    disabled={busy}
-                    title="Re-open Plaid Link to grant access to holdings"
-                    onClick={() => void startLink(it.item_id, true)}
-                  >
-                    + ALLOW HOLDINGS
-                  </button>
-                )}
-                <button className="lg-pill ghost" disabled={busy} onClick={() => void onRemove(it)}>
-                  Unlink
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {accounts.length > 0 && (
-        <div className="cx-accts">
-          <h3>Accounts</h3>
-          <p className="cx-accts-hint">
-            Give a card or account a nickname to spot it at a glance — the last-4
-            is kept automatically. Hide one to drop it and its transactions from
-            every view; it keeps syncing, and you can show it again here.
-          </p>
-          {Object.entries(byOrg).map(([org, accts]) => (
-            <div className="cx-acct-group" key={org}>
-              <div className="cx-acct-org">{org}</div>
-              <ul className="cx-acct-list">
-                {accts.map((a) => (
-                  <li className={`cx-acct-row${a.hidden ? " cx-acct-hidden" : ""}`} key={a.id}>
-                    <SourceChip s={accountSource(a)} />
-                    {a.hidden && <span className="cx-hidden-tag">hidden</span>}
-                    {editing === a.id ? (
-                      <input
-                        className="cx-nick-input"
-                        type="text"
-                        autoFocus
-                        defaultValue={a.nickname ?? ""}
-                        placeholder="nickname"
-                        maxLength={40}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.currentTarget.blur();
-                          } else if (e.key === "Escape") {
-                            cancelEdit.current = true;
-                            e.currentTarget.blur();
-                          }
-                        }}
-                        onBlur={(e) => {
-                          if (cancelEdit.current) {
-                            cancelEdit.current = false;
-                            setEditing(null);
-                            return;
-                          }
-                          void saveNickname(a, e.target.value);
-                        }}
-                      />
-                    ) : (
-                      <button className="cx-nick-edit" onClick={() => setEditing(a.id)}>
-                        {a.nickname ? "Rename" : "Add nickname"}
-                      </button>
-                    )}
-                    <button className="cx-hide" onClick={() => void toggleHidden(a)}>
-                      {a.hidden ? "Show" : "Hide"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {log.length > 0 && (
-        <div className="cx-log">
-          <h3>Recent syncs</h3>
-          <ul>
-            {log.map((s) => (
-              <li key={s.id}>
-                <span className="cx-log-src">{s.source}</span>
-                <span>{agoLabel(s.started)}</span>
-                <span>
-                  {s.finished === null
-                    ? "running…"
-                    : s.note
-                      ? `failed: ${s.note}`
-                      : `${s.added ?? 0} added, ${s.updated ?? 0} updated`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }

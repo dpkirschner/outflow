@@ -599,7 +599,7 @@ body {
   margin-top: -2px;
   font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--lg-amber);
+  color: var(--lg-dim);
 }
 
 .lg-strip :focus-visible {
@@ -1080,9 +1080,10 @@ button.fl-lane-figure {
 .fl-amt.in {
   color: var(--lg-green);
 }
-.fl-moved .fl-merch-name,
+/* A move isn't in or out: its amount stays neutral, never green. The tag
+   says it's moved; the name and amount stay readable. */
 .fl-moved .fl-amt {
-  color: var(--lg-dim);
+  color: var(--lg-text);
 }
 .fl-col-act {
   text-align: right;
@@ -1650,9 +1651,9 @@ button.fl-lane-figure {
 .hd-sofar {
   font-size: 0.6875rem;
   font-weight: 600;
-  color: var(--lg-amber);
+  color: var(--lg-dim);
   padding: 1px 8px;
-  border: 1px solid var(--lg-amber-edge);
+  border: 1px solid var(--lg-faint);
   border-radius: 999px;
 }
 .hd-views {

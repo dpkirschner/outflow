@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Account } from "./types";
 import { Toast, toastPersists, type ToastMsg } from "./components/Toast";
 import { Flow } from "./components/Flow";
-import { Holdings } from "./components/Holdings";
 import { Settings } from "./components/Settings";
 import { SCREENS, onLinkClick, useScreen } from "./route";
 import { errMessage } from "./format";
+
+// Holdings carries the chart library (recharts, most of the bundle); load it
+// only when that screen opens.
+const Holdings = lazy(() =>
+  import("./components/Holdings").then((m) => ({ default: m.Holdings })),
+);
 
 export default function App() {
   // The screen comes from the URL (route.ts); /oauth-return maps to Settings
@@ -113,7 +118,15 @@ export default function App() {
       {tab === "settings" ? (
         <Settings notify={notify} onChanged={() => void reload()} />
       ) : tab === "holdings" ? (
-        <Holdings key={dataVersion} month={month} onMonth={setMonth} />
+        <Suspense
+          fallback={
+            <main className="hd-wrap" aria-busy="true">
+              <h1 className="lg-sr">Holdings</h1>
+            </main>
+          }
+        >
+          <Holdings key={dataVersion} month={month} onMonth={setMonth} />
+        </Suspense>
       ) : (
         <Flow
           key={dataVersion}

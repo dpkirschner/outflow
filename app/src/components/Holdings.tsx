@@ -65,6 +65,27 @@ function loadView(): View {
   }
 }
 
+type Lens = "account" | "position";
+const LENS_KEY = "outflow.holdings.lens";
+function loadLens(): Lens {
+  try {
+    return window.localStorage.getItem(LENS_KEY) === "position" ? "position" : "account";
+  } catch {
+    return "account";
+  }
+}
+
+// Open account rows survive a trip to another screen (this module stays
+// loaded); a reload starts closed.
+let rememberedOpen = new Set<string>();
+
+/** Uninvested cash under a dollar is a rounding remainder, not a holding:
+ *  left out of the rows and the "and cash" wording. Totals are unchanged. */
+const TINY_CASH_CENTS = 100;
+function shown(rows: PositionChange[]): PositionChange[] {
+  return rows.filter((p) => !(p.is_cash && Math.abs(p.end_value) < TINY_CASH_CENTS));
+}
+
 function saveView(v: View) {
   try {
     window.localStorage.setItem(VIEW_KEY, v);
@@ -142,7 +163,15 @@ export function Holdings({
   const [history, setHistory] = useState<Load<DayTotals[]>>({ state: "loading" });
   const [balances, setBalances] = useState<BalancesView | null>(null);
   const [view, setViewState] = useState<View>(loadView);
-  const [lens, setLens] = useState<"account" | "position">("account");
+  const [lens, setLensState] = useState<Lens>(loadLens);
+  const setLens = (l: Lens) => {
+    setLensState(l);
+    try {
+      window.localStorage.setItem(LENS_KEY, l);
+    } catch {
+      /* private window: the lens just isn't remembered */
+    }
+  };
   const [change, setChange] = useState<Load<NetWorthChange>>({ state: "loading" });
   const [positions, setPositions] = useState<Load<PositionChange[]>>({ state: "loading" });
   const [combined, setCombined] = useState<Load<PositionChange[]>>({ state: "loading" });
@@ -826,7 +855,13 @@ function AccountGroups({
   acctById: Map<string, AccountBalance>;
   live: boolean;
 }) {
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [open, setOpenState] = useState<Set<string>>(rememberedOpen);
+  const setOpen = (f: (s: Set<string>) => Set<string>) =>
+    setOpenState((s) => {
+      const next = f(s);
+      rememberedOpen = next;
+      return next;
+    });
   if (c.accounts.length === 0) {
     return <p className="hd-quiet hd-pad">No account has a snapshot in this range.</p>;
   }
@@ -840,7 +875,7 @@ function AccountGroups({
   // Every account starting at its first snapshot is said once, in the hero.
   const allPartial = c.accounts.every((a) => a.partial_start);
   const posOf = (id: string) =>
-    positions.state === "ok" ? positions.data.filter((p) => p.account_ids[0] === id) : [];
+    positions.state === "ok" ? shown(positions.data.filter((p) => p.account_ids[0] === id)) : [];
   return (
     <div className="hd-groups">
       <div className="hd-cols" aria-hidden="true">
@@ -1039,7 +1074,8 @@ function CombinedPositions({
       </div>
     );
   }
-  if (load.data.length === 0) {
+  const rows = shown(load.data);
+  if (rows.length === 0) {
     return <p className="hd-quiet hd-pad">No positions in this range.</p>;
   }
   return (
@@ -1048,12 +1084,57 @@ function CombinedPositions({
         Each security combined across accounts. Position gains count a reinvested dividend as money
         put in, so they don't add up to the account gains.
       </p>
-      <PositionTable rows={load.data} showAccounts />
+      <PositionTable rows={rows} showAccounts />
     </div>
   );
 }
 
-function PositionTable({ rows, showAccounts }: { rows: PositionChange[]; showAccounts: boolean }) {
+type PosSort = "label" | "value" | "gain" | "unrealized";
+const POS_SORT: Record<PosSort, (p: PositionChange) => number | string | null> = {
+  label: (p) => p.label.toLowerCase(),
+  value: (p) => p.end_value,
+  gain: (p) => p.gain,
+  unrealized: (p) => p.unrealized_gain,
+};
+
+function PositionTable({
+  rows: given,
+  showAccounts,
+}: {
+  rows: PositionChange[];
+  showAccounts: boolean;
+}) {
+  // null = the server's order. Clicking a header sorts by it (names A-Z,
+  // figures largest first); clicking again flips it. Unknowns sort last.
+  const [sort, setSort] = useState<{ key: PosSort; desc: boolean } | null>(null);
+  const rows = useMemo(() => {
+    if (!sort) return given;
+    const get = POS_SORT[sort.key];
+    return [...given].sort((x, y) => {
+      const a = get(x);
+      const b = get(y);
+      if (a === null || b === null) return a === null ? (b === null ? 0 : 1) : -1;
+      const c = a < b ? -1 : a > b ? 1 : 0;
+      return sort.desc ? -c : c;
+    });
+  }, [given, sort]);
+  const onSort = (key: PosSort) =>
+    setSort((s) => (s?.key === key ? { key, desc: !s.desc } : { key, desc: key !== "label" }));
+  // A plain function (not a component) so header buttons keep focus.
+  const head = (key: PosSort, label: string, right = true) => (
+    <th
+      scope="col"
+      className={right ? "r" : undefined}
+      aria-sort={sort?.key === key ? (sort.desc ? "descending" : "ascending") : "none"}
+    >
+      <button className="fl-sort" onClick={() => onSort(key)}>
+        {label}
+        <span className="fl-sort-mark" aria-hidden="true">
+          {sort?.key === key ? (sort.desc ? "↓" : "↑") : ""}
+        </span>
+      </button>
+    </th>
+  );
   // Reasons are footnotes under the table, not hover-only titles.
   const noBasis = rows.some((p) => !p.is_cash && !p.sold && p.cost_basis === null);
   const unknown = rows.some(
@@ -1071,19 +1152,13 @@ function PositionTable({ rows, showAccounts }: { rows: PositionChange[]; showAcc
       </colgroup>
       <thead>
         <tr>
-          <th scope="col">Holding</th>
+          {head("label", "Holding", false)}
           <th scope="col" className="r">
             Shares
           </th>
-          <th scope="col" className="r">
-            Value
-          </th>
-          <th scope="col" className="r">
-            Gain this range
-          </th>
-          <th scope="col" className="r">
-            Unrealized
-          </th>
+          {head("value", "Value")}
+          {head("gain", "Gain this range")}
+          {head("unrealized", "Unrealized")}
         </tr>
       </thead>
       <tbody>

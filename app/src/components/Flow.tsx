@@ -421,6 +421,9 @@ function bringTableIntoView() {
     if (!el || el.getBoundingClientRect().top < window.innerHeight * 0.75) return;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+    // The control that was pressed is now off screen: take focus to the
+    // table title so the keyboard carries on where the eye went.
+    el.focus({ preventScroll: true });
   });
 }
 
@@ -593,7 +596,7 @@ function OutLane({
             {shown.map((c) => (
               <Row
                 key={c.category ?? "\u0000"}
-                label={c.category ?? <i>Not yet categorized</i>}
+                label={c.category ?? "Not yet categorized"}
                 name={c.category ?? "Not yet categorized"}
                 value={signedCents(-c.total_cents)}
                 cents={c.total_cents}
@@ -930,7 +933,8 @@ function TxnTable({
               category, so there's nothing to set. */}
           {moved ? (
             <span className="fl-tag">
-              Moved · {MOVED_LABEL[t.flag as Exclude<TxnFlag, "Spending">]}
+              <span className="fl-sr">Moved: </span>
+              {MOVED_LABEL[t.flag as Exclude<TxnFlag, "Spending">]}
             </span>
           ) : editing === t.id ? (
             <label>

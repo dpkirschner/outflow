@@ -706,6 +706,15 @@ interface Block {
   page: TxnPage;
 }
 
+// The transaction table's own narrowing, kept for the session (module
+// scope outlives the component, like Holdings' open rows).
+const remembered: { search: string; account: string; sort: SortKey; dir: "asc" | "desc" } = {
+  search: "",
+  account: "",
+  sort: "date",
+  dir: "desc",
+};
+
 function TxnTable({
   period,
   range,
@@ -731,11 +740,17 @@ function TxnTable({
   onFiguresChanged: () => Promise<void>;
 }) {
   const periodLabel = range?.label ?? monthName;
-  const [search, setSearch] = useState("");
-  const [debounced, setDebounced] = useState("");
-  const [account, setAccount] = useState("");
-  const [sort, setSort] = useState<SortKey>("date");
-  const [dir, setDir] = useState<"asc" | "desc">("desc");
+  // Search, account and sort survive a trip to another screen (this
+  // component unmounts); a page reload starts fresh.
+  const [search, setSearchState] = useState(remembered.search);
+  const [debounced, setDebounced] = useState(remembered.search);
+  const [account, setAccountState] = useState(remembered.account);
+  const [sort, setSortState] = useState<SortKey>(remembered.sort);
+  const [dir, setDirState] = useState<"asc" | "desc">(remembered.dir);
+  const setSearch = (v: string) => setSearchState((remembered.search = v));
+  const setAccount = (v: string) => setAccountState((remembered.account = v));
+  const setSort = (v: SortKey) => setSortState((remembered.sort = v));
+  const setDir = (v: "asc" | "desc") => setDirState((remembered.dir = v));
   const [offset, setOffset] = useState(0);
   const [blocks, setBlocks] = useState<Load<Block[]>>({ state: "loading" });
   const [editing, setEditing] = useState<string | null>(null);
@@ -762,10 +777,14 @@ function TxnTable({
     const row =
       rows.find((x) => x.dataset.txn === r.id) ??
       (r.index >= 0 ? rows[Math.min(r.index, rows.length - 1)] : undefined);
+    // The row action exists twice and one copy is display:none: take the
+    // first match that's rendered.
+    const shown = (sel: string) =>
+      Array.from(row?.querySelectorAll<HTMLElement>(sel) ?? []).find(
+        (el) => el.getClientRects().length > 0,
+      );
     const to =
-      row?.querySelector<HTMLElement>(r.sel) ??
-      row?.querySelector<HTMLElement>(".fl-mini, .fl-cat") ??
-      document.getElementById("fl-txns-title");
+      shown(r.sel) ?? shown(".fl-mini, .fl-cat") ?? document.getElementById("fl-txns-title");
     to?.focus();
   };
 
@@ -833,7 +852,7 @@ function TxnTable({
   }, [blocks]);
 
   const onSort = (k: SortKey) => {
-    if (sort === k) setDir((d) => (d === "desc" ? "asc" : "desc"));
+    if (sort === k) setDir(dir === "desc" ? "asc" : "desc");
     else {
       setSort(k);
       setDir(k === "merchant" || k === "category" ? "asc" : "desc");
@@ -940,14 +959,30 @@ function TxnTable({
   const row = (t: TxnRow) => {
     const a = acctFor(t.account_id);
     const moved = t.flag !== "Spending";
+    const act = moved ? (
+      <button className="fl-mini" onClick={() => void setTxnFlag(t, "Spending")}>
+        Count as spending
+      </button>
+    ) : (
+      <button className="fl-mini" onClick={() => void setTxnFlag(t, "Transfer")}>
+        Mark as moved
+      </button>
+    );
+    // The action renders twice and CSS shows one (the other is display:none,
+    // so out of the tab order and the accessibility tree): at the end of the
+    // merchant cell in the desktop table, so no column sits empty waiting
+    // for a hover; in its own cell in the phone layout.
     return (
       <tr key={t.id} data-txn={t.id} className={moved ? "fl-moved" : undefined}>
         <td className="fl-date">{fmtDay(t.transacted_at ?? t.posted)}</td>
         <td className="fl-col-merch">
-          <span className="fl-merch">
-            <span className="fl-merch-name">{t.display_name}</span>
-            {t.pending && <span className="fl-pending">pending</span>}
-          </span>
+          <div className="fl-merch-line">
+            <span className="fl-merch">
+              <span className="fl-merch-name">{t.display_name}</span>
+              {t.pending && <span className="fl-pending">pending</span>}
+            </span>
+            <span className="fl-merch-act">{act}</span>
+          </div>
         </td>
         <td className="fl-cat-cell">
           {/* A move has a group, not a category: the lanes never read its
@@ -1013,17 +1048,7 @@ function TxnTable({
           )}
         </td>
         <td className={`num fl-amt${t.amount > 0 ? " in" : ""}`}>{signedCents(t.amount)}</td>
-        <td className="fl-col-act">
-          {moved ? (
-            <button className="fl-mini" onClick={() => void setTxnFlag(t, "Spending")}>
-              Count as spending
-            </button>
-          ) : (
-            <button className="fl-mini" onClick={() => void setTxnFlag(t, "Transfer")}>
-              Mark as moved
-            </button>
-          )}
-        </td>
+        <td className="fl-col-act">{act}</td>
       </tr>
     );
   };

@@ -70,7 +70,8 @@ body {
 .lg-app {
   max-width: 940px;
   margin: 0 auto;
-  padding: 28px 24px 80px;
+  /* --toast-room: a showing toast's height plus its offset (App.tsx). */
+  padding: 28px 24px calc(80px + var(--toast-room, 0px));
   background: var(--lg-bg);
   color: var(--lg-text);
   min-height: 100vh;
@@ -1118,8 +1119,21 @@ button.fl-lane-figure {
 .fl-moved .fl-amt {
   color: var(--lg-text);
 }
+/* Desktop: the row action sits at the end of the merchant cell (Flow.tsx
+   renders it there and in .fl-col-act); the phone layout swaps them. */
 .fl-col-act {
+  display: none;
   text-align: right;
+}
+.fl-merch-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.fl-merch-act {
+  margin-left: auto;
+  flex: none;
 }
 .fl-mini {
   background: none;
@@ -1512,7 +1526,10 @@ button.fl-lane-figure {
   .fl-table tr[data-txn] > td.fl-date { order: 4; font-size: 0.75rem; }
   .fl-table tr[data-txn] > td.fl-cat-cell { order: 5; font-size: 0.75rem; }
   .fl-table tr[data-txn] > td.fl-col-acct { order: 6; }
-  .fl-table tr[data-txn] > td.fl-col-act { order: 7; margin-left: auto; }
+  .fl-table tr[data-txn] > td.fl-col-act { display: block; order: 7; margin-left: auto; }
+  .fl-merch-act {
+    display: none;
+  }
   /* No room to wait for hover here: the action is always shown. */
   .fl-table .fl-mini {
     opacity: 1;
@@ -1732,10 +1749,24 @@ button.fl-lane-figure {
   font-weight: 600;
   color: var(--lg-dim);
 }
-.hd-eq-op {
+/* "= Markets", "+ Added": the operator is generated beside its term (hidden
+   from screen readers by the empty alt text) so the pair wraps as one. */
+.hd-eq-term {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 20px;
+  align-items: end;
+}
+.hd-eq-term::before {
+  content: attr(data-op) / "";
+  grid-row: 1 / span 2;
   font-size: 1.375rem;
   color: var(--lg-dim);
   padding-bottom: 3px;
+}
+.hd-eq-term dt,
+.hd-eq-term dd {
+  grid-column: 2;
 }
 .hd-say {
   margin: 0;

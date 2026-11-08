@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { api } from "./api";
 import type { Account } from "./types";
 import { Toast, toastPersists, type ToastMsg } from "./components/Toast";
@@ -33,6 +33,26 @@ export default function App() {
   const [dataVersion, setDataVersion] = useState(0);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
+  // While a toast is up, the page gets room below its content for it, so
+  // whatever the toast covers at the bottom can be scrolled clear (an error
+  // or Undo toast stays until dismissed).
+  const toastRegions = useRef<HTMLDivElement>(null);
+  const [toastRoom, setToastRoom] = useState(0);
+  useEffect(() => {
+    const el = toastRegions.current;
+    if (!el) return;
+    const measure = () => {
+      const h = Math.max(
+        0,
+        ...Array.from(el.children, (r) => r.getBoundingClientRect().height),
+      );
+      // The toast floats this far above the viewport bottom (ledger.css).
+      setToastRoom(h > 0 ? h + 22 : 0);
+    };
+    const ro = new ResizeObserver(measure);
+    Array.from(el.children).forEach((r) => ro.observe(r));
+    return () => ro.disconnect();
+  }, []);
 
   const notify = useCallback((msg: ToastMsg) => {
     // Rapid-fire notifications must reset the dismiss timer, not stack — an
@@ -81,7 +101,10 @@ export default function App() {
   }, [reload, notify]);
 
   return (
-    <div className="lg-app">
+    <div
+      className="lg-app"
+      style={toastRoom ? ({ "--toast-room": `${toastRoom}px` } as CSSProperties) : undefined}
+    >
       <header className="lg-top">
         <span className="lg-wm">outflow</span>
         <nav className="lg-nav" aria-label="Screens">
@@ -138,11 +161,13 @@ export default function App() {
       )}
       {/* Always in the page so screen readers announce what appears in them:
           confirmations politely, errors at once. */}
-      <div className="toast-region" role="status">
-        {toast?.kind === "ok" && <Toast msg={toast} onDismiss={() => setToast(null)} />}
-      </div>
-      <div className="toast-region" role="alert">
-        {toast?.kind === "err" && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+      <div ref={toastRegions} className="toast-regions">
+        <div className="toast-region" role="status">
+          {toast?.kind === "ok" && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+        </div>
+        <div className="toast-region" role="alert">
+          {toast?.kind === "err" && <Toast msg={toast} onDismiss={() => setToast(null)} />}
+        </div>
       </div>
     </div>
   );

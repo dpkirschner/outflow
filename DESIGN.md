@@ -245,7 +245,9 @@ phone is a glance surface; desktop is where the layout is tuned.
 
 Flat by design. Depth is three tonal steps: Recessed Panel sits below Panel,
 which sits on the Ink Background. Hairlines separate everything. Nothing
-floats over the page but the toast, and it has no drop shadow either. A
+floats over the page but the toast, and it has no drop shadow either;
+while one shows, the page gains room below its content so nothing has to
+stay under it. A
 selected figure or row is marked with the Selected Fill and a 2px Field
 Teal inset ring rather than a lift.
 
@@ -333,7 +335,9 @@ those capsules.
 ### Month strip (Flow, Holdings)
 - One shared component (`MonthStrip.tsx`, `lg-strip`): one button per
   month with the short month and a short figure. Flow adds a 20px bar (Out,
-  scaled to the largest month); Holdings shows net worth at month end with
+  scaled to the largest month, from zero: months that spent about the same
+  look about the same, because they did; the exact figure is on the button,
+  so no cropped baseline to exaggerate small changes); Holdings shows net worth at month end with
   no bar (a level, not an amount to compare by height). The selected month
   gets the Selected Fill, its edge and a Field Teal bar. The strip is one
   Tab stop (roving tabindex): arrow keys, Home and End move and select. The
@@ -343,7 +347,8 @@ those capsules.
 ### Change equation (Holdings)
 - The Holdings focal moment, open on the page like Flow's headline pair:
   "Net worth change = Markets + Added" as three figures (34px for the
-  change, 24px for the parts, tabular) joined by Text Dim operators, the
+  change, 24px for the parts, tabular) joined by Text Dim operators (each drawn with the
+  term after it, so a narrow screen wraps "= Markets" and "+ Added" whole), the
   change's percent beside it in Text Dim. Under it, the start and end in
   words, the definitions behind a closed `<details>` ("What Markets and
   Added mean · show", dotted Text Dim underline, the state spelled out
@@ -422,10 +427,13 @@ those capsules.
 ### Transaction table (Flow)
 - Sortable headers are buttons with `aria-sort`; amounts are signed and
   tabular, In amounts also In Green. Moved rows carry a "Moved · group" tag
-  and dim the name and amount. Category is a dashed-underline control that
+  in place of a category; the name and amount stay full Text, never green.
+  Category is a dashed-underline control that
   opens a select: a pointer pick saves, a keyboard pick saves on Enter or
-  on leaving the field, Escape cancels. The row action waits for hover or
-  focus on desktop.
+  on leaving the field, Escape cancels. The row action sits at the end of
+  the merchant cell on desktop (no column of its own to sit empty) and
+  waits for hover or focus; on a phone it's always shown on the row's last
+  line.
 - **Side-grouped:** a card payment drills into both legs, each under a
   group header row ("From checking" / "Into cards") with its row count and
   subtotal, so the reader can see why Moved counts it once.

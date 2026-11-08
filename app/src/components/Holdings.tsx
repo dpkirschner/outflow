@@ -475,17 +475,13 @@ function Hero({
             {c.change_bp !== null && <span className="hd-eq-pct">{signedPct(c.change_bp)}</span>}
           </dd>
         </div>
-        <div className="hd-eq-op" aria-hidden="true">
-          =
-        </div>
-        <div>
+        {/* Each operator is drawn with the term after it (CSS), so a narrow
+            screen wraps "= Markets" and "+ Added" whole. */}
+        <div className="hd-eq-term" data-op="=">
           <dt>Markets</dt>
           <dd>{signedCents(c.markets ?? 0)}</dd>
         </div>
-        <div className="hd-eq-op" aria-hidden="true">
-          +
-        </div>
-        <div>
+        <div className="hd-eq-term" data-op="+">
           <dt>Added</dt>
           <dd>{signedCents(c.added ?? 0)}</dd>
         </div>

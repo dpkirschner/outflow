@@ -134,12 +134,11 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
   Serves the SPA from `app/dist` with an index.html fallback (OAuth resumption
   at `/oauth-return`). Frontend in `app/src/` (React + Vite + TS).
 
-**Styling:** plain CSS in two files — `app/src/theme.css` and `app/src/ledger.css`
-(no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
+**Styling:** plain CSS in one file, `app/src/ledger.css` (tokens are the
+`--lg-*` properties on `:root`; no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
 `fl-*` = Flow tab (`fl-rc-*` its recurring list), `hd-*` = Holdings tab, `lg-*` = shell and shared (incl. the `lg-strip` month strip), `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
 match review. For styling/visual questions, trace
-`className` → rule with `rtk grep` across those `.css` files (graphify doesn't
-index CSS), or just read both — they're small.
+`className` → rule with `rtk grep` in `ledger.css` (graphify doesn't index CSS).
 
 **Swappable ports:** the transaction source is a free-function pipeline —
 fetch JSON in `net`, parse pure in `core`

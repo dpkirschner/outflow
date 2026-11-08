@@ -27,11 +27,26 @@ import type {
 import { formatCentsShort, monthLabel, monthLabelShort, signedCents, unsignedCents } from "../format";
 import { onLinkClick, pathOf } from "../route";
 import { SourceChip, accountDisplayLabel, accountSource } from "./accounts";
+import { MonthStrip, type StripMonth } from "./MonthStrip";
 import { RecurringSection, windowLabel } from "./Recurring";
 import type { ToastMsg } from "./Toast";
 
 const PAGE = 50;
 const CATEGORY_PREVIEW = 6;
+
+// The strip shows Out per month, scaled to the largest month.
+function stripMonths(months: FlowMonth[]): StripMonth[] {
+  const maxOut = Math.max(1, ...months.map((m) => m.out_cents));
+  return months.map((m) => ({
+    key: monthKey(m.year, m.month),
+    label: monthLabel(m.year, m.month),
+    short: monthLabelShort(m.year, m.month),
+    figure: formatCentsShort(-m.out_cents).replace("-", "\u2212"),
+    spoken: `${signedCents(-m.out_cents)} out`,
+    bar: Math.max(0, m.out_cents) / maxOut,
+    sofar: isCurrentMonth(m),
+  }));
+}
 
 export function monthKey(year: number, month: number): string {
   return `${year}-${String(month).padStart(2, "0")}`;
@@ -302,7 +317,12 @@ export function Flow({
         if (e.key === "Escape" && pick && !e.defaultPrevented) clearPick();
       }}
     >
-      <MonthStrip months={months} selected={month} onSelect={onMonth} />
+      <MonthStrip
+        caption="Out per month"
+        months={stripMonths(months)}
+        selected={month}
+        onSelect={onMonth}
+      />
 
       {!selected && (
         <h1 id="fl-title" className="fl-sr">
@@ -357,84 +377,6 @@ export function Flow({
         />
       )}
     </main>
-  );
-}
-
-// ── Month strip: Out per month, one bar each, latest on the right ───────────
-function MonthStrip({
-  months,
-  selected,
-  onSelect,
-}: {
-  months: FlowMonth[];
-  selected: string | null;
-  onSelect: (m: string) => void;
-}) {
-  const scroller = useRef<HTMLOListElement>(null);
-  // Start scrolled to the latest months.
-  useEffect(() => {
-    const el = scroller.current;
-    if (el) el.scrollLeft = el.scrollWidth;
-  }, [months.length]);
-
-  const maxOut = Math.max(1, ...months.map((m) => m.out_cents));
-  // One Tab stop for the whole strip (the archive only grows); arrow keys,
-  // Home and End move between months and select as they go.
-  const keys = months.map((m) => monthKey(m.year, m.month));
-  const current = Math.max(0, selected ? keys.indexOf(selected) : keys.length - 1);
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    const step: Record<string, number> = {
-      ArrowLeft: current - 1,
-      ArrowRight: current + 1,
-      Home: 0,
-      End: keys.length - 1,
-    };
-    if (!(e.key in step)) return;
-    e.preventDefault();
-    const next = Math.min(keys.length - 1, Math.max(0, step[e.key]));
-    onSelect(keys[next]);
-    scroller.current?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
-  };
-  return (
-    <nav className="fl-strip" aria-label="Month">
-      <p className="fl-strip-key" id="fl-strip-key">
-        Out per month<span className="fl-sr">. Left and right arrow keys change the month.</span>
-      </p>
-      <ol ref={scroller} aria-describedby="fl-strip-key" onKeyDown={onKeyDown}>
-        {months.map((m, i) => {
-          const key = keys[i];
-          const on = key === selected;
-          const sofar = isCurrentMonth(m);
-          const h = Math.max(2, Math.round((Math.max(0, m.out_cents) / maxOut) * 48));
-          return (
-            <li key={key}>
-              <button
-                className={`fl-month${on ? " on" : ""}`}
-                aria-pressed={on}
-                tabIndex={i === current ? 0 : -1}
-                aria-label={`${monthLabel(m.year, m.month)}${sofar ? " so far" : ""}: ${signedCents(-m.out_cents)} out`}
-                onClick={() => onSelect(key)}
-              >
-                <span className="fl-bar-track" aria-hidden="true">
-                  <span className="fl-bar" style={{ height: `${h}px` }} />
-                </span>
-                <span className="fl-mlabel" aria-hidden="true">
-                  {monthLabelShort(m.year, m.month)}
-                </span>
-                <span className="fl-mout" aria-hidden="true">
-                  {formatCentsShort(-m.out_cents).replace("-", "\u2212")}
-                </span>
-                {sofar && (
-                  <span className="fl-msofar" aria-hidden="true">
-                    so far
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
   );
 }
 

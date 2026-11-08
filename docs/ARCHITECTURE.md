@@ -126,8 +126,10 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
   (`components/Recurring.tsx`) and the month's transaction table; each
   figure and each recurring merchant is a button that drills the table into
   its rows via the core `lane` / `merchant` filters, `components/Flow.tsx`),
-  `/balances`
-  (`components/Balances.tsx`), and `/settings` (Connections, card-payment
+  `/holdings` (net worth change as Markets + Added over the shared month or
+  a 3M / YTD / 1Y / All range, the signed breakdown, net worth and invested
+  vs contributed charts, accounts by type or combined positions;
+  `components/Holdings.tsx`), and `/settings` (Connections, card-payment
   review, categorize, reset; `components/Settings.tsx`). `/` and unknown
   paths redirect to `/flow`; `/oauth-return` shows Settings and is
   rewritten to `/settings` once Plaid Link has read it. Only the screen is in

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Account } from "./types";
 import { Toast, type ToastMsg } from "./components/Toast";
-import { Balances } from "./components/Balances";
 import { Flow } from "./components/Flow";
+import { Holdings } from "./components/Holdings";
 import { Settings } from "./components/Settings";
 import { SCREENS, onLinkClick, useScreen } from "./route";
 
@@ -21,7 +21,7 @@ export default function App() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vocab, setVocab] = useState<string[]>([]);
   // The selected calendar month (`YYYY-MM`), shared across screens so Flow
-  // and, later, Holdings read the same one. null = the latest with data.
+  // and Holdings read the same one. null = the latest with data.
   const [month, setMonth] = useState<string | null>(null);
   // Bumped when a sync on open brings new rows, so Flow reloads its figures.
   const [dataVersion, setDataVersion] = useState(0);
@@ -102,8 +102,8 @@ export default function App() {
 
       {tab === "settings" ? (
         <Settings notify={notify} onChanged={() => void reload()} />
-      ) : tab === "balances" ? (
-        <Balances notify={notify} />
+      ) : tab === "holdings" ? (
+        <Holdings key={dataVersion} month={month} onMonth={setMonth} />
       ) : (
         <Flow
           key={dataVersion}

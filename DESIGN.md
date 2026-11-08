@@ -172,8 +172,8 @@ each mean one thing.
   call to action.
 - **Account-kind inks** (kind-cash, kind-credit, kind-invest): tint an
   account chip by what kind of money it holds. Cash is teal-green, credit is
-  violet, investments are gold. Kind-invest also draws the cash series on
-  the balances chart.
+  violet (loans too), investments are gold. Kind-invest also draws the
+  Invested line on the Holdings chart.
 
 ### Neutral
 - **Ink Background** (ink-bg): the page.
@@ -271,7 +271,8 @@ those capsules.
 ### Segmented controls
 - A Recessed Panel track with a Hairline border and 2px inset. Options are
   bare text in Text Dim; the selected option gets the Selected Fill and Text
-  colour. Used for the Balances trend range.
+  colour. Used for the Holdings range (Month / 3M / YTD / 1Y / All) and
+  its By account / By position lens.
 
 ### Cards / Containers
 - **Corner Style:** 12px.
@@ -322,11 +323,48 @@ those capsules.
 - Below 720px each merchant becomes two lines: name and cost, then spark,
   change, last charge and Ignore.
 
-### Month strip (Flow)
-- One button per month: a 20px bar (Out, scaled to the largest month),
-  the short month and the short Out figure. The selected month gets the
-  Selected Fill, its edge and a Field Teal bar. The strip is one Tab stop
-  (roving tabindex): arrow keys, Home and End move and select.
+### Month strip (Flow, Holdings)
+- One shared component (`MonthStrip.tsx`, `lg-strip`): one button per
+  month with the short month and a short figure. Flow adds a 20px bar (Out,
+  scaled to the largest month); Holdings shows net worth at month end with
+  no bar (a level, not an amount to compare by height). The selected month
+  gets the Selected Fill, its edge and a Field Teal bar. The strip is one
+  Tab stop (roving tabindex): arrow keys, Home and End move and select. The
+  month is App state, so both screens follow the same one; a month Holdings
+  has no snapshots for stays selected and the screen says so.
+
+### Change equation (Holdings)
+- The Holdings focal moment, open on the page like Flow's headline pair:
+  "Net worth change = Markets + Added" as three figures (34px for the
+  change, 24px for the parts, tabular) joined by Text Faint operators, the
+  change's percent beside it in Text Dim. Under it, the start and end in
+  words, a one-line Text Dim definition, and a note when Markets can't
+  cover every investment account (it names them and says their whole
+  change is in Added). Below 480px the change takes its own line.
+
+### Breakdown sum (Holdings)
+- Stat tiles joined by their signs: Cash + Invested − Credit owed − Loans
+  = Net worth, owed amounts shown as positive magnitudes after a minus,
+  never in Out Red. The Net worth tile carries the Selected edge. Below
+  480px the tiles become a column sum, key left and value right.
+
+### Account rows (Holdings)
+- One card, one column header (Value / Change / Gain) and a fixed grid,
+  so every group (Cash, Investments, Credit, Loans) lines up; the group
+  total sits in the Value column. A stale sync is an Attention Amber note
+  beside the account. Investment rows open their positions with a real
+  button ("Show 4 positions" / "Hide positions", `aria-expanded`), never a
+  caret. Position rows never get a total: they don't sum to the account
+  gain. Below 720px figures move under the name with their own keys, and
+  each position becomes two lines (holding and value, then labelled
+  shares, gain and unrealized).
+
+### Holdings charts
+- Net worth (Field Teal) and Invested vs contributed (Kind-invest solid,
+  Text Dim dashed for the contributed baseline, with a legend). Linear
+  lines, no smoothing, one y-axis each, `role=img` with a sentence summary,
+  tooltip dates in the axis's month-day order. Cash is a margin note under
+  the net worth chart, not a third line.
 
 ### Headline pair (Flow)
 - The screen's focal moment, open on the page rather than in a card, so
@@ -384,7 +422,7 @@ those capsules.
   that had it, and keep an Undo toast up until it's used or dismissed.
 - **Do** put one Key button per action group, at most.
 - **Do** mirror token values into constants when SVG presentation
-  attributes can't read CSS variables (as `Balances.tsx` does), and keep
+  attributes can't read CSS variables (as `Holdings.tsx` does), and keep
   them in sync.
 
 ### Don't:

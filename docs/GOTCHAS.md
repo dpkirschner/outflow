@@ -39,7 +39,8 @@ boundary, Plaid, secrets, encryption, or the demo setup.
 
 - **Sign conventions are inverted vs the domain.** Plaid transaction amounts:
   positive = money out → negate at parse. Credit-account
-  `balances.current`: positive = owed → negate for `AccountKind::Credit`.
+  `balances.current`: positive = owed → negate for `AccountKind::Credit`
+  and `AccountKind::Loan`.
   Both flips live in `core::plaid` only.
 - **Amounts are JSON doubles.** Never do f64 math — `Number::to_string()` →
   `Money::from_decimal_str`. There's a cents-exactness test (`4.22` → `-422`).

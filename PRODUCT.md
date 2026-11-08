@@ -51,7 +51,7 @@ hidden and never counted as spending or income.
 - Screens (per ADR 0001): Check-in (home), Holdings, Flow, Find money
   (placeholder), Settings. The UI is mid-reshape: Flow has replaced
   Outflows and the Ledger (Recurring now sits on the Flow screen), and
-  Balances becomes Holdings.
+  Holdings has replaced Balances.
 - Upkeep (bank connections, card-payment match review, categorize,
   reset) lives in Settings, away from the analysis screens.
 

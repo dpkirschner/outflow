@@ -12,6 +12,8 @@ import type {
   MatchView,
   MerchantSpend,
   FlowMonth,
+  NetWorthChange,
+  PositionChange,
   PlaidItem,
   RecurringView,
   SyncEntry,
@@ -27,6 +29,21 @@ import type {
 // live here, next to the calls that use them.
 
 export type SortKey = "date" | "amount" | "merchant" | "category";
+
+/** A Stock range: a period spelling (`2026-11`, `this-year`), or a first day
+ *  (`YYYY-MM-DD`, through today), or neither for all of history. */
+export interface StockRange {
+  period?: string;
+  since?: string;
+}
+
+function rangeQuery(r: StockRange, extra: Record<string, string> = {}): string {
+  const q = new URLSearchParams(extra);
+  if (r.period) q.set("period", r.period);
+  if (r.since) q.set("since", r.since);
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
 
 export interface Filter {
   period?: string; // e.g. "2026-11"; resolved in server-local days
@@ -165,6 +182,11 @@ export const api = {
   balances: () => get<BalancesView>("/balances"),
   balanceHistory: (since?: number) =>
     get<DayTotals[]>(since ? `/balances/history?since=${since}` : "/balances/history"),
+  // Net worth change over a range, split Markets + Added (core::stock).
+  netWorthChange: (r: StockRange) => get<NetWorthChange>(`/net-worth/change${rangeQuery(r)}`),
+  // Gain over a range per position; `position` combines a ticker across accounts.
+  holdingsChange: (r: StockRange, by: "account" | "position") =>
+    get<PositionChange[]>(`/holdings/change${rangeQuery(r, { by })}`),
   // Search/sort/filter over the whole archive; returns one page + totals.
   transactions: (s?: TxnSearch) => {
     const q = new URLSearchParams();

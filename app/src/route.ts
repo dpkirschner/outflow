@@ -6,11 +6,11 @@
 // View state (the selected month, open panels) stays in app memory, not the URL.
 import { useEffect, useState } from "react";
 
-export type Screen = "flow" | "balances" | "settings";
+export type Screen = "flow" | "holdings" | "settings";
 
 export const SCREENS: { screen: Screen; path: string; label: string }[] = [
   { screen: "flow", path: "/flow", label: "Flow" },
-  { screen: "balances", path: "/balances", label: "Balances" },
+  { screen: "holdings", path: "/holdings", label: "Holdings" },
   { screen: "settings", path: "/settings", label: "Settings" },
 ];
 

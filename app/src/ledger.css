@@ -142,7 +142,8 @@ body:has(.lg-app) {
   border-color: #1f4a44;
   background: #0f2420;
 }
-.lg-src.credit {
+.lg-src.credit,
+.lg-src.loan {
   color: #c4b5fd;
   border-color: #3b2f66;
   background: #1a1533;
@@ -480,13 +481,13 @@ body:has(.lg-app) {
   text-underline-offset: 3px;
 }
 
-/* month strip: Out per month */
-.fl-strip-key {
+/* Month strip, shared by Flow and Holdings (MonthStrip.tsx). */
+.lg-strip-key {
   margin: 0 0 4px;
   font-size: 12px;
   color: var(--lg-dim);
 }
-.fl-strip ol {
+.lg-strip ol {
   list-style: none;
   margin: 0 -4px;
   padding: 4px 4px 6px;
@@ -496,7 +497,7 @@ body:has(.lg-app) {
   scrollbar-width: thin;
   scrollbar-color: var(--lg-line) transparent;
 }
-.fl-month {
+.lg-month {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -510,50 +511,67 @@ body:has(.lg-app) {
   font: inherit;
   cursor: pointer;
 }
-.fl-month:hover {
+.lg-month:hover {
   background: var(--lg-panel2);
   border-color: var(--lg-line);
 }
-.fl-month.on {
+.lg-month.on {
   background: var(--lg-selected);
   border-color: var(--lg-selected-edge);
   color: var(--lg-text);
 }
-.fl-bar-track {
+.lg-bar-track {
   height: 48px;
   display: flex;
   align-items: flex-end;
 }
-.fl-bar {
+.lg-bar {
   width: 20px;
   background: var(--lg-faint);
   border-radius: 4px 4px 0 0;
 }
-.fl-month:hover .fl-bar {
+.lg-month:hover .lg-bar {
   background: var(--lg-dim);
 }
-.fl-month.on .fl-bar {
+.lg-month.on .lg-bar {
   background: var(--lg-teal);
 }
-.fl-mlabel {
+.lg-mlabel {
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
 }
-.fl-mout {
+.lg-mfig {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--lg-dim);
   white-space: nowrap;
 }
-.fl-month.on .fl-mout {
+.lg-month.on .lg-mfig {
   color: var(--lg-text);
 }
-.fl-msofar {
+.lg-msofar {
   margin-top: -2px;
   font-size: 11px;
   font-weight: 600;
   color: var(--lg-amber);
+}
+
+.lg-strip :focus-visible {
+  outline: 2px solid var(--lg-teal);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.lg-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* month title + headline pair */
@@ -1460,7 +1478,7 @@ button.fl-lane-figure {
   .fl-pair dd {
     font-size: 24px;
   }
-  .fl-month {
+  .lg-month {
     min-height: 44px;
   }
   /* touch: drill-down targets at 44px */
@@ -1492,259 +1510,600 @@ button.fl-lane-figure {
   cursor: default;
 }
 
-/* ── Balances tab (bl-*) ─────────────────────────────────────────────── */
-.bl-wrap {
+/* ── Holdings screen (hd-*) ──────────────────────────────────────────── */
+.hd-wrap {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-.bl-asof,
-.bl-dim {
+.hd-wrap :focus-visible {
+  outline: 2px solid var(--lg-teal);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+.hd-quiet {
   color: var(--lg-dim);
+}
+.hd-pad {
+  margin: 0;
+  padding: 12px 16px;
+}
+.hd-meta {
+  margin: 6px 0 0;
   font-size: 12px;
-}
-.bl-totals {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-}
-.bl-stat {
-  background: var(--lg-panel);
-  border: 1px solid var(--lg-line);
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-.bl-stat-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--lg-dim);
+  max-width: 72ch;
 }
-.bl-stat-val {
-  font-size: 20px;
-  font-weight: 600;
-  margin-top: 4px;
+.hd-num {
   font-variant-numeric: tabular-nums;
 }
-.bl-neg {
-  color: var(--lg-red);
-}
-.bl-pos {
+.hd-up {
   color: var(--lg-green);
 }
-.bl-trend {
+.hd-down {
+  color: var(--lg-red);
+}
+.hd-stale {
+  font-size: 11.5px;
+  color: var(--lg-amber);
+}
+
+/* states */
+.hd-state {
   background: var(--lg-panel);
   border: 1px solid var(--lg-line);
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-.bl-trend-head {
+  border-radius: 12px;
+  padding: 24px;
+  color: var(--lg-dim);
+  font-size: 13px;
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  font-size: 12px;
-  margin-bottom: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
-.bl-trend-head .bl-range {
+.hd-state p {
+  margin: 0;
+}
+.hd-state.hd-quiet {
+  padding: 16px 24px;
+}
+.hd-state-hint a {
+  color: var(--lg-teal);
+  text-underline-offset: 3px;
+}
+.hd-btn {
+  background: var(--lg-panel);
+  color: var(--lg-text);
+  border: 1px solid var(--lg-faint);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.hd-btn:hover {
+  background: var(--lg-hover);
+}
+
+/* title row: the range name, then the range control */
+.hd-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+.hd-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.hd-sofar {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lg-amber);
+  padding: 1px 8px;
+  border: 1px solid var(--lg-amber-edge);
+  border-radius: 999px;
+}
+.hd-views {
   margin-left: 0;
 }
-.bl-trend-empty {
-  font-size: 12px;
-  padding: 24px 0;
-  text-align: center;
-}
-/* Net worth | cash, side by side; stacked on narrow screens. */
-.bl-charts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-.bl-chart {
-  min-width: 0; /* let ResponsiveContainer shrink inside the grid cell */
-}
-.bl-chart-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  margin: 0 12px 4px 52px; /* align with the plot area, past the y-axis */
-}
-.bl-key {
-  display: inline-block;
-  width: 10px;
-  height: 3px;
-  border-radius: 2px;
-  vertical-align: middle;
-  margin-right: 4px;
-}
-.bl-tip {
-  background: var(--lg-panel2);
-  border: 1px solid var(--lg-line);
-  border-radius: 6px;
-  padding: 6px 9px;
-  font-size: 12px;
+.lg-win button:hover:not(.on) {
   color: var(--lg-text);
 }
-@media (max-width: 640px) {
-  .bl-charts {
-    grid-template-columns: 1fr;
-  }
+
+/* hero: Change = Markets + Added, open on the page */
+.hd-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 4px;
 }
-.bl-idle {
-  border: 1px solid #4a3a1f;
-  background: #1a150b;
+.hd-eq {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  column-gap: 20px;
+  row-gap: 8px;
+}
+.hd-eq dt {
+  font-size: 13px;
+  color: var(--lg-dim);
+}
+.hd-eq dd {
+  margin: 2px 0 0;
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.hd-eq-main dd {
+  font-size: 34px;
+  letter-spacing: -0.02em;
+}
+.hd-eq-pct {
+  margin-left: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--lg-dim);
+}
+.hd-eq-op {
+  font-size: 22px;
+  color: var(--lg-faint);
+  padding-bottom: 3px;
+}
+.hd-say {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  max-width: 64ch;
+}
+.hd-say b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.hd-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  max-width: 72ch;
+}
+
+/* breakdown: tiles joined by their signs, summing to net worth */
+.hd-sum {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  row-gap: 8px;
+}
+.hd-sum li {
+  display: flex;
+  align-items: stretch;
+}
+.hd-sum-op {
+  align-self: center;
+  width: 22px;
+  text-align: center;
+  font-size: 18px;
+  color: var(--lg-faint);
+}
+.hd-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--lg-panel2);
+  border: 1px solid transparent;
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 12px 14px;
+  min-width: 120px;
+}
+.hd-sum-total .hd-tile {
+  border-color: var(--lg-selected-edge);
+}
+.hd-tile-key {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--lg-dim);
+}
+.hd-tile-val {
+  font-size: 20px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.hd-tile-sub {
+  font-size: 11.5px;
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* charts: side by side, stacked on narrow screens */
+.hd-charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.hd-chart {
+  margin: 0;
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.hd-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.hd-chart-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.hd-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--lg-dim);
+}
+.hd-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.hd-tip {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.hd-tip b {
+  font-weight: 600;
+}
+
+/* idle cash: worth a second look */
+.hd-idle {
+  border: 1px solid var(--lg-amber-edge);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.hd-idle-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lg-amber);
+}
+.hd-idle ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.bl-idle-title {
-  color: #f5d38a;
-  font-weight: 600;
   font-size: 13px;
 }
-.bl-idle-row {
+.hd-idle li {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
-.bl-idle-amt {
+.hd-idle b {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.bl-group-head {
+
+/* accounts / positions card */
+.hd-section {
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.hd-section-head {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--lg-dim);
-  padding: 0 4px 6px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--lg-line);
 }
-.bl-accts {
+.hd-section-head h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--lg-dim);
+}
+.hd-group + .hd-group {
+  border-top: 1px solid var(--lg-line);
+}
+/* Name, then Value / Change / Gain in fixed columns, so every group lines up
+   under one header. The group total sits in the Value column. */
+.hd-cols,
+.hd-group-head,
+.hd-acct-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 128px 128px 168px;
+  column-gap: 12px;
+  align-items: center;
+}
+.hd-cols {
+  padding: 8px 16px 0;
+  font-size: 11px;
+  color: var(--lg-dim);
+  text-align: right;
+}
+.hd-group-head {
+  align-items: baseline;
+  padding: 12px 16px 4px;
+  font-size: 14px;
+}
+.hd-group-total {
+  grid-column: 2;
+  text-align: right;
+  font-weight: 600;
+}
+.hd-group-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.hd-accts {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.bl-acct {
-  border-bottom: 1px solid var(--lg-line);
+.hd-acct {
+  padding: 12px 16px;
 }
-.bl-acct.idle .bl-cash {
-  color: #f5d38a;
+.hd-acct + .hd-acct {
+  border-top: 1px solid var(--lg-divider);
 }
-.bl-acct-main {
+.hd-acct-name {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 9px 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
 }
-.bl-acct-main.clickable {
-  cursor: pointer;
-}
-.bl-acct-main.clickable:hover {
-  background: var(--lg-panel);
-}
-.bl-caret {
-  width: 10px;
-  color: var(--lg-dim);
-  font-size: 11px;
-}
-.bl-num {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-.bl-hold-scroll {
-  /* Fallback only — the fixed layout below is sized to fit. `contain` keeps a
-     trackpad swipe from rubber-banding the page sideways. */
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  padding: 0 4px 10px 24px;
-}
-/* Fixed layout: numeric columns get set widths, the holding column takes the
-   rest and truncates long fund names with an ellipsis (full name on hover). */
-.bl-hold {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-  font-size: 12.5px;
-  font-variant-numeric: tabular-nums;
-}
-.bl-hold .c-qty {
-  width: 92px;
-}
-.bl-hold .c-price {
-  width: 78px;
-}
-.bl-hold .c-val {
-  width: 96px;
-}
-.bl-hold .c-share {
-  width: 66px;
-}
-.bl-hold .c-gain {
-  width: 92px;
-}
-.bl-hold th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--lg-faint);
-  font-size: 11px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--lg-line);
-}
-.bl-hold td {
-  padding: 5px 8px;
-  border-bottom: 1px solid #151e29;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.bl-hold .r {
+.hd-fig {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 13px;
   text-align: right;
 }
-.bl-hold th.bl-sortable {
-  cursor: pointer;
-  user-select: none;
+/* The column header names the figures on desktop; the per-row key is for
+   screen readers there and shows on narrow rows. */
+.hd-fig-key {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
-.bl-hold th.bl-sortable:hover,
-.bl-hold th.bl-sortable.on {
+.hd-expand {
+  margin-top: 8px;
+  background: var(--lg-panel);
+  color: var(--lg-dim);
+  border: 1px solid var(--lg-faint);
+  border-radius: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.hd-expand:hover {
+  background: var(--lg-hover);
   color: var(--lg-text);
 }
-.bl-sort-ind {
-  display: inline-block;
-  width: 10px;
-  margin-left: 3px;
-  font-size: 8px;
-  vertical-align: middle;
+.hd-expand[aria-expanded="true"] {
+  background: var(--lg-selected);
+  border-color: var(--lg-selected-edge);
+  color: var(--lg-text);
 }
-@media (max-width: 560px) {
-  .bl-hold-scroll {
-    padding-left: 4px;
-  }
-  .bl-hold .c-price,
-  .bl-hold .c-share {
-    display: none;
-  }
+
+/* positions table (under an account, or combined). No total row: position
+   gains don't sum to the account's gain. */
+.hd-pos {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 13px;
 }
-.bl-ticker {
+.hd-section > .hd-pos {
+  margin-top: 0;
+}
+.hd-pos th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--lg-dim);
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--lg-line);
+}
+.hd-pos td {
+  padding: 8px;
+  border-top: 1px solid var(--lg-divider);
+  vertical-align: top;
+  font-variant-numeric: tabular-nums;
+}
+.hd-pos .r {
+  text-align: right;
+}
+.hd-section > .hd-pos th:first-child,
+.hd-section > .hd-pos td:first-child {
+  padding-left: 16px;
+}
+.hd-section > .hd-pos th:last-child,
+.hd-section > .hd-pos td:last-child {
+  padding-right: 16px;
+}
+.hd-ticker {
   font-weight: 600;
 }
-.bl-hname {
-  margin-left: 8px;
+.hd-hname,
+.hd-sub {
+  display: block;
+  font-size: 11.5px;
 }
-.bl-cash-tag {
+.hd-tag {
   margin-left: 6px;
-  font-size: 10px;
-  color: #f5d38a;
-  border: 1px solid #4a3a1f;
+  font-size: 10.5px;
+  color: var(--lg-dim);
+  border: 1px solid var(--lg-faint);
   border-radius: 4px;
   padding: 0 4px;
+}
+.hd-sub-inline {
+  color: inherit;
+}
+
+/* Narrow (phones, and desktop at 200% zoom): charts stack, account figures
+   move under the name, and each position becomes two lines: holding and
+   value, then shares, gain and unrealized, labelled. Nothing is dropped. */
+@media (max-width: 720px) {
+  .hd-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hd-cols {
+    display: none;
+  }
+  .hd-group-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .hd-acct-main {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 8px;
+  }
+  .hd-acct-name {
+    grid-column: 1 / -1;
+  }
+  .hd-fig {
+    align-items: flex-start;
+    text-align: left;
+  }
+  .hd-fig-key {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    font-size: 11px;
+    color: var(--lg-dim);
+  }
+  .hd-pos thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .hd-pos tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 12px;
+    padding: 8px 0;
+    border-top: 1px solid var(--lg-divider);
+  }
+  .hd-section > .hd-pos tr {
+    padding: 8px 16px;
+  }
+  .hd-pos td {
+    border: 0;
+    padding: 2px 0;
+  }
+  .hd-section > .hd-pos td:first-child,
+  .hd-section > .hd-pos td:last-child {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .hd-pos .hd-hold {
+    grid-column: 1;
+  }
+  .hd-pos .hd-c-val {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .hd-pos .hd-c-qty,
+  .hd-pos .hd-c-gain,
+  .hd-pos .hd-c-unr {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    text-align: right;
+  }
+  .hd-pos td[data-label]:not(.hd-c-val)::before {
+    content: attr(data-label);
+    color: var(--lg-dim);
+    font-size: 11.5px;
+    text-align: left;
+  }
+  .hd-pos .hd-c-unr > span:first-of-type {
+    margin-left: auto;
+  }
+}
+@media (max-width: 480px) {
+  /* The change on its own line, then "= Markets + Added" under it. */
+  .hd-eq-main {
+    flex-basis: 100%;
+  }
+  .hd-eq-main dd {
+    font-size: 28px;
+  }
+  .hd-eq dd {
+    font-size: 20px;
+  }
+  /* The breakdown becomes a column sum, one term per line. */
+  .hd-sum {
+    flex-direction: column;
+    row-gap: 6px;
+  }
+  .hd-sum li:first-child {
+    padding-left: 22px;
+  }
+  .hd-tile {
+    flex: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    column-gap: 10px;
+    min-width: 0;
+    padding: 10px 12px;
+  }
+  .hd-tile-val {
+    font-size: 17px;
+  }
+  .hd-tile-sub {
+    flex-basis: 100%;
+    text-align: right;
+  }
+  .hd-expand {
+    min-height: 44px;
+  }
+  .lg-win button {
+    min-height: 40px;
+  }
 }
 
 /* settings screen: upkeep sections stacked (Connections, review, categorize, reset) */

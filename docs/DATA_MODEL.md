@@ -87,11 +87,11 @@ keys off. Plaid calendar dates (`YYYY-MM-DD`) are anchored at **local noon** so
 they never straddle a month boundary. All enums have `as_str`/`from_str` for
 string round-tripping in SQLite.
 
-## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 12)
+## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 14)
 
 | Table | Role | Key notes |
 |---|---|---|
-| `accounts` | latest account snapshot | upsert by `id`; `source` column; user-owned `nickname` + `hidden` (never overwritten by a re-pull) |
+| `accounts` | latest account snapshot | upsert by `id`; `source` column; user-owned `nickname` + `hidden` (never overwritten by a re-pull); `item_id` = the Plaid connection it last synced through (set by the sync, kept by a fixture pull; NULL until a v14+ sync) |
 | `transactions` | the durable archive | grows past the providers' pull windows; this is the permanent history; `source` column; `pfc_primary`/`pfc_detailed` (Plaid's category, refreshed on re-sync) and `flag_overridden` (0/1, see below) |
 | `category_rules` | learned/manual rules | `match_type` (exact/contains), `pattern` (lowercased), `category` |
 | `flag_rules` | learned/manual suppression rules | same shape but carries a `flag` — an independent axis |
@@ -104,7 +104,7 @@ string round-tripping in SQLite.
 | `balance_snapshots` | **append-only** history | PK(taken_at, account_id); every account, every successful item sync; `cash_cents` from `balances::account_cash` |
 | `holding_snapshots` | **append-only** history | PK(taken_at, account_id, security_id); one row per position per sync; quantity, value, cost basis, price (NULL before v8) |
 | `investment_transactions` | **archive** of investment activity | id PK (Plaid `investment_transaction_id`); account_id, security_id (nullable), date (`YYYY-MM-DD`), name, type, subtype, quantity/price (decimal text), amount_cents (cash effect, domain sign: out < 0), fees_cents, currency, cancel_txn_id, synced_at. Upserted by id each sync; never deleted (`reset_data` keeps it) |
-| `txn_matches` | card-payment pair decisions | UNIQUE(bank_txn_id, card_txn_id); status proposed/accepted/rejected; decided pairs are never re-proposed |
+| `txn_matches` | card-payment pair decisions | UNIQUE(bank_txn_id, card_txn_id); status proposed/accepted/rejected; decided pairs are never re-proposed; `retired_by` = the accepted pair that retired this proposal; `bank_`/`card_prev_flag` + `_prev_overridden` = each leg's flag before the accept (NULL for pairs accepted before v14) |
 
 Indexes on `transactions(account_id)`, `(posted)`, `(pending)`.
 
@@ -122,7 +122,8 @@ v12 `transactions.pfc_primary`/`pfc_detailed`/`flag_overridden`, backfilled
 once from `raw` (`backfill_pfc_columns`; a row is marked overridden when its
 stored flag differs from what its category gives, so no effective flag
 changes), v13 data-only: `merchant_overrides` keeps one mark — the ledger's
-`dismissed` became `ignored`, `committed`/`kept` rows were deleted. The v10
+`dismissed` became `ignored`, `committed`/`kept` rows were deleted, v14
+`accounts.item_id` + `txn_matches.retired_by` and the legs' prior flags. The v10
 and v11 backfills still parse `raw`; nothing after v12 does.
 Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.
@@ -339,10 +340,15 @@ classification on either leg) AND an unambiguous 1:1 pairing; everything else
 is **Medium**. The sync engine auto-accepts High (flags both legs
 `CardPayment`, retires competing proposals) and queues Medium for the Review
 screen. Accepting/rejecting is idempotent and survives re-sync (UNIQUE pair +
-flag-preserving upsert). Undoing an accept (`unaccept_match`) returns the
-pair to `proposed` and each leg to the flag Plaid's category gives (unless
-another accepted pair uses it); rejecting an accepted pair does the same to
-the legs but the pair is never proposed again.
+flag-preserving upsert). Every accept goes through `Store::accept_match`
+(server, CLI and auto-accept), which records each leg's flag before and marks
+the proposals it retires (`retired_by`). Undoing an accept (`unaccept_match`)
+returns the pair to `proposed`, each leg to its recorded flag (unless another
+accepted pair uses it), and its retired proposals to review (unless another
+accepted pair holds one of their legs; that pair then owns them). Pairs
+accepted before v14 have no record: their legs fall back to the flag Plaid's
+category gives and retired proposals stay rejected. Rejecting an accepted pair
+(`reject_match`) undoes the accept the same way, then rejects it for good.
 
 ## Categorization precedence
 

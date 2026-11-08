@@ -603,6 +603,7 @@ mod tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
 

@@ -43,6 +43,12 @@ export type Account = {
    * `nickname`.
    */
   hidden: boolean,
+  /**
+   * The Plaid connection (item) this account syncs through, set at every
+   * sync. `None` for fixture rows, and for rows from before v14 until
+   * their next sync. Settings lists accounts under their connection by it.
+   */
+  item_id: string | null,
 };
 
 export type Transaction = {

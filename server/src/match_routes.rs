@@ -7,7 +7,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use outflow_core::{MatchStatus, Transaction, TxnFlag, TxnMatch, Unaccept};
+use outflow_core::{MatchStatus, Transaction, TxnMatch, Unaccept};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{with_store, ApiError, ApiResult, AppState};
@@ -77,56 +77,32 @@ async fn list(
     .map(Json)
 }
 
+/// Accept a pair (`Store::accept_match`: legs flagged, conflicting
+/// proposals retired, what it changed recorded). 404 for an unknown id.
 async fn accept(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<()> {
-    with_store(&state, move |store| {
-        let m = store
-            .match_by_id(id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no match {id}"))?;
-        store
-            .set_flag(&m.bank_txn_id, TxnFlag::CardPayment, false)
-            .map_err(|e| e.to_string())?;
-        store
-            .set_flag(&m.card_txn_id, TxnFlag::CardPayment, false)
-            .map_err(|e| e.to_string())?;
-        store
-            .set_match_status(id, MatchStatus::Accepted)
-            .map_err(|e| e.to_string())?;
-        store
-            .reject_conflicting_proposals(id, &m.bank_txn_id, &m.card_txn_id)
-            .map_err(|e| e.to_string())?;
-        Ok(())
+    let found = with_store(&state, move |store| {
+        store.accept_match(id).map_err(|e| e.to_string())
     })
-    .await
-    .map(Json)
+    .await?;
+    found
+        .then_some(Json(()))
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, format!("no match {id}")))
 }
 
+/// Reject a pair. Rejecting an accepted pair undoes the accept first
+/// (`Store::reject_match`). 404 for an unknown id.
 async fn reject(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<()> {
-    with_store(&state, move |store| {
-        let m = store
-            .match_by_id(id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no match {id}"))?;
-        // Undoing an accept drops both legs' overrides: each goes back to
-        // the flag Plaid's category gives.
-        if m.status == MatchStatus::Accepted {
-            store
-                .clear_flag(&m.bank_txn_id)
-                .map_err(|e| e.to_string())?;
-            store
-                .clear_flag(&m.card_txn_id)
-                .map_err(|e| e.to_string())?;
-        }
-        store
-            .set_match_status(id, MatchStatus::Rejected)
-            .map_err(|e| e.to_string())
+    let found = with_store(&state, move |store| {
+        store.reject_match(id).map_err(|e| e.to_string())
     })
-    .await
-    .map(Json)
+    .await?;
+    found
+        .then_some(Json(()))
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, format!("no match {id}")))
 }
 
-/// Undo an accept: the pair goes back to `proposed` (review) and each leg's
-/// flag override is dropped, unless another accepted pair still uses it
+/// Undo an accept: the pair goes back to `proposed` (review), each leg gets
+/// back the flag it had, and the proposals it retired return to review
 /// (`Store::unaccept_match`). 404 for an unknown id, 409 when the pair isn't
 /// accepted.
 async fn unaccept(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<()> {

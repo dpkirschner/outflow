@@ -42,7 +42,8 @@ export const account: Account = {
   "last_synced": 1768435200,
   "source": "plaid",
   "nickname": "Test card",
-  "hidden": false
+  "hidden": false,
+  "item_id": null
 };
 
 export const transaction: Transaction = {
@@ -312,7 +313,8 @@ export const balancesView: BalancesView = {
             "last_synced": 1768435200,
             "source": "plaid",
             "nickname": null,
-            "hidden": false
+            "hidden": false,
+            "item_id": null
           },
           "group": "investments",
           "cash": 31250,
@@ -365,7 +367,8 @@ export const balancesView: BalancesView = {
             "last_synced": 1768435200,
             "source": "plaid",
             "nickname": "Test card",
-            "hidden": false
+            "hidden": false,
+            "item_id": null
           },
           "group": "credit",
           "cash": 0,

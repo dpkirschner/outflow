@@ -2,7 +2,7 @@ use crate::categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 use crate::model::*;
 use crate::money::Money;
 use crate::subscriptions::normalize_payee;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 
 fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
@@ -221,14 +221,16 @@ fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Re
         // (which carries no nickname) must not wipe a user-set one. Same rule as
         // `flag` on transactions — see `insert_txn_batch`. `hidden` isn't
         // written at all: new accounts take the column default (visible) and a
-        // re-pull never un-hides one.
+        // re-pull never un-hides one. A pull that doesn't know the connection
+        // (fixtures) keeps the one a live sync recorded.
         conn.execute(
-            "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced, source, nickname)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO accounts (id, org, name, kind, balance_cents, currency, last_synced, source, nickname, item_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
              ON CONFLICT(id) DO UPDATE SET
                 org=excluded.org, name=excluded.name, kind=excluded.kind,
                 balance_cents=excluded.balance_cents, currency=excluded.currency,
-                last_synced=excluded.last_synced, source=excluded.source",
+                last_synced=excluded.last_synced, source=excluded.source,
+                item_id=COALESCE(excluded.item_id, item_id)",
             params![
                 a.id,
                 a.org,
@@ -238,7 +240,8 @@ fn insert_account_batch(conn: &Connection, accounts: &[Account]) -> rusqlite::Re
                 a.currency,
                 a.last_synced,
                 a.source,
-                a.nickname
+                a.nickname,
+                a.item_id
             ],
         )?;
     }
@@ -360,7 +363,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     last_synced INTEGER NOT NULL,
     source TEXT NOT NULL DEFAULT 'plaid',
     nickname TEXT,
-    hidden INTEGER NOT NULL DEFAULT 0
+    hidden INTEGER NOT NULL DEFAULT 0,
+    item_id TEXT
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -428,6 +432,11 @@ CREATE TABLE IF NOT EXISTS txn_matches (
     confidence TEXT NOT NULL,
     reason TEXT,
     created INTEGER NOT NULL,
+    retired_by INTEGER,
+    bank_prev_flag TEXT,
+    bank_prev_overridden INTEGER,
+    card_prev_flag TEXT,
+    card_prev_overridden INTEGER,
     UNIQUE(bank_txn_id, card_txn_id)
 );
 CREATE TABLE IF NOT EXISTS securities (
@@ -510,7 +519,10 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// `raw` once (see `backfill_pfc_columns`); the flag is an override from here.
 /// v13: data-only — merchant_overrides keeps one mark, `ignored` (was the
 /// ledger's `dismissed`); `committed` and `kept` rows are deleted.
-const SCHEMA_VERSION: i64 = 13;
+/// v14: accounts.item_id (the connection, filled at the next sync);
+/// txn_matches.retired_by + each leg's flag before the accept, so unaccept
+/// restores exactly (pairs accepted earlier have none: best effort).
+const SCHEMA_VERSION: i64 = 14;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -625,6 +637,18 @@ impl Store {
                 "UPDATE merchant_overrides SET mark = 'ignored' WHERE mark = 'dismissed';
                  DELETE FROM merchant_overrides WHERE mark <> 'ignored';",
             )?;
+        }
+        if version < 14 {
+            for (table, column, decl) in [
+                ("accounts", "item_id", "TEXT"),
+                ("txn_matches", "retired_by", "INTEGER"),
+                ("txn_matches", "bank_prev_flag", "TEXT"),
+                ("txn_matches", "bank_prev_overridden", "INTEGER"),
+                ("txn_matches", "card_prev_flag", "TEXT"),
+                ("txn_matches", "card_prev_overridden", "INTEGER"),
+            ] {
+                self.add_column_if_missing(table, column, decl)?;
+            }
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -837,7 +861,7 @@ impl Store {
 
     fn query_accounts(&self, filter: &str) -> rusqlite::Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source, nickname, hidden
+            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source, nickname, hidden, item_id
              FROM accounts {filter} ORDER BY name"
         ))?;
         let rows = stmt.query_map([], |r| {
@@ -853,6 +877,7 @@ impl Store {
                 source: r.get(7)?,
                 nickname: r.get(8)?,
                 hidden: r.get(9)?,
+                item_id: r.get(10)?,
             })
         })?;
         rows.collect()
@@ -1807,12 +1832,56 @@ impl Store {
         Ok(())
     }
 
+    /// Accept a card-payment pair: both legs become `CardPayment` overrides
+    /// and every other proposal sharing a leg is retired. What each leg was
+    /// before, and which proposals this retired, are recorded so
+    /// `unaccept_match` can put them back exactly. One transaction.
+    /// Accepting an accepted pair changes nothing (recording again would
+    /// overwrite the legs' real prior flags). `false` = no such pair.
+    pub fn accept_match(&self, id: i64) -> rusqlite::Result<bool> {
+        let Some(m) = self.match_by_id(id)? else {
+            return Ok(false);
+        };
+        if m.status == MatchStatus::Accepted {
+            return Ok(true);
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        let prior = |leg: &str| -> rusqlite::Result<(Option<String>, Option<bool>)> {
+            Ok(tx
+                .query_row(
+                    "SELECT flag, flag_overridden FROM transactions WHERE id = ?1",
+                    params![leg],
+                    |r| Ok((Some(r.get(0)?), Some(r.get(1)?))),
+                )
+                .optional()?
+                .unwrap_or((None, None)))
+        };
+        let (bank_flag, bank_over) = prior(&m.bank_txn_id)?;
+        let (card_flag, card_over) = prior(&m.card_txn_id)?;
+        tx.execute(
+            "UPDATE transactions SET flag = ?1, flag_overridden = 1 WHERE id IN (?2, ?3)",
+            params![TxnFlag::CardPayment.as_str(), m.bank_txn_id, m.card_txn_id],
+        )?;
+        tx.execute(
+            "UPDATE txn_matches SET status = 'accepted',
+                bank_prev_flag = ?2, bank_prev_overridden = ?3,
+                card_prev_flag = ?4, card_prev_overridden = ?5
+             WHERE id = ?1",
+            params![id, bank_flag, bank_over, card_flag, card_over],
+        )?;
+        // Those pairings are stale once the legs are flagged.
+        tx.execute(
+            "UPDATE txn_matches SET status = 'rejected', retired_by = ?1
+             WHERE status = 'proposed' AND id != ?1
+               AND (bank_txn_id = ?2 OR card_txn_id = ?3)",
+            params![id, m.bank_txn_id, m.card_txn_id],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Return an accepted card-payment pair to `proposed`, undoing what
-    /// accepting it did to the legs: each leg's flag override is dropped (back
-    /// to the flag Plaid's category gives), unless another accepted pair still
-    /// uses that leg. One transaction. Proposals that accepting retired
-    /// (`reject_conflicting_proposals`) stay rejected: they can't be told
-    /// apart from the owner's own rejections.
+    /// accepting it did (`release_accept`). One transaction.
     pub fn unaccept_match(&self, id: i64) -> rusqlite::Result<Unaccept> {
         let Some(m) = self.match_by_id(id)? else {
             return Ok(Unaccept::NotFound);
@@ -1821,38 +1890,107 @@ impl Store {
             return Ok(Unaccept::NotAccepted(m.status));
         }
         let tx = self.conn.unchecked_transaction()?;
-        for leg in [&m.bank_txn_id, &m.card_txn_id] {
-            let shared: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM txn_matches
-                 WHERE status = 'accepted' AND id != ?1
-                   AND (bank_txn_id = ?2 OR card_txn_id = ?2))",
-                params![id, leg],
-                |r| r.get(0),
-            )?;
-            if !shared {
-                self.clear_flag(leg)?;
-            }
-        }
+        self.release_accept(&m)?;
         self.set_match_status(id, MatchStatus::Proposed)?;
         tx.commit()?;
         Ok(Unaccept::Done)
     }
 
-    /// After accepting a match, retire every other proposal that shares either
-    /// leg — those pairings are stale once the legs are flagged. Returns the
-    /// count retired.
-    pub fn reject_conflicting_proposals(
-        &self,
-        accepted_id: i64,
-        bank_txn_id: &str,
-        card_txn_id: &str,
-    ) -> rusqlite::Result<usize> {
+    /// Reject a pair. Rejecting an accepted pair first undoes the accept, as
+    /// `unaccept_match` does: the legs count as before and the proposals it
+    /// retired get another look. One transaction. `false` = no such pair.
+    pub fn reject_match(&self, id: i64) -> rusqlite::Result<bool> {
+        let Some(m) = self.match_by_id(id)? else {
+            return Ok(false);
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        if m.status == MatchStatus::Accepted {
+            self.release_accept(&m)?;
+        }
+        self.set_match_status(id, MatchStatus::Rejected)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Undo what `accept_match` did to an accepted pair, inside the caller's
+    /// transaction (the pair's own status is the caller's to set):
+    /// - each leg gets back the flag it had before, unless another accepted
+    ///   pair still uses it. A pair accepted before v14 has no record, so its
+    ///   legs drop their override (back to the flag Plaid's category gives).
+    /// - each proposal it retired goes back to review, unless another
+    ///   accepted pair holds one of its legs; that pair then owns giving it
+    ///   back.
+    fn release_accept(&self, m: &TxnMatch) -> rusqlite::Result<()> {
+        type Prior = (Option<String>, Option<bool>, Option<String>, Option<bool>);
+        let (bank_flag, bank_over, card_flag, card_over): Prior = self.conn.query_row(
+            "SELECT bank_prev_flag, bank_prev_overridden, card_prev_flag, card_prev_overridden
+             FROM txn_matches WHERE id = ?1",
+            params![m.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?;
+        for (leg, flag, over) in [
+            (&m.bank_txn_id, bank_flag, bank_over),
+            (&m.card_txn_id, card_flag, card_over),
+        ] {
+            let shared: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM txn_matches
+                 WHERE status = 'accepted' AND id != ?1
+                   AND (bank_txn_id = ?2 OR card_txn_id = ?2))",
+                params![m.id, leg],
+                |r| r.get(0),
+            )?;
+            if shared {
+                continue;
+            }
+            match (flag.as_deref().and_then(TxnFlag::from_str), over) {
+                (Some(f), Some(o)) => {
+                    self.conn.execute(
+                        "UPDATE transactions SET flag = ?1, flag_overridden = ?2 WHERE id = ?3",
+                        params![f.as_str(), o, leg],
+                    )?;
+                }
+                _ => self.clear_flag(leg)?,
+            }
+        }
         self.conn.execute(
-            "UPDATE txn_matches SET status = 'rejected'
-             WHERE status = 'proposed' AND id != ?1
-               AND (bank_txn_id = ?2 OR card_txn_id = ?3)",
-            params![accepted_id, bank_txn_id, card_txn_id],
-        )
+            "UPDATE txn_matches SET bank_prev_flag = NULL, bank_prev_overridden = NULL,
+                card_prev_flag = NULL, card_prev_overridden = NULL
+             WHERE id = ?1",
+            params![m.id],
+        )?;
+
+        let retired: Vec<(i64, String, String)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT id, bank_txn_id, card_txn_id FROM txn_matches
+                 WHERE retired_by = ?1 AND status = 'rejected'",
+            )?;
+            let rows = stmt.query_map(params![m.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<rusqlite::Result<_>>()?
+        };
+        for (rid, bank, card) in retired {
+            let holder: Option<i64> = self
+                .conn
+                .query_row(
+                    "SELECT id FROM txn_matches
+                     WHERE status = 'accepted' AND id != ?1
+                       AND (bank_txn_id = ?2 OR card_txn_id = ?3)
+                     LIMIT 1",
+                    params![m.id, bank, card],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match holder {
+                Some(h) => self.conn.execute(
+                    "UPDATE txn_matches SET retired_by = ?1 WHERE id = ?2",
+                    params![h, rid],
+                )?,
+                None => self.conn.execute(
+                    "UPDATE txn_matches SET status = 'proposed', retired_by = NULL WHERE id = ?1",
+                    params![rid],
+                )?,
+            };
+        }
+        Ok(())
     }
 
     /// Every (bank, card) pair that already has a row, regardless of status —
@@ -1952,6 +2090,7 @@ mod tests {
             source: default_source(),
             nickname: None,
             hidden: false,
+            item_id: None,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         let got = s.accounts().unwrap();
@@ -2336,7 +2475,8 @@ mod tests {
         );
         assert_eq!(s.unaccept_match(999).unwrap(), Unaccept::NotFound);
 
-        // Accept the way the server does.
+        // Accepted before v14: flags set by hand, nothing recorded, so the
+        // legs fall back to the flag Plaid's category gives.
         s.set_flag("bank", TxnFlag::CardPayment, false).unwrap();
         s.set_flag("card", TxnFlag::CardPayment, false).unwrap();
         s.set_match_status(id, MatchStatus::Accepted).unwrap();
@@ -2348,6 +2488,133 @@ mod tests {
         );
         assert_eq!(seeded("bank"), bank_before);
         assert_eq!(seeded("card"), card_before);
+    }
+
+    fn proposal(s: &Store, bank: &str, card: &str) -> i64 {
+        s.insert_match(
+            bank,
+            card,
+            MatchStatus::Proposed,
+            MatchConfidence::Medium,
+            None,
+            0,
+        )
+        .unwrap()
+        .unwrap()
+    }
+
+    fn status(s: &Store, id: i64) -> MatchStatus {
+        s.match_by_id(id).unwrap().unwrap().status
+    }
+
+    #[test]
+    fn unaccept_restores_a_prior_override_and_the_proposals_it_retired() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[
+            txn("bank", "acct1", 100, -50_000, false),
+            txn("card", "acct2", 100, 50_000, false),
+            txn("card2", "acct3", 100, 50_000, false),
+        ])
+        .unwrap();
+        // The owner had marked the bank leg Moved before the pair was found.
+        s.set_flag("bank", TxnFlag::Transfer, false).unwrap();
+        let id = proposal(&s, "bank", "card");
+        let rival = proposal(&s, "bank", "card2");
+        let owners_own = proposal(&s, "other", "card");
+        s.reject_match(owners_own).unwrap();
+
+        assert!(s.accept_match(id).unwrap());
+        assert_eq!(status(&s, rival), MatchStatus::Rejected);
+        // Accepting again records nothing new (the legs are CardPayment now).
+        assert!(s.accept_match(id).unwrap());
+        assert!(!s.accept_match(999).unwrap());
+
+        assert_eq!(s.unaccept_match(id).unwrap(), Unaccept::Done);
+        let t = |id: &str| s.transaction(id).unwrap().unwrap();
+        assert_eq!(t("bank").flag, TxnFlag::Transfer);
+        assert_eq!(t("card").flag, TxnFlag::Spending);
+        let overridden = |id: &str| -> bool {
+            s.conn
+                .query_row(
+                    "SELECT flag_overridden FROM transactions WHERE id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        assert!(overridden("bank"));
+        assert!(!overridden("card"));
+        assert_eq!(status(&s, id), MatchStatus::Proposed);
+        assert_eq!(status(&s, rival), MatchStatus::Proposed);
+        // The owner's own rejection stays.
+        assert_eq!(status(&s, owners_own), MatchStatus::Rejected);
+    }
+
+    #[test]
+    fn rejecting_an_accepted_pair_undoes_the_accept_first() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[
+            txn("bank", "acct1", 100, -50_000, false),
+            txn("card", "acct2", 100, 50_000, false),
+            txn("card2", "acct3", 100, 50_000, false),
+        ])
+        .unwrap();
+        let id = proposal(&s, "bank", "card");
+        let rival = proposal(&s, "bank", "card2");
+        s.accept_match(id).unwrap();
+        assert!(s.reject_match(id).unwrap());
+        assert_eq!(status(&s, id), MatchStatus::Rejected);
+        assert_eq!(status(&s, rival), MatchStatus::Proposed);
+        assert_eq!(
+            s.transaction("bank").unwrap().unwrap().flag,
+            TxnFlag::Spending
+        );
+        assert!(!s.reject_match(999).unwrap());
+    }
+
+    #[test]
+    fn a_retired_proposal_another_accepted_pair_holds_waits_for_that_pair() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[
+            txn("b1", "acct1", 100, -50_000, false),
+            txn("b2", "acct1", 100, -50_000, false),
+            txn("c1", "acct2", 100, 50_000, false),
+            txn("c2", "acct2", 100, 50_000, false),
+        ])
+        .unwrap();
+        let a = proposal(&s, "b1", "c1");
+        let b = proposal(&s, "b2", "c2");
+        // Shares b1 with A and c2 with B.
+        let p = proposal(&s, "b1", "c2");
+        s.accept_match(a).unwrap(); // retires P
+        s.accept_match(b).unwrap();
+        s.unaccept_match(a).unwrap();
+        // B still holds c2: P stays retired, now B's to give back.
+        assert_eq!(status(&s, p), MatchStatus::Rejected);
+        s.unaccept_match(b).unwrap();
+        assert_eq!(status(&s, p), MatchStatus::Proposed);
+    }
+
+    #[test]
+    fn a_fixture_pull_keeps_the_connection_a_sync_recorded() {
+        let s = Store::open_in_memory().unwrap();
+        let mut a = Account {
+            id: "acct1".into(),
+            org: "Bank".into(),
+            name: "Checking".into(),
+            kind: AccountKind::Checking,
+            balance: Money::from_cents(0),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: default_source(),
+            nickname: None,
+            hidden: false,
+            item_id: Some("item1".into()),
+        };
+        s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
+        a.item_id = None;
+        s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
+        assert_eq!(s.accounts().unwrap()[0].item_id.as_deref(), Some("item1"));
     }
 
     #[test]
@@ -2438,6 +2705,7 @@ mod tests {
             source: default_source(),
             nickname: None,
             hidden: false,
+            item_id: None,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         s.set_account_nickname("acct1", Some("Travel Card")).unwrap();
@@ -2464,6 +2732,7 @@ mod tests {
             source: default_source(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
 
@@ -3260,6 +3529,7 @@ mod tests {
             source: default_source(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }])
         .unwrap();
         assert!(s.has_credit_account().unwrap());

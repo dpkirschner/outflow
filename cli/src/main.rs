@@ -1603,41 +1603,16 @@ fn cmd_matches(store: &Store, action: &MatchCmd, json: bool) -> Result<(), Strin
             Ok(())
         }
         MatchCmd::Accept { id } => {
-            let m = store
-                .match_by_id(*id)
-                .map_err(|e| format!("{e}"))?
-                .ok_or_else(|| format!("no match {id}"))?;
-            store
-                .set_flag(&m.bank_txn_id, TxnFlag::CardPayment, false)
-                .map_err(|e| format!("{e}"))?;
-            store
-                .set_flag(&m.card_txn_id, TxnFlag::CardPayment, false)
-                .map_err(|e| format!("{e}"))?;
-            store
-                .set_match_status(*id, MatchStatus::Accepted)
-                .map_err(|e| format!("{e}"))?;
-            store
-                .reject_conflicting_proposals(*id, &m.bank_txn_id, &m.card_txn_id)
-                .map_err(|e| format!("{e}"))?;
+            if !store.accept_match(*id).map_err(|e| format!("{e}"))? {
+                return Err(format!("no match {id}"));
+            }
             println!("accepted #{id}: both legs excluded as card payment");
             Ok(())
         }
         MatchCmd::Reject { id } => {
-            let m = store
-                .match_by_id(*id)
-                .map_err(|e| format!("{e}"))?
-                .ok_or_else(|| format!("no match {id}"))?;
-            if m.status == MatchStatus::Accepted {
-                store
-                    .clear_flag(&m.bank_txn_id)
-                    .map_err(|e| format!("{e}"))?;
-                store
-                    .clear_flag(&m.card_txn_id)
-                    .map_err(|e| format!("{e}"))?;
+            if !store.reject_match(*id).map_err(|e| format!("{e}"))? {
+                return Err(format!("no match {id}"));
             }
-            store
-                .set_match_status(*id, MatchStatus::Rejected)
-                .map_err(|e| format!("{e}"))?;
             println!("rejected #{id}");
             Ok(())
         }

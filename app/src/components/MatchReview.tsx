@@ -57,7 +57,7 @@ export function MatchReview({
       await api.unacceptMatch(id);
       notify({
         kind: "ok",
-        text: "Back in review. Until you decide, both sides count as spending.",
+        text: "Back in review. Both sides count as they did before the match.",
       });
       await refresh();
       onChanged();
@@ -77,7 +77,7 @@ export function MatchReview({
         kind: "ok",
         text: ok
           ? "Same payment: both sides now count as a card payment, not spending."
-          : "Kept apart: both still count as spending.",
+          : "Kept apart: neither counts as a card payment.",
       });
       await refresh();
       onChanged();

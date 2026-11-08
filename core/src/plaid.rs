@@ -223,6 +223,7 @@ pub fn parse_accounts_get(
             source: "plaid".to_string(),
             nickname: None,
             hidden: false,
+            item_id: None,
         });
     }
     Ok(accounts)

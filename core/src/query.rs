@@ -876,6 +876,7 @@ mod tests {
             source: crate::model::default_source(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
 

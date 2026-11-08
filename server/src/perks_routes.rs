@@ -80,6 +80,7 @@ mod tests {
                 source: "plaid".into(),
                 nickname: None,
                 hidden: false,
+                item_id: None,
             }])
             .unwrap();
         let now = now_secs();

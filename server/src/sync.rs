@@ -112,7 +112,7 @@ fn sync_all_blocking(store: &Arc<Mutex<Store>>, cfg: &Config) -> SyncReport {
 /// auto-accept (flag both legs immediately); the rest queue as proposals for
 /// the Review screen. Previously decided pairs never re-enter.
 fn detect_and_record_matches(s: &Store) -> Result<(usize, usize), String> {
-    use outflow_core::{detect_card_payments, MatchConfidence, MatchOptions, MatchStatus, TxnFlag};
+    use outflow_core::{detect_card_payments, MatchConfidence, MatchOptions, MatchStatus};
 
     // Hidden accounts included: a hidden checking account can still pay a
     // visible card, and that card's payment leg must be suppressed.
@@ -128,23 +128,20 @@ fn detect_and_record_matches(s: &Store) -> Result<(usize, usize), String> {
     for p in proposals {
         match p.confidence {
             MatchConfidence::High => {
+                // Recorded as a proposal, then accepted the one way every
+                // accept goes, so unaccept can restore it exactly.
                 let id = s
                     .insert_match(
                         &p.bank_txn_id,
                         &p.card_txn_id,
-                        MatchStatus::Accepted,
+                        MatchStatus::Proposed,
                         p.confidence,
                         Some(&p.reason),
                         now_secs(),
                     )
                     .map_err(|e| e.to_string())?;
                 if let Some(id) = id {
-                    s.set_flag(&p.bank_txn_id, TxnFlag::CardPayment, false)
-                        .map_err(|e| e.to_string())?;
-                    s.set_flag(&p.card_txn_id, TxnFlag::CardPayment, false)
-                        .map_err(|e| e.to_string())?;
-                    s.reject_conflicting_proposals(id, &p.bank_txn_id, &p.card_txn_id)
-                        .map_err(|e| e.to_string())?;
+                    s.accept_match(id).map_err(|e| e.to_string())?;
                     auto += 1;
                 }
             }
@@ -251,8 +248,13 @@ pub fn run_plaid_item(
     let synced_at = now_secs();
 
     let accounts_json = plaid::accounts_get(pcfg, &token)?;
-    let accounts = parse_accounts_get(&accounts_json, &item.institution, synced_at)
+    let mut accounts = parse_accounts_get(&accounts_json, &item.institution, synced_at)
         .map_err(|e| format!("parse accounts: {e:?}"))?;
+    // Which connection each account came through: Settings lists accounts
+    // under it.
+    for a in &mut accounts {
+        a.item_id = Some(item.item_id.clone());
+    }
     // Consent is display-only metadata (drives "Allow holdings" in the UI), so
     // a malformed item block is logged rather than failing the sync.
     let consent = match item_has_investments_consent(&accounts_json) {

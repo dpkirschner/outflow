@@ -56,6 +56,7 @@ fn account() -> Account {
         source: "plaid".into(),
         nickname: Some("Test card".into()),
         hidden: false,
+        item_id: None,
     }
 }
 
@@ -71,6 +72,7 @@ fn checking() -> Account {
         source: "plaid".into(),
         nickname: None,
         hidden: false,
+        item_id: None,
     }
 }
 
@@ -311,6 +313,7 @@ fn balances_view() -> BalancesView {
         source: "plaid".into(),
         nickname: None,
         hidden: false,
+        item_id: None,
     };
     let cash_row = HoldingRow {
         security_id: "sec-demo-mmf".into(),

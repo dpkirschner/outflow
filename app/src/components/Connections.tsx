@@ -278,15 +278,21 @@ export function Connections({
     }
   };
 
-  // Accounts sit under their connection. Accounts carry no item id yet, so
-  // they're matched by institution name (org === PlaidItem.institution on
-  // the live path); anything unmatched (a fixture pull) is listed after.
-  const byOrg = accounts.reduce<Record<string, Account[]>>((m, a) => {
-    (m[a.org] ??= []).push(a);
-    return m;
-  }, {});
-  const linked = new Set(items.map((it) => it.institution));
-  const unmatched = accounts.filter((a) => !linked.has(a.org));
+  // Accounts sit under their connection: the one each last synced through
+  // (item_id). An account that hasn't synced since that was recorded falls
+  // back to its institution name; anything unplaced (a fixture pull, an
+  // unlinked connection) is listed after.
+  const itemIds = new Set(items.map((it) => it.item_id));
+  const byName = new Map(items.map((it) => [it.institution, it.item_id]));
+  const placedIn = (a: Account) =>
+    a.item_id && itemIds.has(a.item_id) ? a.item_id : !a.item_id ? byName.get(a.org) : undefined;
+  const byItem: Record<string, Account[]> = {};
+  const unmatched: Account[] = [];
+  for (const a of accounts) {
+    const id = placedIn(a);
+    if (id) (byItem[id] ??= []).push(a);
+    else unmatched.push(a);
+  }
 
   if (!loaded) return null;
 
@@ -406,7 +412,7 @@ export function Connections({
                       {it.investments_consent ? (
                         <span className="lg-src investment">holdings allowed</span>
                       ) : (
-                        byOrg[it.institution]?.some((a) => a.kind === "Investment") && (
+                        byItem[it.item_id]?.some((a) => a.kind === "Investment") && (
                           // Items linked before outflow requested Investments consent
                           // need this update-mode pass before holdings can be fetched.
                           <button
@@ -420,9 +426,9 @@ export function Connections({
                       )}
                     </div>
                   </div>
-                  {(byOrg[it.institution]?.length ?? 0) > 0 && (
+                  {(byItem[it.item_id]?.length ?? 0) > 0 && (
                     <ul className="cx-acct-list" aria-label={`${it.institution} accounts`}>
-                      {byOrg[it.institution].map(accountRow)}
+                      {byItem[it.item_id].map(accountRow)}
                     </ul>
                   )}
                   <div className="cx-item-foot">

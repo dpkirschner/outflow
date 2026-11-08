@@ -609,6 +609,7 @@ mod tests {
             source: default_source(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
 

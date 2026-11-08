@@ -999,6 +999,7 @@ mod tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         };
         store
             .upsert_accounts(&[acct("acct-1"), acct("acct-2")])
@@ -1176,6 +1177,7 @@ mod tests {
                 source: "plaid".into(),
                 nickname: None,
                 hidden: false,
+                item_id: None,
             }])
             .unwrap();
         let sec = Security {
@@ -1245,6 +1247,7 @@ mod tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         };
         let accounts = [
             acct("chk", AccountKind::Checking, 2_000_00),
@@ -1544,6 +1547,7 @@ mod tests {
                 source: "plaid".into(),
                 nickname: None,
                 hidden: false,
+                item_id: None,
             }])
             .unwrap();
         let mut out = txn("sav-out", -5000, "To Savings");
@@ -1761,6 +1765,7 @@ mod tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }];
         store.upsert_accounts(&accounts).unwrap();
         let secs = [Security {
@@ -1823,6 +1828,7 @@ mod tests {
                 source: "plaid".into(),
                 nickname: None,
                 hidden: false,
+                item_id: None,
             }])
             .unwrap();
         let t = |id: &str, date: &str| InvestmentTxn {

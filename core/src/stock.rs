@@ -549,6 +549,7 @@ mod tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
 
@@ -1632,6 +1633,7 @@ mod position_tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
 
@@ -2080,6 +2082,7 @@ mod uninvested_tests {
             source: "plaid".into(),
             nickname: None,
             hidden: false,
+            item_id: None,
         }
     }
     fn pos(ts: i64, a: &str, cents: i64) -> HoldingSnapshot {

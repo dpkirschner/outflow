@@ -71,7 +71,7 @@ curl -s -H "Authorization: Bearer $RO_TOKEN" \
 
 | Method · Path | Query params | Returns |
 |---|---|---|
-| `GET /accounts` | `include_hidden` (default `false`) | `Account[]` — latest snapshot per account incl. `balance` (cents; credit balances negated) and `hidden`. Hidden accounts are omitted unless `include_hidden=true` (the Connections screen) |
+| `GET /accounts` | `include_hidden` (default `false`) | `Account[]` — latest snapshot per account incl. `balance` (cents; credit balances negated), `hidden` and `item_id` (the connection it last synced through, `null` before its first v14 sync or from a fixture). Hidden accounts are omitted unless `include_hidden=true` (the Connections screen) |
 | `GET /transactions` | see **Transaction query** below | `TxnPage { items: TxnRow[], total, total_cents }` — paginated. `TxnRow` = every `Transaction` field (flattened) plus `display_name` (`display_merchant`: processor prefix, trailing store number and `.COM` cut, all-caps title-cased; display only) |
 | `GET /spend/categories` | `period` / `since` / `until`, `pending`, `transfers` | `CategorySpend[]` — outflow sum per category (uncategorized under `null`) |
 | `GET /merchants` | `period` / `since` / `until`, `pending`, `transfers`, `limit` (default 15) | `MerchantSpend[]` — outflow sum per normalized merchant |
@@ -157,9 +157,9 @@ An RO token gets **403** on all of these.
 | Method · Path | Query / Path | Returns |
 |---|---|---|
 | `GET /matches` | `?status=` = `proposed`\|`accepted`\|`rejected` (omit for all) | `MatchView[]` |
-| `POST /matches/{id}/accept` | `id` | accept a proposed pair (flags both legs `CardPayment`) |
-| `POST /matches/{id}/reject` | `id` | reject a proposed pair (permanent unless re-accepted by hand). On an accepted pair it also drops both legs' overrides, but the pair is never proposed again — to undo an accept use `unaccept` |
-| `POST /matches/{id}/unaccept` | `id` | undo an accept → `null`: the pair goes back to `proposed` (review) and each leg's flag override is dropped (back to the flag Plaid's category gives) unless another accepted pair still uses that leg. Proposals that accepting retired stay rejected. `404` unknown id, `409` when the pair isn't accepted |
+| `POST /matches/{id}/accept` | `id` | accept a proposed pair (flags both legs `CardPayment`, retires other proposals sharing a leg, records what it changed). `404` unknown id |
+| `POST /matches/{id}/reject` | `id` | reject a pair (permanent unless re-accepted by hand). On an accepted pair it first undoes the accept as `unaccept` does, but the pair is never proposed again. `404` unknown id |
+| `POST /matches/{id}/unaccept` | `id` | undo an accept → `null`: the pair goes back to `proposed` (review) and each leg gets back the flag it had before the accept unless another accepted pair still uses that leg, and the proposals the accept retired return to review. Pairs accepted before schema v14 have no record: legs go back to the flag Plaid's category gives and retired proposals stay rejected. `404` unknown id, `409` when the pair isn't accepted |
 
 ## Source of truth
 

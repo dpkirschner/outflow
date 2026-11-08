@@ -71,6 +71,11 @@ pub struct Account {
     /// `nickname`.
     #[serde(default)]
     pub hidden: bool,
+    /// The Plaid connection (item) this account syncs through, set at every
+    /// sync. `None` for fixture rows, and for rows from before v14 until
+    /// their next sync. Settings lists accounts under their connection by it.
+    #[serde(default)]
+    pub item_id: Option<String>,
 }
 
 /// One instrument from `/investments/holdings/get` (fund, stock, cash sweep).

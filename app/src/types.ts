@@ -489,7 +489,7 @@ export type Usual = {
   net_worth_change_cents: number | null,
 };
 
-export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge";
+export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late";
 
 /**
  * One unusual item. Which fields are set depends on `kind`; each item
@@ -539,6 +539,16 @@ export type Unusual = {
    * Match review: how many wait.
    */
   count: number | null,
+  /**
+   * Recurring: the merchant's usual days between charges.
+   */
+  gap_days: number | null,
+  /**
+   * Recurring up / down judged charge to charge (a merchant slower than
+   * monthly): `cents` is the charge and `usual_cents` the usual charge,
+   * not monthly totals.
+   */
+  per_charge: boolean,
 };
 
 export type Check = "recurring_changes" | "new_recurring" | "large_charges";
@@ -640,7 +650,22 @@ export type ResetPreview = {
 /**
  * How a recurring merchant's cost moved.
  */
-export type Change = "New" | "Up" | "Down" | "Steady";
+export type Change = "New" | "Up" | "Down" | "Late" | "Steady";
+
+/**
+ * One charge (a day's charges at a merchant, summed: a visit plus its tip
+ * is one charge).
+ */
+export type Charge = {
+  /**
+   * Behavioral date, epoch seconds (the day's first charge).
+   */
+  at: number,
+  /**
+   * Positive = spent.
+   */
+  cents: number,
+};
 
 /**
  * One recurring merchant.
@@ -658,6 +683,10 @@ export type RecurringMerchant = {
   name: string,
   cadence: StreamCadence,
   /**
+   * Median days between charges ("every ~2 months" is drawn from it).
+   */
+  gap_days: number,
+  /**
    * Charges in the window.
    */
   count: number,
@@ -672,15 +701,37 @@ export type RecurringMerchant = {
   monthly_cents: number,
   change: Change,
   /**
-   * Signed % of the last completed month against `change_base_cents`;
-   * `None` with fewer than two completed months.
+   * Signed % against `change_base_cents`. Monthly or faster: the last
+   * completed month (None when it had no charge, or with fewer than two
+   * completed months). Slower (`cadence.is_slow()`): the latest charge.
    */
   change_pct: number | null,
   /**
-   * What `change_pct` compares with: the mean of up to 3 completed months
-   * before the last one. Positive.
+   * What `change_pct` compares with. Monthly or faster: the mean of up to
+   * 3 completed months before the last one. Slower: the median of up to
+   * `CHARGE_BASE` charges before the latest. Positive.
    */
   change_base_cents: number | null,
+  /**
+   * When it became late (last charge + the allowance), epoch seconds;
+   * set only when late as of the view (the chosen month's end, or now).
+   */
+  late_since: number | null,
+  /**
+   * Spent in the 12 completed months ending with the chosen month (or the
+   * month before it, while it's in progress). Positive.
+   */
+  year_cents: number,
+  /**
+   * The same over the 12 months before those; None when the archive
+   * doesn't reach back that far.
+   */
+  prior_year_cents: number | null,
+  /**
+   * Slower merchants only (else empty): the last `CHARGE_SPARK` charges
+   * up to the chosen month's end, oldest first.
+   */
+  recent_charges: Array<Charge>,
   /**
    * Behavioral date (epoch seconds) of the first and last charge in the
    * window.
@@ -738,7 +789,7 @@ export type RecurringView = {
  * How often a recurring merchant charges, classified from the median gap
  * between charges. The UI maps each variant to a label.
  */
-export type StreamCadence = "Daily" | "FewPerWeek" | "Weekly" | "FewPerMonth" | "Monthly" | "Yearly";
+export type StreamCadence = "Daily" | "FewPerWeek" | "Weekly" | "FewPerMonth" | "Monthly" | "EveryFewMonths" | "Yearly";
 
 /**
  * Which balances section an account sits in, from its `AccountKind`.

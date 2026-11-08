@@ -135,6 +135,9 @@ pub enum UnusualKind {
     RecurringDown,
     /// A single charge at or above your own 95th percentile.
     LargeCharge,
+    /// A recurring merchant with no charge for 1.5x its usual gap (at least
+    /// a month), as of the period's end: skipped, moved or stopped.
+    Late,
 }
 
 /// One unusual item. Which fields are set depends on `kind`; each item
@@ -167,6 +170,12 @@ pub struct Unusual {
     pub status: Option<String>,
     /// Match review: how many wait.
     pub count: Option<usize>,
+    /// Recurring: the merchant's usual days between charges.
+    pub gap_days: Option<i64>,
+    /// Recurring up / down judged charge to charge (a merchant slower than
+    /// monthly): `cents` is the charge and `usual_cents` the usual charge,
+    /// not monthly totals.
+    pub per_charge: bool,
 }
 
 impl Unusual {
@@ -185,6 +194,8 @@ impl Unusual {
             item_id: None,
             status: None,
             count: None,
+            gap_days: None,
+            per_charge: false,
         }
     }
 }
@@ -339,6 +350,11 @@ pub fn checkin(
                     changed.insert(u.merchant.clone().unwrap_or_default(), u);
                 }
             }
+            // Slower merchants: a charge in the period against the ones
+            // before it, month in progress or not.
+            for u in charge_changes(&last_view, since, until) {
+                changed.insert(u.merchant.clone().unwrap_or_default(), u);
+            }
             let mut changed: Vec<Unusual> = changed.into_values().collect();
             changed.sort_by(|a, b| {
                 let gap = |u: &Unusual| (u.cents.unwrap_or(0) - u.usual_cents.unwrap_or(0)).abs();
@@ -410,6 +426,12 @@ pub fn checkin(
             check: Check::LargeCharges,
             reason: NotCheckedReason::Range,
         });
+    }
+
+    // Late: recurring merchants that went quiet during the period. Each
+    // shows once, in the period it became late.
+    if calendar {
+        unusual.extend(late(&last_view, since, until));
     }
 
     let change = nw(&period);
@@ -493,6 +515,7 @@ fn new_recurring(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> {
 fn recurring_changes(view: &RecurringView, month: NaiveDate) -> Vec<Unusual> {
     view.items
         .iter()
+        .filter(|r| !r.cadence.is_slow())
         .filter_map(|r| {
             let kind = match r.change {
                 Change::Up => UnusualKind::RecurringUp,
@@ -506,9 +529,63 @@ fn recurring_changes(view: &RecurringView, month: NaiveDate) -> Vec<Unusual> {
             u.merchant = Some(r.merchant.clone());
             u.account_id = Some(r.account_id.clone());
             u.month = Some(format!("{:04}-{:02}", month.year(), month.month()));
+            u.gap_days = Some(r.gap_days);
             Some(u)
         })
         .collect()
+}
+
+/// Up / Down for merchants slower than monthly whose latest charge falls
+/// in `[since, until)`: that charge against the usual charge.
+fn charge_changes(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> {
+    view.items
+        .iter()
+        .filter(|r| r.cadence.is_slow())
+        .filter_map(|r| {
+            let kind = match r.change {
+                Change::Up => UnusualKind::RecurringUp,
+                Change::Down => UnusualKind::RecurringDown,
+                _ => return None,
+            };
+            let latest = r.recent_charges.last()?;
+            if !(since..until).contains(&latest.at) {
+                return None;
+            }
+            let day = local_day(latest.at)?;
+            let mut u = Unusual::new(kind, r.name.clone());
+            u.cents = Some(latest.cents);
+            u.usual_cents = r.change_base_cents;
+            u.change_pct = r.change_pct;
+            u.merchant = Some(r.merchant.clone());
+            u.account_id = Some(r.account_id.clone());
+            u.day = Some(day.to_string());
+            u.month = Some(format!("{:04}-{:02}", day.year(), day.month()));
+            u.gap_days = Some(r.gap_days);
+            u.per_charge = true;
+            Some(u)
+        })
+        .collect()
+}
+
+/// Recurring merchants (not ignored) that became late in `[since, until)`,
+/// longest-quiet first. `day` is the last charge.
+fn late(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> {
+    let mut out: Vec<(i64, Unusual)> = view
+        .items
+        .iter()
+        .filter_map(|r| {
+            let at = r.late_since.filter(|at| (since..until).contains(at))?;
+            let mut u = Unusual::new(UnusualKind::Late, r.name.clone());
+            u.cents = Some(r.median_cents);
+            u.merchant = Some(r.merchant.clone());
+            u.account_id = Some(r.account_id.clone());
+            u.day = local_day(r.last_seen).map(|d| d.to_string());
+            u.gap_days = Some(r.gap_days);
+            Some((at, u))
+        })
+        .collect();
+    out.sort_by_key(|(at, _)| *at);
+    out.into_iter().map(|(_, u)| u).collect()
 }
 
 /// First day of each month the period touches.
@@ -813,5 +890,93 @@ mod tests {
         let mut v: Vec<i64> = (1..=100).collect();
         assert_eq!(percentile(&mut v, 95), 95);
         assert_eq!(percentile(&mut [7], 95), 7);
+    }
+
+    /// The seed plus two merchants slower than monthly: a groomer every two
+    /// months whose August visit costs more, and a plumber who went quiet
+    /// after May.
+    fn seed_slow() -> Store {
+        let s = seed();
+        let mut t = Vec::new();
+        for (i, (y, m, c)) in [
+            (2025, 12, 80_00i64),
+            (2026, 2, 80_00),
+            (2026, 4, 80_00),
+            (2026, 6, 80_00),
+            (2026, 8, 105_00),
+        ]
+        .iter()
+        .enumerate()
+        {
+            t.push(txn(
+                &format!("g{i}"),
+                noon(*y, *m, 10),
+                -c,
+                "Sample Groomer",
+            ));
+        }
+        for (i, (y, m)) in [(2025, 11), (2026, 1), (2026, 3), (2026, 5)]
+            .iter()
+            .enumerate()
+        {
+            t.push(txn(
+                &format!("pl{i}"),
+                noon(*y, *m, 10),
+                -90_00,
+                "Sample Plumber",
+            ));
+        }
+        s.upsert_transactions(&t).unwrap();
+        s
+    }
+
+    fn find<'a>(c: &'a CheckIn, kind: UnusualKind, merchant: &str) -> Option<&'a Unusual> {
+        c.unusual
+            .iter()
+            .find(|u| u.kind == kind && u.merchant.as_deref() == Some(merchant))
+    }
+
+    #[test]
+    fn slower_merchants_are_judged_by_charge_and_go_late_once() {
+        let s = seed_slow();
+
+        let aug = run(&s, "2026-08");
+        let up = find(&aug, UnusualKind::RecurringUp, "sample groomer").expect("groomer up");
+        assert!(up.per_charge);
+        assert_eq!(up.cents, Some(105_00));
+        assert_eq!(up.usual_cents, Some(80_00));
+        assert_eq!(up.day.as_deref(), Some("2026-08-10"));
+        assert!(up.gap_days.unwrap() >= 55);
+        let late = find(&aug, UnusualKind::Late, "sample plumber").expect("plumber late");
+        assert_eq!(late.day.as_deref(), Some("2026-05-10"));
+        assert_eq!(late.cents, Some(90_00));
+
+        // A month without a visit is not "down", and late shows only once.
+        for p in ["2026-09", "2026-10"] {
+            let c = run(&s, p);
+            assert!(
+                find(&c, UnusualKind::RecurringDown, "sample groomer").is_none(),
+                "{p}"
+            );
+            assert!(
+                find(&c, UnusualKind::RecurringUp, "sample groomer").is_none(),
+                "{p}"
+            );
+            assert!(
+                find(&c, UnusualKind::Late, "sample plumber").is_none(),
+                "{p}"
+            );
+            assert!(
+                !c.unusual
+                    .iter()
+                    .any(|u| u.change_pct.is_some_and(|p| p <= -100.0)),
+                "no down 100% in {p}"
+            );
+        }
+
+        // The quarter holding both.
+        let q3 = run(&s, "2026-Q3");
+        assert!(find(&q3, UnusualKind::RecurringUp, "sample groomer").is_some());
+        assert!(find(&q3, UnusualKind::Late, "sample plumber").is_some());
     }
 }

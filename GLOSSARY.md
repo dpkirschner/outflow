@@ -73,10 +73,20 @@ product direction behind these terms is in
 - **Usual monthly cost**: the mean of a recurring merchant's completed
   months since its first charge in the window, with months that had no
   charge counted as $0.
-- **New / Up / Down**: the change marker. New means the first charge falls
-  in the last three months, against older history. Up or Down means the
-  last completed month is more than 25% away from the average of up to
-  three months before it. Otherwise it's steady, and nothing is shown.
+- **Every few months**: a recurring merchant charged roughly every two to
+  nine months (a bimonthly bill, a groomer). Months with no charge are
+  normal for it, so it's compared **charge to charge**, never month to month.
+- **New / Up / Down / Late**: the change marker. New means the first charge
+  falls in the last three months, against older history. Up or Down means
+  the last completed month is more than 25% away from the average of up to
+  three months before it; for a merchant charged every few months, the
+  latest charge is more than 25% away from its usual charge (the median of
+  up to four before it). A month with no charge is never Down. Late means
+  no charge for 1.5 times the usual gap (at least a month): skipped, moved
+  or stopped. Otherwise it's steady, and nothing is shown.
+- **Year on year**: what a recurring merchant cost over the last 12
+  completed months against the 12 before, once the archive reaches back
+  two years.
 - **Ignored**: the one per-merchant mark. It moves the merchant off the
   recurring list into a separate ignored list, where it can be restored.
 
@@ -86,7 +96,8 @@ product direction behind these terms is in
   default, or week or quarter): net worth change, earned − spent, saved,
   and anything **unusual**.
 - **Unusual**: one of: a new recurring merchant; a recurring merchant
-  whose monthly cost is more than 25% away from its usual; a one-off
+  whose monthly cost (or, every few months, its latest charge) is more
+  than 25% away from its usual; a recurring merchant that went late; a one-off
   charge that is large compared with your own spending (around your 95th
   percentile); or a connection or match review that needs attention.
   The thresholds are constants in `core`.

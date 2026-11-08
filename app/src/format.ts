@@ -48,6 +48,11 @@ export function monthLabelShort(year: number, month: number): string {
   return `${MONTHS[(month - 1 + 12) % 12]} '${String(year).slice(2)}`;
 }
 
+/** "every ~2 months", from a recurring merchant's median gap in days. */
+export function everyFewMonths(gapDays: number): string {
+  return `every ~${Math.max(2, Math.round(gapDays / 30.44))} months`;
+}
+
 export function formatDate(epochSecs: number): string {
   return new Date(epochSecs * 1000).toLocaleDateString("en-US", {
     year: "numeric",

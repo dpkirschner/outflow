@@ -2872,3 +2872,8 @@ button.fl-lane-figure {
     margin-left: 0;
   }
 }
+/* A slower merchant's spark: one bar per charge, spaced a little wider than
+   the month bars so the two read as different scales. */
+.fl-rc-spark-charges {
+  gap: 5px;
+}

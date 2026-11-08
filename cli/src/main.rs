@@ -725,17 +725,28 @@ fn cmd_recurring(
     for r in rows {
         let change = match (r.change, r.change_pct) {
             (Change::New, _) => "new".to_string(),
+            (Change::Late, _) => "late".to_string(),
             (Change::Up | Change::Down, Some(p)) => format!("{p:+.0}%"),
             _ => String::new(),
         };
+        // Year on year, when the archive reaches back two years.
+        let yoy = match r.prior_year_cents {
+            Some(p) if p > 0 => format!(
+                "  12mo {} ({:+.0}%)",
+                dollars(r.year_cents),
+                (r.year_cents - p) as f64 / p as f64 * 100.0
+            ),
+            _ => String::new(),
+        };
         println!(
-            "{:<28} {:<10} {:>10}/mo  {:<6} last {}  {}",
+            "{:<28} {:<14} {:>10}/mo  {:<6} last {}  {}{}",
             truncate(&r.name, 28),
-            cadence_label(r.cadence),
+            cadence_label(r.cadence, r.gap_days),
             dollars(r.monthly_cents),
             change,
             date_label(r.last_seen),
-            r.merchant
+            r.merchant,
+            yoy
         );
     }
     if !ignored {
@@ -748,15 +759,21 @@ fn cmd_recurring(
     Ok(())
 }
 
-fn cadence_label(c: StreamCadence) -> &'static str {
+fn cadence_label(c: StreamCadence, gap_days: i64) -> String {
     match c {
-        StreamCadence::Daily => "~daily",
-        StreamCadence::FewPerWeek => "~3x/wk",
-        StreamCadence::Weekly => "weekly",
-        StreamCadence::FewPerMonth => "~4x/mo",
-        StreamCadence::Monthly => "monthly",
-        StreamCadence::Yearly => "yearly",
+        StreamCadence::Daily => "~daily".into(),
+        StreamCadence::FewPerWeek => "~3x/wk".into(),
+        StreamCadence::Weekly => "weekly".into(),
+        StreamCadence::FewPerMonth => "~4x/mo".into(),
+        StreamCadence::Monthly => "monthly".into(),
+        StreamCadence::EveryFewMonths => format!("every ~{}mo", months_of_gap(gap_days)),
+        StreamCadence::Yearly => "yearly".into(),
     }
+}
+
+/// "every ~2 months": the median gap in whole months, at least 2.
+fn months_of_gap(gap_days: i64) -> i64 {
+    ((gap_days as f64 / 30.44).round() as i64).max(2)
 }
 
 fn cmd_fix(store: &Store, txn_id: String, category: String, no_learn: bool) -> Result<(), String> {
@@ -1108,6 +1125,13 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
     for u in &c.unusual {
         let amt = |v: Option<i64>| v.map(dollars).unwrap_or_else(|| "-".into());
         let line = match u.kind {
+            UnusualKind::Late => format!(
+                "late        {}  last charge {}, usually every {} days, {} a charge",
+                u.label,
+                u.day.as_deref().unwrap_or("?"),
+                u.gap_days.unwrap_or(0),
+                amt(u.cents)
+            ),
             UnusualKind::Connection => format!(
                 "connection  {}: {}",
                 u.label,
@@ -1125,21 +1149,34 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
                 amt(u.cents),
                 u.day.as_deref().unwrap_or("?")
             ),
-            UnusualKind::RecurringUp | UnusualKind::RecurringDown => format!(
-                "{}        {}  {} in {} vs {} a month before{}",
-                if u.kind == UnusualKind::RecurringUp {
+            UnusualKind::RecurringUp | UnusualKind::RecurringDown => {
+                let dir = if u.kind == UnusualKind::RecurringUp {
                     "up  "
                 } else {
                     "down"
-                },
-                u.label,
-                amt(u.cents),
-                u.month.as_deref().unwrap_or("?"),
-                amt(u.usual_cents),
-                u.change_pct
+                };
+                let pct = u
+                    .change_pct
                     .map(|p| format!(" ({p:+.0}%)"))
-                    .unwrap_or_default()
-            ),
+                    .unwrap_or_default();
+                if u.per_charge {
+                    format!(
+                        "{dir}        {}  {} charge on {} vs usual charge {}{pct}",
+                        u.label,
+                        amt(u.cents),
+                        u.day.as_deref().unwrap_or("?"),
+                        amt(u.usual_cents),
+                    )
+                } else {
+                    format!(
+                        "{dir}        {}  {} in {} vs {} a month before{pct}",
+                        u.label,
+                        amt(u.cents),
+                        u.month.as_deref().unwrap_or("?"),
+                        amt(u.usual_cents),
+                    )
+                }
+            }
             UnusualKind::LargeCharge => format!(
                 "large       {}  {} on {} (your 95th percentile {})  [{}]",
                 u.label,

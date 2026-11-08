@@ -207,7 +207,9 @@ export const checkIn: CheckIn = {
       "month": "2026-10",
       "item_id": null,
       "status": null,
-      "count": null
+      "count": null,
+      "gap_days": 30,
+      "per_charge": false
     },
     {
       "kind": "large_charge",
@@ -222,7 +224,26 @@ export const checkIn: CheckIn = {
       "month": null,
       "item_id": null,
       "status": null,
-      "count": null
+      "count": null,
+      "gap_days": null,
+      "per_charge": false
+    },
+    {
+      "kind": "late",
+      "label": "SAMPLE GROOMER",
+      "cents": 8000,
+      "usual_cents": null,
+      "change_pct": null,
+      "merchant": "sample groomer",
+      "txn_id": null,
+      "account_id": "acct-demo-checking",
+      "day": "2026-07-14",
+      "month": null,
+      "item_id": null,
+      "status": null,
+      "count": null,
+      "gap_days": 61,
+      "per_charge": false
     }
   ],
   "not_checked": [
@@ -244,12 +265,17 @@ export const recurringView: RecurringView = {
       "merchant": "example coffee co",
       "name": "Example Coffee Co",
       "cadence": "FewPerWeek",
+      "gap_days": 2,
       "count": 36,
       "median_cents": 650,
       "monthly_cents": 7800,
       "change": "Up",
       "change_pct": 31.5,
       "change_base_cents": 7605,
+      "late_since": null,
+      "year_cents": 88900,
+      "prior_year_cents": 71200,
+      "recent_charges": [],
       "first_seen": 1739923200,
       "last_seen": 1768435200,
       "spark_cents": [
@@ -262,6 +288,59 @@ export const recurringView: RecurringView = {
       ],
       "category": "Dining",
       "account_id": "acct-demo-card"
+    },
+    {
+      "merchant": "sample groomer",
+      "name": "Sample Groomer",
+      "cadence": "EveryFewMonths",
+      "gap_days": 61,
+      "count": 6,
+      "median_cents": 8000,
+      "monthly_cents": 4000,
+      "change": "Late",
+      "change_pct": 12.5,
+      "change_base_cents": 8000,
+      "late_since": 1768003200,
+      "year_cents": 49000,
+      "prior_year_cents": null,
+      "recent_charges": [
+        {
+          "at": 1733443200,
+          "cents": 8000
+        },
+        {
+          "at": 1738713600,
+          "cents": 8200
+        },
+        {
+          "at": 1743984000,
+          "cents": 8400
+        },
+        {
+          "at": 1749254400,
+          "cents": 8600
+        },
+        {
+          "at": 1754524800,
+          "cents": 8800
+        },
+        {
+          "at": 1759795200,
+          "cents": 9000
+        }
+      ],
+      "first_seen": 1739923200,
+      "last_seen": 1768435200,
+      "spark_cents": [
+        0,
+        9000,
+        0,
+        0,
+        0,
+        0
+      ],
+      "category": "Pets",
+      "account_id": "acct-demo-card"
     }
   ],
   "ignored": [
@@ -269,12 +348,17 @@ export const recurringView: RecurringView = {
       "merchant": "sample parking",
       "name": "SAMPLE PARKING 0042",
       "cadence": "FewPerWeek",
+      "gap_days": 2,
       "count": 36,
       "median_cents": 650,
       "monthly_cents": 7800,
       "change": "Steady",
       "change_pct": null,
       "change_base_cents": null,
+      "late_since": null,
+      "year_cents": 88900,
+      "prior_year_cents": 71200,
+      "recent_charges": [],
       "first_seen": 1739923200,
       "last_seen": 1768435200,
       "spark_cents": [

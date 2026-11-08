@@ -316,10 +316,19 @@ those capsules.
   a drill-down figure: the dotted underline sits on the name, and the
   selected row gets the Selected Fill and a 2px Field Teal inset ring.
 - Only a change gets a margin note, in words: "new" and "up 44%" in
-  Attention Amber, "down 12%" in Text Dim. Steady says nothing visible.
+  Attention Amber, "down 12%" and "late" in Text Dim. Steady says nothing
+  visible. There is no "down 100%": a merchant with no charge is late or
+  steady.
+- A merchant charged every few months reads "every ~2 months" under its
+  name, and is compared charge to charge. Under that, a Text Dim year line
+  ("$489.00 over 12 months, up 10% on the year before") shows once the
+  archive covers two years: always for those slower merchants, otherwise
+  only when the year moved 10% or more.
 - The spark's bars are Text Faint (Text Dim on hover or selection); the
   month still in progress is an outlined bar, so a partial month doesn't
-  read as a drop.
+  read as a drop. A slower merchant's spark is its last six charges, one
+  bar each, spaced a little wider (its months are empty by design); its
+  accessible name lists the charges.
 - Ignore is the row action, waiting for hover or focus like the table's.
   It's a deliberate exception to "upkeep stays off analysis screens": it
   only changes what this list shows, and it's undone in place (Undo on the
@@ -353,8 +362,9 @@ those capsules.
 
 ### Unusual list (Check-in)
 - One card of rows. Each row: the margin note in words ("reconnect",
-  "review", "new", "up 44%", "large" in Attention Amber; "down 33%" in
-  Text Dim), the name as a link with the dotted underline whose hit area
+  "review", "new", "up 44%", "large" in Attention Amber; "down 33%" and
+  "late" in Text Dim: a skipped grooming is easy to ignore, a missing bill
+  worth a glance), the name as a link with the dotted underline whose hit area
   covers the row, a Text Dim detail line saying what it's compared with,
   the signed amount when there is one, and the destination (Flow /
   Settings) in Text Faint. Rows open the destination already filtered:

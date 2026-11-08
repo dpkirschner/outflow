@@ -191,6 +191,11 @@ fn recurring_merchant() -> RecurringMerchant {
         change: Change::Up,
         change_pct: Some(31.5),
         change_base_cents: Some(7_605),
+        late_since: None,
+        year_cents: 88_900,
+        prior_year_cents: Some(71_200),
+        recent_charges: Vec::new(),
+        gap_days: 2,
         first_seen: T0 - 330 * DAY,
         last_seen: T0,
         spark_cents: vec![7_100, 7_400, 7_900, 7_600, 10_000, 3_200],
@@ -207,13 +212,35 @@ fn recurring_view() -> RecurringView {
     ignored.change_pct = None;
     ignored.change_base_cents = None;
     ignored.category = None;
+    let mut slow = recurring_merchant();
+    slow.merchant = "sample groomer".into();
+    slow.name = "Sample Groomer".into();
+    slow.cadence = StreamCadence::EveryFewMonths;
+    slow.gap_days = 61;
+    slow.count = 6;
+    slow.median_cents = 8_000;
+    slow.monthly_cents = 4_000;
+    slow.change = Change::Late;
+    slow.change_pct = Some(12.5);
+    slow.change_base_cents = Some(8_000);
+    slow.late_since = Some(T0 - 5 * DAY);
+    slow.prior_year_cents = None;
+    slow.year_cents = 49_000;
+    slow.recent_charges = (0..6)
+        .map(|i| outflow_core::recurring::Charge {
+            at: T0 - (100 + (5 - i) * 61) * DAY,
+            cents: 8_000 + i * 200,
+        })
+        .collect();
+    slow.spark_cents = vec![0, 9_000, 0, 0, 0, 0];
+    slow.category = Some("Pets".into());
     RecurringView {
         month: "2026-11".into(),
         since: NaiveDate::from_ymd_opt(2025, 12, 1).unwrap(),
         until: NaiveDate::from_ymd_opt(2026, 11, 30).unwrap(),
         in_progress: true,
         monthly_total_cents: 7_800,
-        items: vec![recurring_merchant()],
+        items: vec![recurring_merchant(), slow],
         ignored: vec![ignored],
     }
 }
@@ -234,7 +261,19 @@ fn checkin() -> outflow_core::CheckIn {
         item_id: None,
         status: None,
         count: None,
+        gap_days: Some(30),
+        per_charge: false,
     };
+    let mut late = up.clone();
+    late.kind = UnusualKind::Late;
+    late.label = "SAMPLE GROOMER".into();
+    late.cents = Some(8_000);
+    late.usual_cents = None;
+    late.change_pct = None;
+    late.merchant = Some("sample groomer".into());
+    late.day = Some("2026-07-14".into());
+    late.month = None;
+    late.gap_days = Some(61);
     let mut large = up.clone();
     large.kind = UnusualKind::LargeCharge;
     large.label = "SAMPLE FURNITURE".into();
@@ -245,6 +284,7 @@ fn checkin() -> outflow_core::CheckIn {
     large.txn_id = Some("txn-demo-1".into());
     large.day = Some("2026-10-12".into());
     large.month = None;
+    large.gap_days = None;
     up.account_id = None;
     let p = outflow_core::Period::parse("2026-10", NaiveDate::from_ymd_opt(2026, 11, 7).unwrap())
         .unwrap();
@@ -281,7 +321,7 @@ fn checkin() -> outflow_core::CheckIn {
             net_worth_periods: 1,
             net_worth_change_cents: None,
         },
-        unusual: vec![up, large],
+        unusual: vec![up, large, late],
         not_checked: vec![NotChecked {
             check: Check::LargeCharges,
             reason: NotCheckedReason::ShortHistory,

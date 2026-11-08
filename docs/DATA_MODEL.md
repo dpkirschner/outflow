@@ -228,7 +228,9 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
 - `subscriptions::detect_rhythms(txns)` — the one recurring detector: Spending
   outflows grouped by `normalize_payee`, at least 3 charges, spacing regular
   (most gaps within 0.5×–2× the median gap). Amounts may vary. Returns each
-  merchant's charges and its cadence class (Daily…Yearly).
+  merchant's charges and its cadence class (Daily…Monthly for median gaps up
+  to 45 days, `EveryFewMonths` up to 300, then Yearly; `is_slow()` = the
+  last two).
 - `recurring(store, through, now) -> RecurringView` — the recurring list
   (GLOSSARY: Recurring) over the 12 calendar months ending with the month that
   contains `through`; `now` decides which months are complete. Per merchant:
@@ -236,8 +238,19 @@ inclusive, until exclusive, both against `effective_date()`. Every aggregation
   the window (months with no charge count as $0; with none complete, median
   charge × frequency); a 6-month spark ending at that month; the change marker
   — **New** if the first charge falls in the last 3 months and the archive has
-  older rows, else **Up**/**Down** when the last completed month is more than
-  25% (`CHANGE_PCT`) from the mean of up to 3 completed months before it.
+  older rows, else **Late** when there's been no charge for `LATE_FACTOR`
+  (1.5) × the median gap, at least `LATE_MIN_DAYS` (31), as of the chosen
+  month's end or now (`late_since` = when), else **Up**/**Down** when the last
+  completed month is more than 25% (`CHANGE_PCT`) from the mean of up to 3
+  completed months before it (a month with no charge is never Down). Slower
+  merchants (`is_slow`) compare charges instead: the latest charge against
+  the median of up to `CHARGE_BASE` (4) before it, a "charge" being one local
+  day's charges summed; their spark is `recent_charges` (last 6).
+  `change_base_cents` is whatever `change_pct` compared with. `year_cents` /
+  `prior_year_cents`: the merchant's spend over the 12 completed months ending
+  with the chosen month (or the one before, in progress) and the 12 before
+  those, read from the whole archive; prior is None until the archive reaches
+  back that far.
   Ignored merchants (`merchant_overrides`) are split into `ignored`. A yearly
   charge can't qualify inside 12 months. The `merchant` filter on
   `search_transactions` (exact normalized key) returns the rows behind a
@@ -324,6 +337,12 @@ of the module.
     each completed month of the period, latest month kept per merchant.
     `usual_cents` is the base the % was taken against (the mean of up to
     3 completed months before), not the merchant's whole-window monthly cost.
+    Merchants slower than monthly are skipped there and judged by charge
+    instead: a latest charge inside the period, Up/Down against the usual
+    charge (`per_charge`, month in progress or not, not on weeks).
+  - Late, for any calendar period: a recurring merchant (not ignored) whose
+    `late_since` falls in the period, so each shows once; `day` = last
+    charge, `cents` = median charge, `gap_days` set.
     A month in progress gets new merchants only; a week gets neither.
   - Large charges: an Out charge (negative, Out lane, pending included)
     from a merchant not on the recurring list, at or above the nearest-rank

@@ -128,7 +128,11 @@ fn render() -> String {
     // --- core::recurring ---
     {
         use outflow_core::recurring::*;
-        decls!(&cfg, out, [Change, RecurringMerchant, RecurringView]);
+        decls!(
+            &cfg,
+            out,
+            [Change, Charge, RecurringMerchant, RecurringView]
+        );
     }
 
     // --- core::subscriptions ---

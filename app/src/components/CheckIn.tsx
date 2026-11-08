@@ -10,7 +10,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { CheckIn as CheckInData, FlowMonth, NotChecked, Unusual } from "../types";
-import { errMessage, formatCentsShort, monthLabel, monthLabelShort, signedCents, unsignedCents } from "../format";
+import {
+  errMessage,
+  everyFewMonths,
+  formatCentsShort,
+  monthLabel,
+  monthLabelShort,
+  signedCents,
+  unsignedCents,
+} from "../format";
 import { onLinkClick, pathOf, navigate } from "../route";
 import { MonthStrip, type StripMonth } from "./MonthStrip";
 import { monthKey, type Pick } from "./Flow";
@@ -513,7 +521,7 @@ function Figures({ c, unit, linkMonth }: { c: CheckInData; unit: string; linkMon
 // ── Unusual ─────────────────────────────────────────────────────────────────
 
 const NOT_CHECKED: Record<string, string> = {
-  week: "Recurring merchants aren't checked on a week: their costs are monthly.",
+  week: "Recurring cost changes and new merchants aren't checked on a week: their costs are monthly.",
   in_progress: "Recurring cost changes wait for a finished month.",
   short_history: "Large charges need 30 charges in the year before to know what's large for you.",
   range: "Recurring and large-charge checks cover weeks, months and quarters only.",
@@ -547,6 +555,17 @@ interface Row {
   dest: "Flow" | "Settings";
   href: string;
   go?: () => void;
+}
+
+/** "monthly", "every ~2 months": how often, from the usual gap (mirrors
+ *  core's cadence buckets, for wording only). */
+function howOften(days: number): string {
+  if (days <= 1.5) return "about daily";
+  if (days <= 3.5) return "a few times a week";
+  if (days <= 10) return "weekly";
+  if (days <= 20) return "a few times a month";
+  if (days <= 45) return "monthly";
+  return everyFewMonths(days);
 }
 
 function rowOf(u: Unusual, fallbackMonth: string | null, onDrill: (p: Pick, m: string) => void): Row {
@@ -599,10 +618,36 @@ function rowOf(u: Unusual, fallbackMonth: string | null, onDrill: (p: Pick, m: s
         href: flowHref,
         go: flowGo(merchantPick(false), u.day?.slice(0, 7) ?? fallbackMonth),
       };
+    case "late":
+      return {
+        note: "late",
+        warn: false,
+        name: u.label,
+        detail: `No charge since ${day ? dayLabel(day) : "a while"}; usually ${howOften(u.gap_days ?? 30)}${
+          u.cents !== null ? `, about ${unsignedCents(u.cents)} a charge` : ""
+        }.`,
+        cents: null,
+        dest: "Flow",
+        href: flowHref,
+        go: flowGo(merchantPick(false), fallbackMonth),
+      };
     case "recurring_up":
     case "recurring_down": {
       const pct = Math.round(Math.abs(u.change_pct ?? 0));
       const m = u.month ?? fallbackMonth;
+      if (u.per_charge)
+        return {
+          note: `${u.kind === "recurring_up" ? "up" : "down"} ${pct}%`,
+          warn: u.kind === "recurring_up",
+          name: u.label,
+          detail: `${day ? dayLabel(day) : "Latest"} charge, against a usual ${
+            u.usual_cents !== null ? unsignedCents(u.usual_cents) : ""
+          } a charge (${howOften(u.gap_days ?? 60)}).`,
+          cents: u.cents ? -u.cents : null,
+          dest: "Flow",
+          href: flowHref,
+          go: flowGo(merchantPick(false), m),
+        };
       return {
         note: `${u.kind === "recurring_up" ? "up" : "down"} ${pct}%`,
         warn: u.kind === "recurring_up",

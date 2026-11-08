@@ -135,8 +135,24 @@ pub enum StreamCadence {
     Weekly,      // "weekly"
     FewPerMonth, // "~4×/mo"
     Monthly,     // "monthly"
+    /// Every two to about nine months (a bimonthly bill, a groomer): judged
+    /// charge to charge, not month to month (`is_slow`).
+    EveryFewMonths, // "every ~N months", N from the median gap
     Yearly,      // "yearly"
 }
+
+impl StreamCadence {
+    /// Slower than monthly: some months have no charge by design, so the
+    /// recurring list compares charges, not calendar months.
+    pub fn is_slow(self) -> bool {
+        matches!(self, StreamCadence::EveryFewMonths | StreamCadence::Yearly)
+    }
+}
+
+/// Median gaps above this many days are slower than monthly.
+pub const MONTHLY_MAX_GAP_DAYS: f64 = 45.0;
+/// Median gaps above this many days are yearly.
+pub const FEW_MONTHS_MAX_GAP_DAYS: f64 = 300.0;
 
 fn f64_median(sorted: &[f64]) -> f64 {
     sorted[sorted.len() / 2]
@@ -176,8 +192,10 @@ fn classify_stream_cadence(sorted_dates: &[i64]) -> Option<(StreamCadence, f64)>
         StreamCadence::Weekly
     } else if med <= 20.0 {
         StreamCadence::FewPerMonth
-    } else if med <= 45.0 {
+    } else if med <= MONTHLY_MAX_GAP_DAYS {
         StreamCadence::Monthly
+    } else if med <= FEW_MONTHS_MAX_GAP_DAYS {
+        StreamCadence::EveryFewMonths
     } else {
         StreamCadence::Yearly
     };
@@ -315,6 +333,17 @@ mod tests {
         assert_eq!(r[0].merchant, "pg e");
         assert_eq!(r[0].cadence, StreamCadence::Monthly);
         assert_eq!(r[0].items.len(), 3);
+    }
+
+    #[test]
+    fn a_charge_every_two_months_is_every_few_months_not_yearly() {
+        let txns: Vec<_> = (0..5)
+            .map(|i| charge(&format!("g{i}"), i * 61, -8000, "Sample Groomer"))
+            .collect();
+        let r = detect_rhythms(&txns);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].cadence, StreamCadence::EveryFewMonths);
+        assert!(r[0].cadence.is_slow());
     }
 
     #[test]

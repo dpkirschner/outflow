@@ -40,7 +40,9 @@ server), `categorize [--llm]`,
 [--period P | --since D --until D]`
 (monthly = Flow lanes: in / out / earned − spent / saved / Moved groups),
 `recurring [--period P --ignored]` (recurring merchants over the 12 months
-ending with P's last month: cadence, usual monthly cost, new / up / down >25%),
+ending with P's last month: cadence, usual monthly cost, new / late / up /
+down >25%, charge to charge for every-few-months merchants, 12-month
+year-on-year),
 `fix <id> <category> [--no-learn]`,
 `perks [--file F --lookback 3mo|6mo|12mo|all --expiring-days N]` (card offers
 vs spending; file from `--file`/`OUTFLOW_PERKS`),

@@ -709,6 +709,21 @@ fn upkeep() -> outflow_core::Upkeep {
     }
 }
 
+fn category_edit() -> outflow_core::CategoryEdit {
+    outflow_core::CategoryEdit {
+        rule_id: Some(12),
+        undo: outflow_core::CategoryUndo {
+            category: "Coffee".into(),
+            prev_category: Some("Dining".into()),
+            prev_source: Some(CategorySource::Plaid),
+            rule: Some(outflow_core::RuleUndo {
+                id: 12,
+                prev_category: None,
+            }),
+        },
+    }
+}
+
 fn reset_preview() -> outflow_core::ResetPreview {
     outflow_core::ResetPreview {
         transactions: 1_200,
@@ -769,6 +784,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("Upkeep", j(upkeep())),
         ("ResetPreview", j(reset_preview())),
         ("CategorizeResult", j(categorize_result())),
+        ("CategoryEdit", j(category_edit())),
         // perks_routes.rs
         ("PerksReport", j(perks_report())),
         // plaid_routes.rs

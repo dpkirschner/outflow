@@ -339,13 +339,20 @@ classification on either leg) AND an unambiguous 1:1 pairing; everything else
 is **Medium**. The sync engine auto-accepts High (flags both legs
 `CardPayment`, retires competing proposals) and queues Medium for the Review
 screen. Accepting/rejecting is idempotent and survives re-sync (UNIQUE pair +
-flag-preserving upsert). Undoing an accept restores both legs to `Spending`.
+flag-preserving upsert). Undoing an accept (`unaccept_match`) returns the
+pair to `proposed` and each leg to the flag Plaid's category gives (unless
+another accepted pair uses it); rejecting an accepted pair does the same to
+the legs but the pair is never proposed again.
 
 ## Categorization precedence
 
 Rule matching (`categorize::RuleSet`): **exact beats contains; among contains,
-longest pattern wins**, on the normalized merchant. `set_manual_category(id,
-cat, learn=true)` writes an exact rule so siblings follow on the next pass.
+longest pattern wins**, on the normalized merchant; among duplicate exact
+rules the oldest (lowest id) wins. `set_manual_category(id, cat,
+learn=true)` re-points that exact rule (else adds one) so siblings follow on
+the next pass, and returns an undo token: `undo_manual_category` restores
+the row's previous category/source and deletes or re-points the rule back,
+only while the edit is still in place.
 Sources stamped: `Plaid | Rule | Llm | Manual`. Plaid-seeded
 categories fill only otherwise-empty rows (the categorizer passes touch NULL
 categories only; manual fixes overwrite anything).

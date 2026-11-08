@@ -760,10 +760,10 @@ fn cadence_label(c: StreamCadence) -> &'static str {
 }
 
 fn cmd_fix(store: &Store, txn_id: String, category: String, no_learn: bool) -> Result<(), String> {
-    let rule = store
+    let edit = store
         .set_manual_category(&txn_id, &category, !no_learn)
         .map_err(|e| format!("{e}"))?;
-    match rule {
+    match edit.rule_id {
         Some(id) => println!("set {txn_id} = {category}; learned rule #{id}"),
         None => println!("set {txn_id} = {category}"),
     }

@@ -87,6 +87,15 @@ pub enum Unaccept {
     NotAccepted(MatchStatus),
 }
 
+/// What `Store::undo_manual_category` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CategoryUndone {
+    Done,
+    NotFound,
+    /// Nothing changed: the row or its rule moved on since the edit.
+    Changed,
+}
+
 /// A learned/manual rule that assigns a `TxnFlag` to transactions whose
 /// normalized merchant matches `pattern`. Parallel to `CategoryRule` — the same
 /// mechanism on an independent axis (a merchant can be categorized AND flagged).
@@ -969,7 +978,9 @@ impl Store {
     pub fn rules(&self) -> rusqlite::Result<Vec<CategoryRule>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, match_type, pattern, category FROM category_rules")?;
+            // Oldest first: RuleSet takes the first exact match, and
+            // set_manual_category re-points that same rule.
+            .prepare("SELECT id, match_type, pattern, category FROM category_rules ORDER BY id")?;
         let rows = stmt.query_map([], |r| {
             let mt: String = r.get(1)?;
             Ok(CategoryRule {
@@ -1020,24 +1031,142 @@ impl Store {
         Ok(n)
     }
 
+    /// Set a transaction's category by hand. With `learn`, also point the
+    /// merchant's exact rule at it: the existing exact rule on the
+    /// normalized merchant (the one `RuleSet` matches first) is re-pointed,
+    /// else a new one is added. Siblings follow on the next categorize pass
+    /// (uncategorized rows only); nothing else is recategorized now. Returns
+    /// the rule and the undo token (`undo_manual_category`). One transaction.
     pub fn set_manual_category(
         &self,
         txn_id: &str,
         category: &str,
         learn: bool,
-    ) -> rusqlite::Result<Option<i64>> {
+    ) -> rusqlite::Result<CategoryEdit> {
         let existing = self.transaction(txn_id)?;
+        let tx = self.conn.unchecked_transaction()?;
         self.set_category(txn_id, category, CategorySource::Manual)?;
-        if learn {
-            if let Some(t) = existing {
-                let pattern = normalize_payee(t.merchant());
-                if !pattern.is_empty() {
+        let mut undo = CategoryUndo {
+            category: category.to_string(),
+            prev_category: existing.as_ref().and_then(|t| t.category.clone()),
+            prev_source: existing.as_ref().and_then(|t| t.category_source),
+            rule: None,
+        };
+        let mut rule_id = None;
+        let pattern = existing
+            .as_ref()
+            .filter(|_| learn)
+            .map(|t| normalize_payee(t.merchant()))
+            .filter(|p| !p.is_empty());
+        if let Some(pattern) = pattern {
+            match self.exact_rule(&pattern)? {
+                Some((id, old)) if old == category => rule_id = Some(id),
+                Some((id, old)) => {
+                    self.conn.execute(
+                        "UPDATE category_rules SET category = ?1 WHERE id = ?2",
+                        params![category, id],
+                    )?;
+                    rule_id = Some(id);
+                    undo.rule = Some(RuleUndo {
+                        id,
+                        prev_category: Some(old),
+                    });
+                }
+                None => {
                     let id = self.add_rule(MatchType::Exact, &pattern, category)?;
-                    return Ok(Some(id));
+                    rule_id = Some(id);
+                    undo.rule = Some(RuleUndo {
+                        id,
+                        prev_category: None,
+                    });
                 }
             }
         }
-        Ok(None)
+        tx.commit()?;
+        Ok(CategoryEdit { rule_id, undo })
+    }
+
+    /// The first exact category rule on `pattern`: `(id, category)`.
+    fn exact_rule(&self, pattern: &str) -> rusqlite::Result<Option<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, category FROM category_rules
+             WHERE match_type = 'exact' AND pattern = ?1 ORDER BY id LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![pattern.to_lowercase()], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
+        rows.next().transpose()
+    }
+
+    /// Reverse one `set_manual_category` edit: the row gets its previous
+    /// category and source back, and the rule the edit wrote is deleted (if
+    /// it created it) or re-pointed back. Only while the edit is still in
+    /// place: the row's category is still the edit's, set by hand, and the
+    /// rule still says it; otherwise nothing changes (`Changed`). Rows a
+    /// categorize pass filled from the learned rule in between keep their
+    /// category. One transaction.
+    pub fn undo_manual_category(
+        &self,
+        txn_id: &str,
+        undo: &CategoryUndo,
+    ) -> rusqlite::Result<CategoryUndone> {
+        let Some(t) = self.transaction(txn_id)? else {
+            return Ok(CategoryUndone::NotFound);
+        };
+        if t.category.as_deref() != Some(undo.category.as_str())
+            || t.category_source != Some(CategorySource::Manual)
+        {
+            return Ok(CategoryUndone::Changed);
+        }
+        if let Some(r) = &undo.rule {
+            let now: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT category FROM category_rules WHERE id = ?1 AND match_type = 'exact'",
+                    params![r.id],
+                    |row| row.get(0),
+                )
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    e => Err(e),
+                })?;
+            if now.as_deref() != Some(undo.category.as_str()) {
+                return Ok(CategoryUndone::Changed);
+            }
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        self.conn.execute(
+            "UPDATE transactions SET category = ?1, category_source = ?2 WHERE id = ?3",
+            params![
+                undo.prev_category,
+                undo.prev_category
+                    .as_ref()
+                    .and(undo.prev_source.map(|s| s.as_str())),
+                txn_id
+            ],
+        )?;
+        match &undo.rule {
+            Some(RuleUndo {
+                id,
+                prev_category: None,
+            }) => {
+                self.conn
+                    .execute("DELETE FROM category_rules WHERE id = ?1", params![id])?;
+            }
+            Some(RuleUndo {
+                id,
+                prev_category: Some(old),
+            }) => {
+                self.conn.execute(
+                    "UPDATE category_rules SET category = ?1 WHERE id = ?2",
+                    params![old, id],
+                )?;
+            }
+            None => {}
+        }
+        tx.commit()?;
+        Ok(CategoryUndone::Done)
     }
 
     pub fn add_flag_rule(
@@ -3192,7 +3321,7 @@ mod categorize_tests {
         ])
         .unwrap();
 
-        let rule_id = s.set_manual_category("1", "Coffee", true).unwrap();
+        let rule_id = s.set_manual_category("1", "Coffee", true).unwrap().rule_id;
         assert!(rule_id.is_some());
 
         let n = s
@@ -3202,6 +3331,89 @@ mod categorize_tests {
 
         let sibling = s.transaction("2").unwrap().unwrap();
         assert_eq!(sibling.category.as_deref(), Some("Coffee"));
+    }
+
+    fn cat(s: &Store, id: &str) -> (Option<String>, Option<CategorySource>) {
+        let t = s.transaction(id).unwrap().unwrap();
+        (t.category, t.category_source)
+    }
+
+    #[test]
+    fn undo_reverses_a_learned_edit_exactly() {
+        let s = Store::open_in_memory().unwrap();
+        let mut a = t("1", "SQ *BLUE BOTTLE 4471");
+        a.category = Some("Dining".into());
+        a.category_source = Some(CategorySource::Plaid);
+        s.upsert_transactions(&[a, t("2", "SAMPLE PARKING 0042")])
+            .unwrap();
+
+        // Learned edit that creates the rule.
+        let e = s.set_manual_category("1", "Coffee", true).unwrap();
+        let rule = e.undo.rule.clone().unwrap();
+        assert_eq!(e.rule_id, Some(rule.id));
+        assert_eq!(rule.prev_category, None);
+        assert_eq!(
+            s.undo_manual_category("1", &e.undo).unwrap(),
+            CategoryUndone::Done
+        );
+        assert_eq!(
+            cat(&s, "1"),
+            (Some("Dining".into()), Some(CategorySource::Plaid))
+        );
+        assert!(s.rules().unwrap().is_empty(), "the created rule is gone");
+        // Undo twice: the edit is no longer in place.
+        assert_eq!(
+            s.undo_manual_category("1", &e.undo).unwrap(),
+            CategoryUndone::Changed
+        );
+
+        // An unlearned edit on an uncategorized row.
+        let e = s.set_manual_category("2", "Parking", false).unwrap();
+        assert_eq!(e.rule_id, None);
+        s.undo_manual_category("2", &e.undo).unwrap();
+        assert_eq!(cat(&s, "2"), (None, None));
+        assert_eq!(
+            s.undo_manual_category("nope", &e.undo).unwrap(),
+            CategoryUndone::NotFound
+        );
+    }
+
+    #[test]
+    fn learning_repoints_the_merchant_rule_and_undo_puts_it_back() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[
+            t("1", "SQ *BLUE BOTTLE 4471"),
+            t("2", "SQ *BLUE BOTTLE 9982"),
+        ])
+        .unwrap();
+        let first = s.set_manual_category("1", "Dining", true).unwrap();
+        let second = s.set_manual_category("2", "Coffee", true).unwrap();
+        // One rule, re-pointed, so the new category actually wins.
+        let rules = s.rules().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].category, "Coffee");
+        assert_eq!(second.rule_id, first.rule_id);
+        assert_eq!(
+            second.undo.rule.as_ref().unwrap().prev_category.as_deref(),
+            Some("Dining")
+        );
+        // Undoing the older edit first would clobber the newer: refused.
+        assert_eq!(
+            s.undo_manual_category("1", &first.undo).unwrap(),
+            CategoryUndone::Changed
+        );
+        assert_eq!(cat(&s, "1").0.as_deref(), Some("Dining"));
+
+        s.undo_manual_category("2", &second.undo).unwrap();
+        assert_eq!(s.rules().unwrap()[0].category, "Dining");
+        assert_eq!(cat(&s, "2"), (None, None));
+
+        // Same category again writes no rule, so undo leaves the rule alone.
+        let same = s.set_manual_category("2", "Dining", true).unwrap();
+        assert_eq!(same.undo.rule, None);
+        assert_eq!(same.rule_id, first.rule_id);
+        s.undo_manual_category("2", &same.undo).unwrap();
+        assert_eq!(s.rules().unwrap().len(), 1);
     }
 }
 

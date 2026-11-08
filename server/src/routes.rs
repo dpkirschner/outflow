@@ -670,17 +670,47 @@ struct CategoryBody {
     learn: bool,
 }
 
+/// Set a category by hand (`learn`: point the merchant's exact rule at it).
+/// Returns the rule and the undo token for `/category/undo`.
 async fn set_category(
     State(state): State<AppState>,
     Path(txn_id): Path<String>,
     Json(body): Json<CategoryBody>,
-) -> ApiResult<Option<i64>> {
+) -> ApiResult<outflow_core::CategoryEdit> {
     with_store(&state, move |s| {
         s.set_manual_category(&txn_id, &body.category, body.learn)
             .map_err(|e| e.to_string())
     })
     .await
     .map(Json)
+}
+
+/// Reverse one category edit: the body is the `undo` its response carried.
+/// 404 for an unknown transaction, 409 when the row or its rule changed
+/// since (nothing is touched).
+async fn undo_category(
+    State(state): State<AppState>,
+    Path(txn_id): Path<String>,
+    Json(undo): Json<outflow_core::CategoryUndo>,
+) -> ApiResult<()> {
+    use outflow_core::CategoryUndone;
+    let id = txn_id.clone();
+    let done = with_store(&state, move |s| {
+        s.undo_manual_category(&id, &undo)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    match done {
+        CategoryUndone::Done => Ok(Json(())),
+        CategoryUndone::NotFound => Err(ApiError(
+            axum::http::StatusCode::NOT_FOUND,
+            format!("no transaction {txn_id}"),
+        )),
+        CategoryUndone::Changed => Err(ApiError(
+            axum::http::StatusCode::CONFLICT,
+            format!("{txn_id}'s category or its rule changed since; nothing undone"),
+        )),
+    }
 }
 
 #[derive(Deserialize)]
@@ -866,6 +896,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/categorize", post(categorize))
         .route("/categorize_llm", post(categorize_llm))
         .route("/txn/{txn_id}/category", post(set_category))
+        .route("/txn/{txn_id}/category/undo", post(undo_category))
         .route("/txn/{txn_id}/flag", post(set_flag))
         .route("/account/{account_id}/nickname", post(set_account_nickname))
         .route("/account/{account_id}/hidden", post(set_account_hidden))
@@ -1059,6 +1090,56 @@ mod tests {
         let (_, t) = get_json(app.clone(), "/transactions?flag=CardPayment").await;
         assert_eq!(t["total"], 0, "both legs count as before");
         assert_eq!(post("/matches/1/unaccept").await, StatusCode::CONFLICT);
+    }
+
+    async fn post_json(
+        app: Router,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let res = app
+            .oneshot(
+                Request::post(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn category_edit_returns_an_undo_that_reverses_it() {
+        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle")]);
+        let (st, edit) = post_json(
+            app.clone(),
+            "/txn/t1/category",
+            serde_json::json!({ "category": "Coffee", "learn": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(edit["rule_id"].is_number());
+        assert_eq!(edit["undo"]["category"], "Coffee");
+        assert_eq!(edit["undo"]["prev_category"], "Dining");
+        assert_eq!(edit["undo"]["prev_source"], "Rule");
+        assert_eq!(
+            edit["undo"]["rule"]["prev_category"],
+            serde_json::Value::Null
+        );
+
+        let (st, _) = post_json(app.clone(), "/txn/t1/category/undo", edit["undo"].clone()).await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, page) = get_json(app.clone(), "/transactions").await;
+        assert_eq!(page["items"][0]["category"], "Dining");
+        assert_eq!(page["items"][0]["category_source"], "Rule");
+
+        let (st, _) = post_json(app.clone(), "/txn/t1/category/undo", edit["undo"].clone()).await;
+        assert_eq!(st, StatusCode::CONFLICT, "already undone");
+        let (st, _) = post_json(app, "/txn/nope/category/undo", edit["undo"].clone()).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

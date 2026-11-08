@@ -30,9 +30,9 @@ pub use checkin::{
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
-    account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding,
-    HoldingSnapshot, InvestmentTxn, MatchConfidence, MatchStatus, PlaidItem, Security, SyncEntry,
-    Transaction, TxnFlag, TxnMatch,
+    account_display_label, Account, AccountKind, BalanceSnapshot, CategoryEdit, CategorySource,
+    CategoryUndo, Holding, HoldingSnapshot, InvestmentTxn, MatchConfidence, MatchStatus, PlaidItem,
+    RuleUndo, Security, SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use period::{parse_day, today_local, Period, PeriodError, PeriodKind};
@@ -56,7 +56,7 @@ pub use stock::{
     net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
-pub use store::{FlagRule, PlaidBatch, Store, Unaccept, UpsertResult};
+pub use store::{CategoryUndone, FlagRule, PlaidBatch, Store, Unaccept, UpsertResult};
 pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};
 pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};
 pub use upkeep::{summary as upkeep, ConnectionIssue, Upkeep};

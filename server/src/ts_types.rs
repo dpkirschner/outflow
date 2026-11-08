@@ -56,6 +56,9 @@ fn render() -> String {
                 Transaction,
                 PlaidItem,
                 SyncEntry,
+                CategoryEdit,
+                CategoryUndo,
+                RuleUndo,
             ]
         );
     }

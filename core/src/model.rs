@@ -412,6 +412,43 @@ pub struct TxnMatch {
     pub created: i64,
 }
 
+/// What `Store::set_manual_category` did: the learned rule, and the token
+/// that reverses exactly this edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CategoryEdit {
+    /// The exact rule on the merchant when `learn` (new or re-pointed);
+    /// None without `learn` or with an empty merchant.
+    pub rule_id: Option<i64>,
+    /// Send back to `POST /txn/{txn_id}/category/undo` as is.
+    pub undo: CategoryUndo,
+}
+
+/// The state one category edit replaced. Undo restores it only while the
+/// edit is still in place.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CategoryUndo {
+    /// The category the edit set (checked: still the row's manual category).
+    pub category: String,
+    /// The row's category and source before the edit.
+    pub prev_category: Option<String>,
+    pub prev_source: Option<CategorySource>,
+    /// The rule the edit wrote; None when it wrote none (no `learn`, or the
+    /// merchant's rule already said this category).
+    pub rule: Option<RuleUndo>,
+}
+
+/// The rule half of a category edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct RuleUndo {
+    pub id: i64,
+    /// None: the edit created the rule, undo deletes it. Some: the edit
+    /// re-pointed the merchant's existing rule, undo puts this back.
+    pub prev_category: Option<String>,
+}
+
 /// One row of the sync history (`sync_log`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]

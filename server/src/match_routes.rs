@@ -1,11 +1,13 @@
 //! Card-payment match review: list detected pairs (enriched with both
 //! transactions for display), accept (flag both legs `CardPayment`), reject
-//! (and, when undoing an accept, restore both legs to `Spending`).
+//! (and, when undoing an accept, restore both legs to `Spending`), and
+//! unaccept (an accepted pair back to review, legs restored).
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use outflow_core::{MatchStatus, Transaction, TxnFlag, TxnMatch};
+use outflow_core::{MatchStatus, Transaction, TxnFlag, TxnMatch, Unaccept};
 use serde::{Deserialize, Serialize};
 
 use crate::state::{with_store, ApiError, ApiResult, AppState};
@@ -123,9 +125,29 @@ async fn reject(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult
     .map(Json)
 }
 
+/// Undo an accept: the pair goes back to `proposed` (review) and each leg's
+/// flag override is dropped, unless another accepted pair still uses it
+/// (`Store::unaccept_match`). 404 for an unknown id, 409 when the pair isn't
+/// accepted.
+async fn unaccept(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<()> {
+    let done = with_store(&state, move |store| {
+        store.unaccept_match(id).map_err(|e| e.to_string())
+    })
+    .await?;
+    match done {
+        Unaccept::Done => Ok(Json(())),
+        Unaccept::NotFound => Err(ApiError(StatusCode::NOT_FOUND, format!("no match {id}"))),
+        Unaccept::NotAccepted(s) => Err(ApiError(
+            StatusCode::CONFLICT,
+            format!("match {id} is {}, not accepted", s.as_str()),
+        )),
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/matches", get(list))
         .route("/matches/{id}/accept", post(accept))
         .route("/matches/{id}/reject", post(reject))
+        .route("/matches/{id}/unaccept", post(unaccept))
 }

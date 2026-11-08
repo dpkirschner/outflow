@@ -157,7 +157,8 @@ An RO token gets **403** on all of these.
 |---|---|---|
 | `GET /matches` | `?status=` = `proposed`\|`accepted`\|`rejected` (omit for all) | `MatchView[]` |
 | `POST /matches/{id}/accept` | `id` | accept a proposed pair (flags both legs `CardPayment`) |
-| `POST /matches/{id}/reject` | `id` | reject a proposed pair (permanent unless re-accepted by hand) |
+| `POST /matches/{id}/reject` | `id` | reject a proposed pair (permanent unless re-accepted by hand). On an accepted pair it also drops both legs' overrides, but the pair is never proposed again — to undo an accept use `unaccept` |
+| `POST /matches/{id}/unaccept` | `id` | undo an accept → `null`: the pair goes back to `proposed` (review) and each leg's flag override is dropped (back to the flag Plaid's category gives) unless another accepted pair still uses that leg. Proposals that accepting retired stay rejected. `404` unknown id, `409` when the pair isn't accepted |
 
 ## Source of truth
 

@@ -77,6 +77,16 @@ pub struct PlaidBatch {
     pub next_cursor: String,
 }
 
+/// What `Store::unaccept_match` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unaccept {
+    /// The pair is `proposed` again and its legs count as before accepting.
+    Done,
+    NotFound,
+    /// Nothing changed: the pair isn't accepted (its current status).
+    NotAccepted(MatchStatus),
+}
+
 /// A learned/manual rule that assigns a `TxnFlag` to transactions whose
 /// normalized merchant matches `pattern`. Parallel to `CategoryRule` — the same
 /// mechanism on an independent axis (a merchant can be categorized AND flagged).
@@ -1668,6 +1678,37 @@ impl Store {
         Ok(())
     }
 
+    /// Return an accepted card-payment pair to `proposed`, undoing what
+    /// accepting it did to the legs: each leg's flag override is dropped (back
+    /// to the flag Plaid's category gives), unless another accepted pair still
+    /// uses that leg. One transaction. Proposals that accepting retired
+    /// (`reject_conflicting_proposals`) stay rejected: they can't be told
+    /// apart from the owner's own rejections.
+    pub fn unaccept_match(&self, id: i64) -> rusqlite::Result<Unaccept> {
+        let Some(m) = self.match_by_id(id)? else {
+            return Ok(Unaccept::NotFound);
+        };
+        if m.status != MatchStatus::Accepted {
+            return Ok(Unaccept::NotAccepted(m.status));
+        }
+        let tx = self.conn.unchecked_transaction()?;
+        for leg in [&m.bank_txn_id, &m.card_txn_id] {
+            let shared: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM txn_matches
+                 WHERE status = 'accepted' AND id != ?1
+                   AND (bank_txn_id = ?2 OR card_txn_id = ?2))",
+                params![id, leg],
+                |r| r.get(0),
+            )?;
+            if !shared {
+                self.clear_flag(leg)?;
+            }
+        }
+        self.set_match_status(id, MatchStatus::Proposed)?;
+        tx.commit()?;
+        Ok(Unaccept::Done)
+    }
+
     /// After accepting a match, retire every other proposal that shares either
     /// leg — those pairings are stale once the legs are flagged. Returns the
     /// count retired.
@@ -2133,6 +2174,88 @@ mod tests {
         let items = s.plaid_items().unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].cursor, None);
+    }
+
+    #[test]
+    fn unaccept_returns_the_pair_to_review_and_restores_the_legs() {
+        let s = Store::open_in_memory().unwrap();
+        let mut card = txn("card", "acct2", 100, 50_000, false);
+        card.pfc_primary = Some("LOAN_PAYMENTS".into());
+        card.pfc_detailed = Some("LOAN_PAYMENTS_CREDIT_CARD_PAYMENT".into());
+        // As a sync stores it: the flag its Plaid category gives, no override.
+        card.flag =
+            crate::plaid::flag_from_pfc(card.pfc_primary.as_deref(), card.pfc_detailed.as_deref());
+        s.upsert_transactions(&[txn("bank", "acct1", 100, -50_000, false), card])
+            .unwrap();
+        let seeded = |id: &str| s.transaction(id).unwrap().unwrap().flag;
+        let (bank_before, card_before) = (seeded("bank"), seeded("card"));
+        let id = s
+            .insert_match(
+                "bank",
+                "card",
+                MatchStatus::Proposed,
+                MatchConfidence::Medium,
+                None,
+                0,
+            )
+            .unwrap()
+            .unwrap();
+        // Not accepted yet: nothing to undo.
+        assert_eq!(
+            s.unaccept_match(id).unwrap(),
+            Unaccept::NotAccepted(MatchStatus::Proposed)
+        );
+        assert_eq!(s.unaccept_match(999).unwrap(), Unaccept::NotFound);
+
+        // Accept the way the server does.
+        s.set_flag("bank", TxnFlag::CardPayment, false).unwrap();
+        s.set_flag("card", TxnFlag::CardPayment, false).unwrap();
+        s.set_match_status(id, MatchStatus::Accepted).unwrap();
+
+        assert_eq!(s.unaccept_match(id).unwrap(), Unaccept::Done);
+        assert_eq!(
+            s.match_by_id(id).unwrap().unwrap().status,
+            MatchStatus::Proposed
+        );
+        assert_eq!(seeded("bank"), bank_before);
+        assert_eq!(seeded("card"), card_before);
+    }
+
+    #[test]
+    fn unaccept_keeps_a_leg_another_accepted_pair_uses() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[
+            txn("bank", "acct1", 100, -50_000, false),
+            txn("c1", "acct2", 100, 25_000, false),
+            txn("c2", "acct3", 100, 25_000, false),
+        ])
+        .unwrap();
+        let mut ids = vec![];
+        for card in ["c1", "c2"] {
+            let id = s
+                .insert_match(
+                    "bank",
+                    card,
+                    MatchStatus::Accepted,
+                    MatchConfidence::High,
+                    None,
+                    0,
+                )
+                .unwrap()
+                .unwrap();
+            s.set_flag("bank", TxnFlag::CardPayment, false).unwrap();
+            s.set_flag(card, TxnFlag::CardPayment, false).unwrap();
+            ids.push(id);
+        }
+        assert_eq!(s.unaccept_match(ids[0]).unwrap(), Unaccept::Done);
+        let flag = |id: &str| s.transaction(id).unwrap().unwrap().flag;
+        assert_eq!(
+            flag("bank"),
+            TxnFlag::CardPayment,
+            "still paid by c2's pair"
+        );
+        assert_eq!(flag("c1"), TxnFlag::Spending);
+        assert_eq!(flag("c2"), TxnFlag::CardPayment);
     }
 
     #[test]

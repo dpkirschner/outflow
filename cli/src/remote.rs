@@ -145,6 +145,7 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
             },
             MatchCmd::Accept { id } => remote.post(&format!("/matches/{id}/accept"), None),
             MatchCmd::Reject { id } => remote.post(&format!("/matches/{id}/reject"), None),
+            MatchCmd::Unaccept { id } => remote.post(&format!("/matches/{id}/unaccept"), None),
         },
     }
 }

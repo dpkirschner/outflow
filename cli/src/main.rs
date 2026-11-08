@@ -354,6 +354,10 @@ pub(crate) enum MatchCmd {
     Reject {
         id: i64,
     },
+    /// Put an accepted pair back in review; both legs count as before.
+    Unaccept {
+        id: i64,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy)]
@@ -1636,6 +1640,16 @@ fn cmd_matches(store: &Store, action: &MatchCmd, json: bool) -> Result<(), Strin
             println!("rejected #{id}");
             Ok(())
         }
+        MatchCmd::Unaccept { id } => match store.unaccept_match(*id).map_err(|e| format!("{e}"))? {
+            outflow_core::Unaccept::Done => {
+                println!("#{id} is back in review; both legs count as before");
+                Ok(())
+            }
+            outflow_core::Unaccept::NotFound => Err(format!("no match {id}")),
+            outflow_core::Unaccept::NotAccepted(s) => {
+                Err(format!("match {id} is {}, not accepted", s.as_str()))
+            }
+        },
     }
 }
 

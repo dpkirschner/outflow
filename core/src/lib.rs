@@ -56,7 +56,7 @@ pub use stock::{
     net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
-pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
+pub use store::{FlagRule, PlaidBatch, Store, Unaccept, UpsertResult};
 pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};
 pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};
 pub use upkeep::{summary as upkeep, ConnectionIssue, Upkeep};

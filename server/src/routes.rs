@@ -1044,6 +1044,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unaccept_puts_an_accepted_pair_back_in_review() {
+        let app = app_with_two_accounts();
+        let post = |uri: &'static str| post_status(app.clone(), uri, serde_json::json!(null));
+        assert_eq!(post("/matches/1/unaccept").await, StatusCode::CONFLICT);
+        assert_eq!(post("/matches/99/unaccept").await, StatusCode::NOT_FOUND);
+        assert_eq!(post("/matches/1/accept").await, StatusCode::OK);
+        let (_, t) = get_json(app.clone(), "/transactions?flag=CardPayment").await;
+        assert_eq!(t["total"], 2, "both legs excluded as card payment");
+
+        assert_eq!(post("/matches/1/unaccept").await, StatusCode::OK);
+        let (_, m) = get_json(app.clone(), "/matches?status=proposed").await;
+        assert_eq!(m.as_array().map(Vec::len), Some(1));
+        let (_, t) = get_json(app.clone(), "/transactions?flag=CardPayment").await;
+        assert_eq!(t["total"], 0, "both legs count as before");
+        assert_eq!(post("/matches/1/unaccept").await, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
     async fn reset_preview_counts_without_deleting() {
         let app = app_with_two_accounts();
         let (status, v) = get_json(app.clone(), "/reset/preview").await;

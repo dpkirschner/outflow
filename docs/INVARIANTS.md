@@ -24,6 +24,8 @@ data integrity or the domain contract — treat them as load-bearing.
 4. **Merchant grouping is always `subscriptions::normalize_payee`.** Categorizer
    matching, merchant reports, subscription detection, transaction search, and
    the card-payment matcher's lexicon all use it. Do not add a second normalizer.
+   `subscriptions::display_merchant` (shares its processor-prefix cut) is for
+   showing a name only; never group, match or filter on it.
 
 5. **Boundary parsing.** External JSON is deserialized then converted to domain
    types with explicit validation; malformed data returns `SourceError`, never

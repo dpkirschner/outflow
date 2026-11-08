@@ -32,7 +32,7 @@ use crate::query::{account_kinds, flow_over, lane_of, Lane};
 use crate::recurring::{self, Change, RecurringView};
 use crate::stock::{net_worth_change, ChangeReason, NetWorthChange};
 use crate::store::Store;
-use crate::subscriptions::normalize_payee;
+use crate::subscriptions::{display_merchant, normalize_payee};
 use crate::upkeep;
 use chrono::{Datelike, Local, Months, NaiveDate, TimeZone};
 use serde::Serialize;
@@ -143,7 +143,8 @@ pub enum UnusualKind {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Unusual {
     pub kind: UnusualKind,
-    /// Merchant as the bank writes it, institution, or a short phrase.
+    /// Merchant display name (`display_merchant`), institution, or a short
+    /// phrase.
     pub label: String,
     /// The charge (large charge), or the month's spend (recurring), positive.
     pub cents: Option<i64>,
@@ -391,7 +392,8 @@ pub fn checkin(
                     .into_iter()
                     .take(LARGE_CHARGE_MAX_ITEMS)
                     .map(|(t, c)| {
-                        let mut u = Unusual::new(UnusualKind::LargeCharge, t.merchant());
+                        let mut u =
+                            Unusual::new(UnusualKind::LargeCharge, display_merchant(t.merchant()));
                         u.cents = Some(c);
                         u.usual_cents = Some(threshold);
                         u.merchant = Some(normalize_payee(t.merchant()));

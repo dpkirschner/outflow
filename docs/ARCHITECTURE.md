@@ -53,7 +53,8 @@ money            i64-cents type, decimal parse, display
           ├ query          spend_by_category, top_merchants, flow_lanes,
           │                search_transactions (text/sort/filter/pagination)
           ├ subscriptions  normalize_payee (THE normalizer), detect_rhythms() (THE
-          │                recurring detector)
+          │                recurring detector), display_merchant (display
+          │                names only, never a key)
           ├ recurring      recurring() → RecurringView: the recurring list over
           │                12 months, change marker, Ignored mark
           ├ transfers      detect_card_payments() — checking↔card pair matcher

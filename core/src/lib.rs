@@ -48,7 +48,7 @@ pub use plaid::{
 pub use query::{
     flow_lanes, lane_of, search_transactions, spend_by_category, top_merchants, CategorySpend,
     Direction, FlowMonth, Lane, MerchantSpend, MovedFlow, MovedLane, SortKey, TxnFilter, TxnPage,
-    TxnQuery,
+    TxnQuery, TxnRow,
 };
 pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
 pub use reset::{preview as reset_preview, ResetPreview, PLAID_REFETCH_DAYS};
@@ -57,6 +57,8 @@ pub use stock::{
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
 pub use store::{CategoryUndone, FlagRule, PlaidBatch, Store, Unaccept, UpsertResult};
-pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};
+pub use subscriptions::{
+    detect_rhythms, display_merchant, normalize_payee, RhythmGroup, StreamCadence,
+};
 pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};
 pub use upkeep::{summary as upkeep, ConnectionIssue, Upkeep};

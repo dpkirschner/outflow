@@ -7,7 +7,7 @@
 use crate::model::Transaction;
 use crate::query::month_index;
 use crate::store::Store;
-use crate::subscriptions::{detect_rhythms, median, StreamCadence, MONTH_DAYS};
+use crate::subscriptions::{detect_rhythms, display_merchant, median, StreamCadence, MONTH_DAYS};
 use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -45,7 +45,8 @@ pub struct RecurringMerchant {
     /// Normalized merchant (`normalize_payee`): the key for `merchant=` on
     /// `/transactions` and for the Ignored mark.
     pub merchant: String,
-    /// The merchant as the bank writes it most often, for display.
+    /// Display name (`display_merchant`) of the spelling the bank uses most
+    /// often: `SQ *BLUE BOTTLE 0042` shows as `Blue Bottle`.
     pub name: String,
     pub cadence: StreamCadence,
     /// Charges in the window.
@@ -231,9 +232,7 @@ fn merchant_row(
 
     RecurringMerchant {
         merchant: key.to_string(),
-        name: most_common(items.iter().map(|t| t.merchant()))
-            .unwrap_or(key)
-            .to_string(),
+        name: display_merchant(most_common(items.iter().map(|t| t.merchant())).unwrap_or(key)),
         cadence,
         count: items.len(),
         median_cents,
@@ -330,6 +329,17 @@ mod tests {
         assert_eq!(r.account_id, "card");
         assert_eq!(r.category.as_deref(), Some("Streaming"));
         assert_eq!(v.monthly_total_cents, 1599);
+    }
+
+    #[test]
+    fn name_is_the_display_name_key_stays_normalized() {
+        let txns = monthly(
+            "SQ *DEMO GYM 0042",
+            &[(2026, 7, 4000), (2026, 8, 4000), (2026, 9, 4000)],
+        );
+        let v = build(&txns, &HashSet::new(), day(2026, 9, 30), at(2026, 11, 7));
+        assert_eq!(v.items[0].merchant, "demo gym");
+        assert_eq!(v.items[0].name, "Demo Gym");
     }
 
     #[test]

@@ -77,6 +77,7 @@ fn render() -> String {
             out,
             [
                 TxnPage,
+                TxnRow,
                 CategorySpend,
                 MerchantSpend,
                 Lane,

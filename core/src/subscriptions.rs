@@ -17,13 +17,20 @@ fn is_processor_prefix(head: &str) -> bool {
     )
 }
 
+/// The merchant part of a payee: after a processor prefix (`SQ *SHOP` →
+/// `SHOP`), else before any `*` (`SHOP*ORDER123` → `SHOP`). Shared by the
+/// normalizer and the display name so they cut the same way.
+fn payee_base(s: &str) -> &str {
+    match s.find('*') {
+        Some(i) if is_processor_prefix(&s[..i].to_lowercase()) => &s[i + 1..],
+        Some(i) => &s[..i],
+        None => s,
+    }
+}
+
 pub fn normalize_payee(s: &str) -> String {
-    let lower = s.to_lowercase();
-    let base = match lower.find('*') {
-        Some(i) if is_processor_prefix(&lower[..i]) => &lower[i + 1..],
-        Some(i) => &lower[..i],
-        None => &lower[..],
-    };
+    let lower = payee_base(s).to_lowercase();
+    let base = &lower[..];
     let mut out = String::new();
     for tok in base.split(|c: char| !c.is_alphanumeric()) {
         if tok.is_empty() {
@@ -39,6 +46,79 @@ pub fn normalize_payee(s: &str) -> String {
         out.push_str(tok);
     }
     out.trim().to_string()
+}
+
+/// Web suffixes dropped from a display name (`STREAMFLIX.COM` → Streamflix).
+const DOMAIN_SUFFIXES: &[&str] = &[".com", ".net", ".org", ".co", ".io", ".tv", ".app"];
+
+/// A merchant as people write it, for display only: never a key (grouping
+/// and matching stay on `normalize_payee`, invariant #4). Cuts the same
+/// processor prefix the normalizer does, drops trailing store numbers
+/// (`SAMPLE PARKING 0042`, `#42`) and a web suffix (`.COM`), and title-cases
+/// an all-caps name; a name with any lowercase letter keeps its casing.
+/// Falls back to the trimmed input when nothing would be left.
+pub fn display_merchant(s: &str) -> String {
+    let mut words: Vec<&str> = payee_base(s).split_whitespace().collect();
+    let store_number = |w: &str| {
+        let w = w.trim_start_matches('#');
+        let digits = w.chars().filter(|c| c.is_ascii_digit()).count();
+        w.is_empty() || digits * 2 >= w.len()
+    };
+    while words.len() > 1 && words.last().is_some_and(|w| store_number(w)) {
+        words.pop();
+    }
+    let words: Vec<String> = words
+        .into_iter()
+        .map(|w| {
+            let lower = w.to_lowercase();
+            let w = if lower.starts_with("www.") {
+                &w[4..]
+            } else {
+                w
+            };
+            let lower = w.to_lowercase();
+            DOMAIN_SUFFIXES
+                .iter()
+                .find(|suf| lower.len() > suf.len() && lower.ends_with(*suf))
+                .map_or(w, |suf| &w[..w.len() - suf.len()])
+                .to_string()
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+    let joined = words.join(" ");
+    if joined.is_empty() {
+        return s.trim().to_string();
+    }
+    if joined.chars().any(|c| c.is_lowercase()) {
+        return joined;
+    }
+    title_case(&joined)
+}
+
+/// `BLUE BOTTLE COFFEE` → `Blue Bottle Coffee`, `MCDONALD'S` →
+/// `Mcdonald's`. Short words with no vowel stay as they are (`CVS`, `BP`).
+fn title_case(s: &str) -> String {
+    s.split(' ')
+        .map(|w| {
+            let vowel = w.chars().any(|c| "AEIOUYaeiouy".contains(c));
+            if w.chars().count() <= 3 && !vowel {
+                return w.to_string();
+            }
+            let mut out = String::with_capacity(w.len());
+            let mut prev: Option<char> = None;
+            for c in w.chars() {
+                let start = prev.is_none_or(|p| !p.is_alphanumeric() && p != '\'');
+                if start {
+                    out.extend(c.to_uppercase());
+                } else {
+                    out.extend(c.to_lowercase());
+                }
+                prev = Some(c);
+            }
+            out
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(crate) fn median(sorted: &[i64]) -> i64 {
@@ -158,6 +238,43 @@ mod tests {
 
     // Noon on 2021-01-15 UTC.
     const BASE: i64 = 1610712000;
+
+    #[test]
+    fn display_merchant_reads_like_people_write_it() {
+        for (raw, want) in [
+            ("SQ *BLUE BOTTLE COFFEE", "Blue Bottle Coffee"),
+            ("TST* SAMPLE TACOS 0042", "Sample Tacos"),
+            ("PAYPAL *STREAMFLIX", "Streamflix"),
+            ("SAMPLE PARKING 0042", "Sample Parking"),
+            ("DEMO MART #1234", "Demo Mart"),
+            ("DEMO MART # 1234", "Demo Mart"),
+            ("STREAMFLIX.COM", "Streamflix"),
+            ("WWW.EXAMPLE.NET BILL", "Example Bill"),
+            ("SHOPNET*ORDER 99812", "Shopnet"),
+            ("MCDONALD'S F1234", "Mcdonald's"),
+            ("CVS PHARMACY 01234", "CVS Pharmacy"),
+            ("7-ELEVEN 32145", "7-Eleven"),
+            // Mixed case is left alone (but still trimmed of numbers).
+            ("Example Coffee Co", "Example Coffee Co"),
+            ("iTunes.com", "iTunes"),
+            ("Demo Gym 0042", "Demo Gym"),
+            // Nothing left after cutting: keep the input.
+            ("12345", "12345"),
+            ("  ", ""),
+        ] {
+            assert_eq!(display_merchant(raw), want, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn display_name_groups_like_the_key() {
+        // Display only: two spellings still share one normalized key.
+        assert_eq!(
+            normalize_payee("SQ *BLUE BOTTLE 4471"),
+            normalize_payee("SQ *BLUE BOTTLE 9982")
+        );
+        assert_eq!(normalize_payee("SQ *BLUE BOTTLE 4471"), "blue bottle");
+    }
 
     fn charge(id: &str, day_offset: i64, cents: i64, merchant: &str) -> Transaction {
         Transaction {

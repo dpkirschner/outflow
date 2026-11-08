@@ -1516,6 +1516,16 @@ mod tests {
         assert_eq!(body["items"][0]["payee"], "Blue Bottle");
     }
 
+    #[tokio::test]
+    async fn transaction_rows_carry_a_display_name() {
+        let app = app_with_txns(&[txn("t1", -1500, "TST* SAMPLE TACOS 0042")]);
+        let (_, body) = get_json(app, "/transactions").await;
+        let row = &body["items"][0];
+        assert_eq!(row["id"], "t1", "Transaction fields stay flat");
+        assert_eq!(row["payee"], "TST* SAMPLE TACOS 0042");
+        assert_eq!(row["display_name"], "Sample Tacos");
+    }
+
     // Lane drill-down: the lane reads moved rows without transfers=true,
     // direction picks a side, uncategorized picks rows with no category.
     #[tokio::test]

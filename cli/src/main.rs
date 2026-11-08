@@ -803,12 +803,13 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
     if json {
         return json_out(&page);
     }
-    for t in &page.items {
+    for row in &page.items {
+        let t = &row.txn;
         println!(
             "{:>12}  {:<10}  {:<32} {:<14} {}",
             dollars(t.amount.cents()),
             date_label(t.effective_date()),
-            truncate(t.merchant(), 32),
+            truncate(&row.display_name, 32),
             t.category.as_deref().unwrap_or("—"),
             t.id
         );

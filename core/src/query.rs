@@ -1,6 +1,6 @@
 use crate::model::{AccountKind, Transaction, TxnFlag};
 use crate::store::Store;
-use crate::subscriptions::normalize_payee;
+use crate::subscriptions::{display_merchant, normalize_payee};
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -142,7 +142,28 @@ pub struct TxnPage {
     pub total: usize,
     /// Signed sum over ALL matching rows (not just this page).
     pub total_cents: i64,
-    pub items: Vec<Transaction>,
+    pub items: Vec<TxnRow>,
+}
+
+/// A transaction as the list shows it: every `Transaction` field, plus the
+/// merchant's display name.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct TxnRow {
+    #[serde(flatten)]
+    pub txn: Transaction,
+    /// `display_merchant(merchant())`: `SQ *BLUE BOTTLE 0042` → `Blue
+    /// Bottle`. Display only; filter by `normalize_payee` keys.
+    pub display_name: String,
+}
+
+impl From<Transaction> for TxnRow {
+    fn from(txn: Transaction) -> TxnRow {
+        TxnRow {
+            display_name: display_merchant(txn.merchant()),
+            txn,
+        }
+    }
 }
 
 pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnPage> {
@@ -212,10 +233,11 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
 
     let total = matched.len();
     let total_cents = matched.iter().map(|t| t.amount.cents()).sum();
-    let items: Vec<Transaction> = matched
+    let items: Vec<TxnRow> = matched
         .into_iter()
         .skip(q.offset)
         .take(q.limit.max(1))
+        .map(TxnRow::from)
         .collect();
     Ok(TxnPage {
         total,
@@ -721,8 +743,8 @@ mod tests {
         let page = search_transactions(&s, &q).unwrap();
         assert_eq!(page.total, 6);
         assert_eq!(page.items.len(), 2);
-        assert_eq!(page.items[0].amount.cents(), -5000);
-        assert_eq!(page.items[1].amount.cents(), -3000);
+        assert_eq!(page.items[0].txn.amount.cents(), -5000);
+        assert_eq!(page.items[1].txn.amount.cents(), -3000);
         // total_cents covers ALL matches, not the page.
         assert_eq!(page.total_cents, -5000 - 1500 - 2000 - 3000 + 250000 - 900);
 
@@ -737,7 +759,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(next.items[0].amount.cents(), -2000);
+        assert_eq!(next.items[0].txn.amount.cents(), -2000);
     }
 
     #[test]

@@ -119,8 +119,8 @@ fn txn_page() -> TxnPage {
         total: 2,
         total_cents: -1_234 - 50_000,
         items: vec![
-            transaction(),
-            payment_leg("txn-demo-002", "acct-demo-checking", -50_000),
+            transaction().into(),
+            payment_leg("txn-demo-002", "acct-demo-checking", -50_000).into(),
         ],
     }
 }

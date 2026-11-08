@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-08T00:49:02+00:00",
+  "generatedAt": "2026-11-08T20:54:45+00:00",
   "title": "Design System: outflow",
   "extensions": {
     "colorMeta": {
@@ -142,7 +142,7 @@
       "text-faint": {
         "role": "neutral",
         "displayName": "Text Faint",
-        "canonical": "oklch(50% 0.025 255)",
+        "canonical": "oklch(61.6% 0.028 256)",
         "tonalRamp": [
           "oklch(15% 0.013 255)",
           "oklch(25% 0.016 255)",
@@ -328,26 +328,32 @@
       },
       "meta": {
         "displayName": "Meta",
-        "purpose": "Dates, sources, coverage and sync status."
+        "purpose": "Dates, sources, coverage and sync status (11.5-12px)."
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Uppercase card headers and stat keys."
+        "purpose": "Uppercase card headers and stat keys; 11px is the type floor."
       }
     },
     "shadows": [
       {
         "name": "selection-ring",
-        "value": "inset 0 0 0 2px #2dd4bf",
+        "value": "inset 0 0 0 2px var(--lg-teal, #2dd4bf)",
         "purpose": "The selected figure or row: Selected Fill plus this ring, never a lift."
       },
       {
         "name": "hover-hairline",
-        "value": "inset 0 0 0 1px #1e2a38",
+        "value": "inset 0 0 0 1px var(--lg-line, #1e2a38)",
         "purpose": "Hover on a drill-down figure, with Row Hover."
       }
     ],
-    "motion": [],
+    "motion": [
+      {
+        "name": "busy-dim",
+        "value": "opacity 120ms ease-out 150ms",
+        "purpose": "Range switch on Holdings: old figures dim to 0.55 opacity (hd-busy) only if the new ones take longer than 150ms."
+      }
+    ],
     "breakpoints": [
       {
         "name": "narrow",
@@ -370,7 +376,7 @@
       "refersTo": "button",
       "description": "Default action: Panel fill, hairline border.",
       "html": "<button class=\"ds-btn\">Refresh</button>",
-      "css": ".ds-btn{font:13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#111823;border:1px solid #1e2a38;color:#e6edf3;cursor:pointer;transition:background .15s,border-color .15s}.ds-btn:hover{background:#16202e}.ds-btn:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}.ds-btn:active{transform:translateY(1px)}"
+      "css": ".ds-btn{font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;line-height:1.2;padding:8px 14px;border-radius:8px;background:var(--lg-panel, #111823);border:1px solid var(--lg-line, #1e2a38);color:var(--lg-text, #e6edf3);cursor:pointer}.ds-btn:hover:not(:disabled){background:var(--lg-panel-hi, #16202e)}.ds-btn:disabled{opacity:.5;cursor:default}.ds-btn:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Key Button",
@@ -378,7 +384,7 @@
       "refersTo": "button-key",
       "description": "The one primary action in a group.",
       "html": "<button class=\"ds-btn-key\">Pull</button>",
-      "css": ".ds-btn-key{font:600 13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#0f2e29;border:1px solid #1f5850;color:#2dd4bf;cursor:pointer;transition:border-color .15s}.ds-btn-key:hover{border-color:#2dd4bf}.ds-btn-key:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+      "css": ".ds-btn-key{font:600 0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;line-height:1.2;padding:8px 14px;border-radius:8px;background:var(--lg-teal-wash, #0f2e29);border:1px solid var(--lg-teal-edge, #1f5850);color:var(--lg-teal, #2dd4bf);cursor:pointer}.ds-btn-key:hover:not(:disabled){background:var(--lg-panel-hi, #16202e)}.ds-btn-key:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Ghost Button",
@@ -386,7 +392,7 @@
       "refersTo": "button-ghost",
       "description": "Low-priority or guarded actions (Reset, Unlink).",
       "html": "<button class=\"ds-btn-ghost\">Unlink</button>",
-      "css": ".ds-btn-ghost{font:13px -apple-system,BlinkMacSystemFont,sans-serif;padding:8px 14px;border-radius:8px;background:#111823;border:1px solid #1e2a38;color:#8b98a9;cursor:pointer}.ds-btn-ghost:hover{color:#e6edf3;background:#16202e}.ds-btn-ghost:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+      "css": ".ds-btn-ghost{font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;line-height:1.2;padding:8px 14px;border-radius:8px;background:var(--lg-panel, #111823);border:1px solid var(--lg-line, #1e2a38);color:var(--lg-dim, #8b98a9);cursor:pointer}.ds-btn-ghost:hover:not(:disabled){background:var(--lg-panel-hi, #16202e)}.ds-btn-ghost:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Segmented control",
@@ -394,23 +400,23 @@
       "refersTo": "segmented",
       "description": "Recessed track; the selected option gets the Selected Fill. Holdings range and lens.",
       "html": "<span class=\"ds-seg\" role=\"group\" aria-label=\"Range\"><button class=\"on\" aria-pressed=\"true\">Month</button><button aria-pressed=\"false\">3M</button><button aria-pressed=\"false\">YTD</button><button aria-pressed=\"false\">1Y</button><button aria-pressed=\"false\">All</button></span>",
-      "css": ".ds-seg{display:inline-flex;background:#0e141d;border:1px solid #1e2a38;border-radius:8px;padding:2px;font:11.5px -apple-system,BlinkMacSystemFont,sans-serif}.ds-seg button{border:0;background:none;color:#8b98a9;padding:4px 9px;border-radius:6px;cursor:pointer;font:inherit}.ds-seg button:hover:not(.on){color:#e6edf3}.ds-seg button.on{background:#1c2c40;color:#e6edf3}.ds-seg button:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+      "css": ".ds-seg{display:inline-flex;background:var(--lg-panel2, #0e141d);border:1px solid var(--lg-line, #1e2a38);border-radius:8px;padding:2px;font:0.7188rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif}.ds-seg button{font:inherit;min-height:26px;border:1px solid transparent;background:none;color:var(--lg-dim, #8b98a9);padding:3px 10px;border-radius:6px;cursor:pointer}.ds-seg button:hover:not(.on){color:var(--lg-text, #e6edf3)}.ds-seg button.on{background:var(--lg-selected, #1c2c40);border-color:var(--lg-selected-edge, #2b415c);color:var(--lg-text, #e6edf3)}.ds-seg button:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Navigation",
       "kind": "nav",
       "refersTo": "nav-tab",
-      "description": "Header tabs with an attention badge.",
-      "html": "<nav class=\"ds-nav\"><a>Ledger</a><a>Balances</a><a class=\"on\">Settings<span class=\"ds-badge\">2</span></a></nav>",
-      "css": ".ds-nav{display:flex;gap:6px;font:12px -apple-system,BlinkMacSystemFont,sans-serif}.ds-nav a{padding:5px 11px;border-radius:7px;color:#5a6675;cursor:pointer}.ds-nav a:hover{color:#8b98a9}.ds-nav a.on{background:#152233;color:#e6edf3}.ds-badge{display:inline-block;margin-left:6px;min-width:16px;padding:0 5px;border-radius:8px;background:#fbbf24;color:#0a0e14;font-size:10px;font-weight:700;line-height:16px;text-align:center}"
+      "description": "Header text tabs pushed right of the wordmark; the current tab gets the Selected Fill and edge; an attention count in an amber badge, read aloud as words.",
+      "html": "<nav class=\"ds-nav\"><a>Flow</a><a>Holdings</a><a class=\"on\" aria-current=\"page\" aria-label=\"Settings, 2 items need a look\">Settings<span class=\"ds-badge\" aria-hidden=\"true\">2</span></a></nav>",
+      "css": ".ds-nav{display:flex;flex-wrap:wrap;gap:6px;font:0.75rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif}.ds-nav a{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:7px;border:1px solid transparent;color:var(--lg-faint, #7a8696);cursor:pointer}.ds-nav a:hover{color:var(--lg-dim, #8b98a9)}.ds-nav a.on{background:var(--lg-selected, #1c2c40);border-color:var(--lg-selected-edge, #2b415c);color:var(--lg-text, #e6edf3);cursor:default}.ds-nav a:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}.ds-badge{display:inline-block;min-width:16px;padding:0 5px;border-radius:8px;background:var(--lg-amber, #fbbf24);color:var(--lg-bg, #0a0e14);font-size:0.6875rem;font-weight:700;line-height:1.45;text-align:center}"
     },
     {
       "name": "Account Chip",
       "kind": "chip",
       "refersTo": "account-chip-cash",
-      "description": "Account label tinted by kind: cash, credit, investment.",
-      "html": "<span class=\"ds-src cash\">Checking (0000)</span> <span class=\"ds-src credit\">Card (3333)</span> <span class=\"ds-src invest\">Brokerage (2222)</span>",
-      "css": ".ds-src{font:600 10.5px -apple-system,BlinkMacSystemFont,sans-serif;padding:1px 6px;border-radius:4px;border:1px solid}.ds-src.cash{color:#7dd3c0;border-color:#1f4a44;background:#0f2420}.ds-src.credit{color:#c4b5fd;border-color:#3b2f66;background:#1a1533}.ds-src.invest{color:#f5d38a;border-color:#4a3a1f;background:#241d0f}"
+      "description": "Account label at 12px/600 tinted by kind (cash, credit and loans, investment): ink text, same-hue dark edge, near-black wash; last four digits stay in the label.",
+      "html": "<span class=\"ds-src cash\">Checking (0000)</span> <span class=\"ds-src credit\">Card (3333)</span> <span class=\"ds-src invest\">Brokerage (2222)</span> <span class=\"ds-src more\">+2 more</span>",
+      "css": ".ds-src{font:600 0.75rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;padding:1px 6px;border-radius:4px;border:1px solid}.ds-src.cash{color:var(--lg-kind-cash, #7dd3c0);border-color:var(--lg-kind-cash-edge, #1f4a44);background:var(--lg-kind-cash-wash, #0f2420)}.ds-src.credit{color:var(--lg-kind-credit, #c4b5fd);border-color:var(--lg-kind-credit-edge, #3b2f66);background:var(--lg-kind-credit-wash, #1a1533)}.ds-src.invest{color:var(--lg-kind-invest, #f5d38a);border-color:var(--lg-kind-invest-edge, #4a3a1f);background:var(--lg-kind-invest-wash, #241d0f)}.ds-src.more{color:var(--lg-blue, #60a5fa);border-color:var(--lg-blue-edge, #1c3350);background:var(--lg-blue-wash, #0f1c2e);cursor:pointer}"
     },
     {
       "name": "Drill-down figure",
@@ -418,7 +424,7 @@
       "refersTo": "drill-down-figure",
       "description": "Flow: a figure with rows behind it. Dotted underline at rest; selected = fill + 2px teal inset ring + aria-pressed.",
       "html": "<button class=\"ds-pick\"><span>Groceries</span><span class=\"v\">−$338.40</span></button> <button class=\"ds-pick on\" aria-pressed=\"true\"><span>Rent</span><span class=\"v\">−$1,850.00</span></button>",
-      "css": ".ds-pick{font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:space-between;gap:12px;width:240px;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:#e6edf3;cursor:pointer}.ds-pick .v{font-variant-numeric:tabular-nums;text-decoration:underline dotted #5a6675;text-underline-offset:4px}.ds-pick:hover{background:#0e1620;box-shadow:inset 0 0 0 1px #1e2a38}.ds-pick.on{background:#1c2c40;box-shadow:inset 0 0 0 2px #2dd4bf}.ds-pick.on .v,.ds-pick:hover .v{text-decoration-color:#2dd4bf}.ds-pick:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+      "css": ".ds-pick{font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;display:flex;justify-content:space-between;gap:12px;width:240px;padding:7px 8px;border:0;border-radius:6px;background:transparent;color:var(--lg-text, #e6edf3);cursor:pointer}.ds-pick .v{font-variant-numeric:tabular-nums;text-decoration:underline dotted var(--lg-faint, #7a8696);text-underline-offset:4px}.ds-pick:hover{background:var(--lg-hover, #0e1620);box-shadow:inset 0 0 0 1px var(--lg-line, #1e2a38)}.ds-pick.on{background:var(--lg-selected, #1c2c40);box-shadow:inset 0 0 0 2px var(--lg-teal, #2dd4bf)}.ds-pick:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Filter chip",
@@ -426,7 +432,7 @@
       "refersTo": "filter-chip",
       "description": "Flow: what the table is drilled into, with the month and a Clear button.",
       "html": "<div class=\"ds-chip\"><span>Moved › Card payment<span class=\"m\"> · Oct 2026</span></span><button>Clear</button></div>",
-      "css": ".ds-chip{font:13px -apple-system,BlinkMacSystemFont,sans-serif;display:inline-flex;align-items:center;gap:10px;padding:3px 4px 3px 12px;background:#1c2c40;border:1px solid #2b415c;border-radius:999px;font-weight:600;color:#e6edf3}.ds-chip .m{font-weight:400;color:#8b98a9}.ds-chip button{font:12px -apple-system,sans-serif;padding:4px 10px;border-radius:999px;background:#111823;border:1px solid #5a6675;color:#8b98a9;cursor:pointer}"
+      "css": ".ds-chip{font:600 0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;display:inline-flex;align-items:center;gap:10px;padding:3px 4px 3px 12px;background:var(--lg-selected, #1c2c40);border:1px solid var(--lg-selected-edge, #2b415c);border-radius:999px;color:var(--lg-text, #e6edf3)}.ds-chip .m{font-weight:400;color:var(--lg-dim, #8b98a9)}.ds-chip button{font:0.75rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;padding:4px 10px;border-radius:999px;background:var(--lg-panel, #111823);border:1px solid var(--lg-faint, #7a8696);color:var(--lg-dim, #8b98a9);cursor:pointer}.ds-chip button:hover{color:var(--lg-text, #e6edf3);background:var(--lg-hover, #0e1620)}.ds-chip button:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Lane card",
@@ -434,23 +440,23 @@
       "refersTo": "lane-card",
       "description": "Flow: one of the three equal lanes (In / Out / Moved): title, figure, note, rows.",
       "html": "<section class=\"ds-lane\"><h2>Out</h2><p class=\"f\">−$2,870.27</p><p class=\"n\">Spending, after $25.99 of refunds.</p><ul><li><span>Rent</span><span>−$1,850.00</span></li><li><span>Home</span><span>−$475.52</span></li></ul></section>",
-      "css": ".ds-lane{font:13px -apple-system,BlinkMacSystemFont,sans-serif;width:260px;background:#111823;border:1px solid #1e2a38;border-radius:12px;padding:14px 16px 12px;color:#e6edf3}.ds-lane h2{margin:0;font-size:14px;font-weight:600}.ds-lane .f{margin:6px 0;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}.ds-lane .n{margin:0;font-size:12px;color:#8b98a9}.ds-lane ul{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid #1e2a38}.ds-lane li{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #172230;font-variant-numeric:tabular-nums}.ds-lane li:last-child{border-bottom:0}"
+      "css": ".ds-lane{font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;width:260px;background:var(--lg-panel, #111823);border:1px solid var(--lg-line, #1e2a38);border-radius:12px;padding:14px 16px 12px;color:var(--lg-text, #e6edf3)}.ds-lane h2{margin:0;font-size:0.875rem;font-weight:600}.ds-lane .f{margin:6px 0;font-size:1.25rem;font-weight:650;font-variant-numeric:tabular-nums}.ds-lane .n{margin:0;font-size:0.75rem;color:var(--lg-dim, #8b98a9)}.ds-lane ul{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid var(--lg-line, #1e2a38)}.ds-lane li{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--lg-divider, #172230);font-variant-numeric:tabular-nums}.ds-lane li:last-child{border-bottom:0}"
     },
     {
       "name": "Month strip",
       "kind": "nav",
       "refersTo": "month-strip",
-      "description": "Shared by Flow and Holdings: one button per month, roving tabindex. Flow adds an Out bar; Holdings shows month-end net worth.",
-      "html": "<nav class=\"ds-strip\" aria-label=\"Month\"><p>Net worth at month end</p><ol><li><button class=\"ds-m\" aria-pressed=\"false\"><b>Sep '26</b><span>$70.4k</span></button></li><li><button class=\"ds-m\" aria-pressed=\"false\" tabindex=\"-1\"><b>Oct '26</b><span>$72.1k</span></button></li><li><button class=\"ds-m on\" aria-pressed=\"true\"><b>Nov '26</b><span>$75.4k</span><i>so far</i></button></li></ol></nav>",
-      "css": ".ds-strip{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#8b98a9}.ds-strip p{margin:0 0 4px;font-size:12px}.ds-strip ol{list-style:none;margin:0;padding:0;display:flex;gap:4px}.ds-m{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:60px;padding:8px 6px 6px;background:transparent;border:1px solid transparent;border-radius:8px;color:#8b98a9;font:inherit;cursor:pointer}.ds-m:hover{background:#0e141d;border-color:#1e2a38}.ds-m.on{background:#1c2c40;border-color:#2b415c;color:#e6edf3}.ds-m b{font-size:11px;font-weight:600}.ds-m span{font-size:11px;font-variant-numeric:tabular-nums}.ds-m.on span{color:#e6edf3}.ds-m i{font-style:normal;font-size:11px;font-weight:600;color:#fbbf24}.ds-m:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+      "description": "One shared component (`MonthStrip.tsx`, `lg-strip`): one button per month with the short month and a short figure. Flow adds a 20px bar (Out, scaled to the largest month, from zero: months that spent about the same look about the same, because they did; the exact figure is on the button, so no cropped baseline to exaggerate small changes); Holdings shows net worth at month end with no bar (a level, not an amount to compare by height). The selected month gets the Selected Fill, its edge and a Field Teal bar. The strip is one Tab stop (roving tabindex): arrow keys, Home and End move and select. The month is App state, so both screens follow the same one; a month Holdings has no snapshots for stays selected and the screen says so.",
+      "html": "<nav class=\"ds-strip\" aria-label=\"Month\"><p>Out per month</p><ol><li><button class=\"ds-m\" aria-pressed=\"false\" tabindex=\"-1\"><span class=\"tr\"><span class=\"bar\" style=\"height:40px\"></span></span><b>Sep</b><span class=\"f\">$3.1k</span></button></li><li><button class=\"ds-m\" aria-pressed=\"false\" tabindex=\"-1\"><span class=\"tr\"><span class=\"bar\" style=\"height:36px\"></span></span><b>Oct</b><span class=\"f\">$2.9k</span></button></li><li><button class=\"ds-m on\" aria-pressed=\"true\"><span class=\"tr\"><span class=\"bar\" style=\"height:14px\"></span></span><b>Nov</b><span class=\"f\">$1.1k</span><i>so far</i></button></li></ol></nav>",
+      "css": ".ds-strip{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-dim, #8b98a9)}.ds-strip p{margin:0 0 4px;font-size:0.75rem}.ds-strip ol{list-style:none;margin:0;padding:4px 0 6px;display:flex;gap:4px}.ds-m{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:60px;padding:8px 6px 6px;background:transparent;border:1px solid transparent;border-radius:8px;color:var(--lg-dim, #8b98a9);font:inherit;cursor:pointer}.ds-m:hover{background:var(--lg-panel2, #0e141d);border-color:var(--lg-line, #1e2a38)}.ds-m.on{background:var(--lg-selected, #1c2c40);border-color:var(--lg-selected-edge, #2b415c);color:var(--lg-text, #e6edf3)}.ds-m .tr{height:48px;display:flex;align-items:flex-end}.ds-m .bar{width:20px;background:var(--lg-faint, #7a8696);border-radius:4px 4px 0 0}.ds-m:hover .bar{background:var(--lg-dim, #8b98a9)}.ds-m.on .bar{background:var(--lg-teal, #2dd4bf)}.ds-m b{font-size:0.6875rem;font-weight:600}.ds-m .f{font-size:0.6875rem;font-variant-numeric:tabular-nums}.ds-m.on .f{color:var(--lg-text, #e6edf3)}.ds-m i{margin-top:-2px;font-style:normal;font-size:0.6875rem;font-weight:600;color:var(--lg-dim, #8b98a9)}.ds-m:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     },
     {
       "name": "Change equation",
       "kind": "custom",
       "refersTo": "change-equation",
-      "description": "The Holdings focal moment, open on the page like Flow's headline pair: \"Net worth change = Markets + Added\" as three figures (34px for the change, 24px for the parts, tabular) joined by Text Dim operators, the change's percent beside it in Text Dim. Under it, the start and end in words, the definitions behind a closed `<details>` (\"What Markets and Added mean · show\", dotted Text Dim underline, the state spelled out rather than a caret), and a note when Markets can't cover every investment account (it names them and says their whole change is in Added). Below 480px the change takes its own line.",
-      "html": "<dl class=\"ds-eq\"><div class=\"main\"><dt>Net worth change</dt><dd>+$3,303.13<span>+4.6%</span></dd></div><div class=\"op\" aria-hidden=\"true\">=</div><div><dt>Markets</dt><dd>+$257.13</dd></div><div class=\"op\" aria-hidden=\"true\">+</div><div><dt>Added</dt><dd>+$3,046.00</dd></div></dl>",
-      "css": ".ds-eq{margin:0;display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:20px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3}.ds-eq dt{font-size:13px;color:#8b98a9}.ds-eq dd{margin:2px 0 0;font-size:24px;font-weight:650;line-height:1.15;font-variant-numeric:tabular-nums}.ds-eq .main dd{font-size:34px;letter-spacing:-.02em}.ds-eq dd span{margin-left:10px;font-size:15px;font-weight:600;color:#8b98a9}.ds-eq .op{font-size:22px;color:#8b98a9;padding-bottom:3px}"
+      "description": "The Holdings focal moment, open on the page like Flow's headline pair: \"Net worth change = Markets + Added\" as three figures (34px for the change, 24px for the parts, tabular) joined by Text Dim operators (each drawn with the term after it, so a narrow screen wraps \"= Markets\" and \"+ Added\" whole), the change's percent beside it in Text Dim. Under it, the start and end in words, the definitions behind a closed `<details>` (\"What Markets and Added mean · show\", dotted Text Dim underline, the state spelled out rather than a caret), and a note when Markets can't cover every investment account (it names them and says their whole change is in Added). Below 480px the change takes its own line.",
+      "html": "<dl class=\"ds-eq\"><div class=\"main\"><dt>Net worth change</dt><dd>+$3,303.13<span>+4.6%</span></dd></div><div class=\"term\" data-op=\"=\"><dt>Markets</dt><dd>+$257.13</dd></div><div class=\"term\" data-op=\"+\"><dt>Added</dt><dd>+$3,046.00</dd></div></dl>",
+      "css": ".ds-eq{margin:0;display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:20px;row-gap:8px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-text, #e6edf3)}.ds-eq dt{font-size:0.8125rem;color:var(--lg-dim, #8b98a9)}.ds-eq dd{margin:2px 0 0;font-size:1.5rem;font-weight:650;line-height:1.15;font-variant-numeric:tabular-nums}.ds-eq .main dd{font-size:2.125rem;letter-spacing:-.02em}.ds-eq dd span{margin-left:10px;font-size:0.9375rem;font-weight:600;color:var(--lg-dim, #8b98a9)}.ds-eq .term{display:grid;grid-template-columns:auto auto;column-gap:20px;align-items:end}.ds-eq .term::before{content:attr(data-op) / \"\";grid-row:1 / span 2;font-size:1.375rem;color:var(--lg-dim, #8b98a9);padding-bottom:3px}.ds-eq .term dt,.ds-eq .term dd{grid-column:2}"
     },
     {
       "name": "Breakdown sum",
@@ -458,15 +464,23 @@
       "refersTo": "stat-tile",
       "description": "Stat tiles joined by their signs: Cash + Invested − Credit owed − Loans = Net worth, owed amounts shown as positive magnitudes after a minus (Text Dim operators: the sign carries the meaning, so it needs AA), never in Out Red. The Net worth tile carries the Selected edge. Below 480px the tiles become a column sum, key left and value right.",
       "html": "<ol class=\"ds-sum\"><li><span class=\"t\"><span class=\"k\">Cash</span><span class=\"v\">$16,535.00</span></span></li><li><span class=\"o\">+</span><span class=\"t\"><span class=\"k\">Invested</span><span class=\"v\">$72,056.74</span><span class=\"s\">incl. $8,148.03 uninvested</span></span></li><li><span class=\"o\">−</span><span class=\"t\"><span class=\"k\">Credit owed</span><span class=\"v\">$578.00</span></span></li><li class=\"total\"><span class=\"o\">=</span><span class=\"t\"><span class=\"k\">Net worth</span><span class=\"v\">$88,013.74</span></span></li></ol>",
-      "css": ".ds-sum{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;row-gap:8px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3}.ds-sum li{display:flex;align-items:stretch}.ds-sum .o{align-self:center;width:22px;text-align:center;font-size:18px;color:#8b98a9}.ds-sum .t{display:flex;flex-direction:column;gap:2px;background:#0e141d;border:1px solid transparent;border-radius:10px;padding:12px 14px;min-width:120px}.ds-sum .total .t{border-color:#2b415c}.ds-sum .k{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#8b98a9}.ds-sum .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}.ds-sum .s{font-size:11.5px;color:#8b98a9}"
+      "css": ".ds-sum{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;row-gap:8px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-text, #e6edf3)}.ds-sum li{display:flex;align-items:stretch}.ds-sum .o{align-self:center;width:22px;text-align:center;font-size:1.125rem;color:var(--lg-dim, #8b98a9)}.ds-sum .t{display:flex;flex-direction:column;gap:2px;background:var(--lg-panel2, #0e141d);border:1px solid transparent;border-radius:10px;padding:12px 14px;min-width:120px}.ds-sum .total .t{border-color:var(--lg-selected-edge, #2b415c)}.ds-sum .k{font-size:0.6875rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--lg-dim, #8b98a9)}.ds-sum .v{font-size:1.25rem;font-weight:650;font-variant-numeric:tabular-nums}.ds-sum .s{font-size:0.7188rem;color:var(--lg-dim, #8b98a9);font-variant-numeric:tabular-nums}"
     },
     {
       "name": "Account row",
       "kind": "card",
       "refersTo": "card",
-      "description": "One card, one column header (Value / Change / Gain) and a fixed grid, so every group (Cash, Investments, Credit, Loans) lines up; the group total sits in the Value column. A stale sync is an Attention Amber note beside the account. Investment rows open their positions with a real button (\"Show 4 positions\" / \"Hide positions\", `aria-expanded`), never a caret (\"Show 3 positions and cash\" when it holds uninvested cash). Position rows never get a total: they don't sum to the account gain, but their values do sum to the account's value (uninvested cash is its own \"Cash · cash\" row). Position tables use fixed figure columns so every account's positions line up. A sold position says \"sold\" under Shares. - **Owed rows** speak in their own frame: Change reads \"up $763.14\" / \"down $410.00\" (what's owed), not the net-worth sign beside an \"owed\" value, which reads backwards. - **Reasons are visible, never `title`-only.** A missing figure is \"—\" with an sr-only reason, and the table carries one Text Dim footnote (\"— under Unrealized: the broker reports no cost basis\"). \"from first snapshot\" shows only on accounts that started later than the rest; when all did, the hero says it once. - **Range switches keep the old figures** dimmed (`hd-busy`, 0.55 opacity after 150ms, `aria-busy`) until the new ones land; only the newest request may write. \"Loading…\" (`role=status`) appears only on first load. - Below 720px figures move under the name with their own keys, and each position becomes two lines (holding and value, then labelled shares, gain and unrealized, the basis under the unrealized gain).",
+      "description": "One card, one column header (Value / Change / Gain) and a fixed grid, so every group (Cash, Investments, Credit, Loans) lines up; the group total sits in the Value column. A stale sync is an Attention Amber note beside the account. Investment rows open their positions with a real button (\"Show 4 positions\" / \"Hide positions\", `aria-expanded`), never a caret (\"Show 3 positions and cash\" when it holds uninvested cash). Position rows never get a total: they don't sum to the account gain, but their values do sum to the account's value (uninvested cash is its own \"Cash · cash\" row). Position tables use fixed figure columns so every account's positions line up. A sold position says \"sold\" under Shares. **Owed rows** speak in their own frame: Change reads \"up $763.14\" / \"down $410.00\" (what's owed), not the net-worth sign beside an \"owed\" value, which reads backwards. **Reasons are visible, never `title`-only.** A missing figure is \"—\" with an sr-only reason, and the table carries one Text Dim footnote (\"— under Unrealized: the broker reports no cost basis\"). \"from first snapshot\" shows only on accounts that started later than the rest; when all did, the hero says it once. **Range switches keep the old figures** dimmed (`hd-busy`, 0.55 opacity after 150ms, `aria-busy`) until the new ones land; only the newest request may write. \"Loading…\" (`role=status`) appears only on first load. Below 720px figures move under the name with their own keys, and each position becomes two lines (holding and value, then labelled shares, gain and unrealized, the basis under the unrealized gain).",
       "html": "<div class=\"ds-acc\"><div class=\"cols\" aria-hidden=\"true\"><span></span><span>Value</span><span>Change</span><span>Gain</span></div><div class=\"row\"><span class=\"n\"><span class=\"chip\">Brokerage (4444)</span><span class=\"d\">Demo Broker</span></span><span>$16,170.67</span><span>+$486.19</span><span class=\"up\">+$186.19</span></div><div class=\"pad\"><button aria-expanded=\"false\">Show 3 positions and cash</button></div><div class=\"row\"><span class=\"n\"><span class=\"chip\">Workplace 401(k) (6666)</span></span><span>$46,080.00</span><span>+$2,880.00</span><span class=\"d\">contributions unknown</span></div></div>",
-      "css": ".ds-acc{background:#111823;border:1px solid #1e2a38;border-radius:12px;font:13px -apple-system,BlinkMacSystemFont,sans-serif;color:#e6edf3;width:640px}.ds-acc .cols,.ds-acc .row{display:grid;grid-template-columns:minmax(0,1fr) 110px 110px 150px;column-gap:12px;align-items:center;padding:10px 16px;text-align:right;font-variant-numeric:tabular-nums}.ds-acc .cols{font-size:11px;color:#8b98a9;padding-bottom:0}.ds-acc .row+.pad,.ds-acc .pad+.row{border-top:0}.ds-acc .row{border-top:1px solid #172230}.ds-acc .n{display:flex;gap:8px;align-items:center;text-align:left;font-size:12px}.ds-acc .chip{font-size:10.5px;font-weight:600;padding:1px 6px;border-radius:4px;color:#f5d38a;border:1px solid #4a3a1f;background:#241d0f}.ds-acc .d{color:#8b98a9}.ds-acc .up{color:#34d399}.ds-acc .pad{padding:0 16px 10px}.ds-acc button{background:#111823;color:#8b98a9;border:1px solid #5a6675;border-radius:8px;padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}.ds-acc button:hover{background:#0e1620;color:#e6edf3}.ds-acc button[aria-expanded=true]{background:#1c2c40;border-color:#2b415c;color:#e6edf3}.ds-acc button:focus-visible{outline:2px solid #2dd4bf;outline-offset:2px}"
+      "css": ".ds-acc{background:var(--lg-panel, #111823);border:1px solid var(--lg-line, #1e2a38);border-radius:12px;font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-text, #e6edf3);width:640px}.ds-acc .cols,.ds-acc .row{display:grid;grid-template-columns:minmax(0,1fr) 110px 110px 150px;column-gap:12px;align-items:center;padding:10px 16px;text-align:right;font-variant-numeric:tabular-nums}.ds-acc .cols{font-size:0.6875rem;color:var(--lg-dim, #8b98a9);padding-bottom:0}.ds-acc .row{border-top:1px solid var(--lg-divider, #172230)}.ds-acc .n{display:flex;gap:8px;align-items:center;text-align:left;font-size:0.75rem}.ds-acc .chip{font-size:0.75rem;font-weight:600;padding:1px 6px;border-radius:4px;color:var(--lg-kind-invest, #f5d38a);border:1px solid var(--lg-kind-invest-edge, #4a3a1f);background:var(--lg-kind-invest-wash, #241d0f)}.ds-acc .d{color:var(--lg-dim, #8b98a9)}.ds-acc .up{color:var(--lg-green, #34d399)}.ds-acc .pad{padding:0 16px 10px}.ds-acc button{background:var(--lg-panel, #111823);color:var(--lg-dim, #8b98a9);border:1px solid var(--lg-faint, #7a8696);border-radius:8px;padding:5px 10px;font:inherit;font-size:0.75rem;cursor:pointer}.ds-acc button:hover{background:var(--lg-hover, #0e1620);color:var(--lg-text, #e6edf3)}.ds-acc button[aria-expanded=true]{background:var(--lg-selected, #1c2c40);border-color:var(--lg-selected-edge, #2b415c);color:var(--lg-text, #e6edf3)}.ds-acc button:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
+    },
+    {
+      "name": "Settings sections",
+      "kind": "custom",
+      "refersTo": "settings-sections",
+      "description": "Settings opens with one upkeep line from core (`GET /api/upkeep`, the same numbers as the nav badge): what needs a look in Attention Amber, the rest in Text Dim, \"Nothing needs you.\" when the total is zero. Each block is a foldable section: the title is a button with a chevron and `aria-expanded`; a one-line status sits beside it; the section's actions stay outside the button and work while it's closed. Sections that need nothing start closed. Row-level actions (nickname, hide, unlink) are small outline buttons: 28px tall, Text Faint edge, Text Dim label. Never Note Blue. Anything that can't be undone confirms on the page, never with a browser dialog. Unlink asks once inline. Clearing data is the Danger zone: a red-edged panel listing what's lost (counts from core), a checkbox naming what can't be fetched again, then the red button.",
+      "html": "<div class=\"ds-st\"><p class=\"up\"><span class=\"warn\">1 connection needs a look</span> · 3 card payments to review</p><section><h2><button class=\"fold\" aria-expanded=\"true\"><svg class=\"chev\" aria-hidden=\"true\" viewBox=\"0 0 16 16\" width=\"12\" height=\"12\"><path d=\"M4 6l4 4 4-4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>Connections</button><span class=\"status\">2 banks · 1 needs reconnect</span></h2><div class=\"row\"><span>Checking (0000)</span><span class=\"acts\"><button class=\"mini\">Nickname</button><button class=\"mini\">Hide</button><button class=\"mini\">Unlink</button></span></div></section><section class=\"danger\"><h2><button class=\"fold\" aria-expanded=\"true\"><svg class=\"chev\" aria-hidden=\"true\" viewBox=\"0 0 16 16\" width=\"12\" height=\"12\"><path d=\"M4 6l4 4 4-4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>Danger zone</button></h2><div class=\"confirm\"><h3>Clear all data?</h3><ul><li>1,204 transactions</li><li class=\"lost\">History older than the bank's window can't be fetched again</li></ul><label class=\"ack\"><input type=\"checkbox\"> I understand older history is gone for good</label><button class=\"dz\">Clear data</button></div></section></div>",
+      "css": ".ds-st{font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-text, #e6edf3);display:flex;flex-direction:column;gap:28px;width:560px}.ds-st .up{margin:0;color:var(--lg-dim, #8b98a9)}.ds-st .warn{color:var(--lg-amber, #fbbf24)}.ds-st section+section{border-top:1px solid var(--lg-line, #1e2a38);padding-top:22px}.ds-st h2{margin:0;display:flex;align-items:center;gap:8px;font-size:1rem;font-weight:600}.ds-st .fold{font:inherit;display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:0 6px 0 0;background:none;border:0;color:var(--lg-text, #e6edf3);cursor:pointer}.ds-st .chev{flex:none;color:var(--lg-faint, #7a8696)}.ds-st .fold:hover .chev{color:var(--lg-text, #e6edf3)}.ds-st .fold:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}.ds-st .status{flex:1;font-size:0.75rem;font-weight:400;color:var(--lg-faint, #7a8696)}.ds-st .danger .fold{color:var(--lg-red, #f87171)}.ds-st .row{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:10px 0;border-top:1px solid var(--lg-divider, #172230)}.ds-st .acts{display:flex;gap:6px}.ds-st .mini{font:inherit;font-size:0.75rem;min-height:28px;padding:0 10px;background:none;border:1px solid var(--lg-faint, #7a8696);border-radius:6px;color:var(--lg-dim, #8b98a9);cursor:pointer}.ds-st .mini:hover{color:var(--lg-text, #e6edf3);background:var(--lg-hover, #0e1620)}.ds-st .mini:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}.ds-st .confirm{margin-top:14px;padding:14px 16px;border:1px solid var(--lg-red-edge, #6b2b2f);border-radius:10px;background:var(--lg-panel, #111823)}.ds-st .confirm h3{margin:0 0 8px;font-size:0.875rem;font-weight:600}.ds-st .confirm ul{margin:0 0 12px;padding-left:18px;color:var(--lg-dim, #8b98a9);line-height:1.6}.ds-st .lost{color:var(--lg-text, #e6edf3)}.ds-st .ack{display:flex;align-items:flex-start;gap:8px;margin-bottom:12px;cursor:pointer}.ds-st .ack input{width:18px;height:18px;margin:1px 0 0;accent-color:var(--lg-red, #f87171)}.ds-st .dz{font:inherit;line-height:1.2;padding:8px 14px;border-radius:8px;color:var(--lg-red, #f87171);background:var(--lg-red-wash, #2a1416);border:1px solid var(--lg-red-edge, #6b2b2f);cursor:pointer}.ds-st .dz:hover{border-color:var(--lg-red, #f87171)}.ds-st .dz:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}"
     }
   ],
   "narrative": {
@@ -507,10 +521,10 @@
       "**Do** give every control a visible border and a pressed and focused state, so it reads as pressable on the dark page. Form fields and small outline buttons use Text Faint for that edge: Hairline is about 1.3:1, and a control's boundary needs 3:1 (WCAG 1.4.11).",
       "**Do** put focus somewhere sensible after an action removes the control that had it, and keep an Undo toast up until it's used or dismissed.",
       "**Do** put one Key button per action group, at most.",
-      "**Do** mirror token values into constants when SVG presentation attributes can't read CSS variables (as `Holdings.tsx` does), and keep them in sync."
+      "**Do** read token values with `getComputedStyle` when SVG presentation attributes can't take CSS variables (as `Holdings.tsx`'s charts do), never copy the hex."
     ],
     "donts": [
-      "**Don't** use the legacy `theme.css` palette (`--bg`, `--card`, `--accent`, the teal-to-blue gradient) for new work. Only the auth gate, toast and a few fallbacks still read it.",
+      "**Don't** write a hex value outside `:root`, or a font size in px: sizes are rem (13px = 0.8125rem) so text follows the browser's font-size setting. The px figures in this file are at the 16px default.",
       "**Don't** add drop shadows to content surfaces.",
       "**Don't** use colour for decoration; see the Meaning-Only Rule.",
       "**Don't** signal in versus out by colour alone.",

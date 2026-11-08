@@ -40,11 +40,13 @@ names).
   queue for review.
 - **Categorization** — a deterministic rule engine that *learns rules* from your
   inline corrections, with an optional LLM pass for merchants rules can't place.
-- **Balances & investments** — net worth across cash, investment and credit
-  accounts, with a daily trend from per-sync snapshots. With Plaid
-  Investments: every position (quantity, price, cost basis, gain), uninvested
-  and idle cash, and an archive of investment transactions (buys, sells,
-  dividends, contributions), all readable from the CLI and JSON API.
+- **Holdings** — net worth across cash, investment, credit and loan accounts
+  as one signed breakdown, and its change over a month or range split into
+  Markets (gain net of contributions) and Added, from per-sync snapshots.
+  With Plaid Investments: every position (quantity, price, cost basis,
+  period and unrealized gain, combined across accounts on request), idle
+  cash, and an archive of investment transactions, all readable from the
+  CLI and JSON API.
 - **Durable history** — Plaid serves a limited window per pull (up to ~24 months
   on first sync); the local database accumulates indefinitely, so trends and
   subscription detection sharpen over time.

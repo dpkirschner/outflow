@@ -550,6 +550,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }
     }
 
@@ -1634,6 +1635,7 @@ mod position_tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }
     }
 
@@ -2083,6 +2085,7 @@ mod uninvested_tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }
     }
     fn pos(ts: i64, a: &str, cents: i64) -> HoldingSnapshot {

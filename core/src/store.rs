@@ -87,6 +87,17 @@ pub enum Unaccept {
     NotAccepted(MatchStatus),
 }
 
+/// What `Store::set_account_kind` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetKind {
+    Done,
+    NotFound,
+    /// Nothing changed: an asset can't become a debt or back.
+    CrossesSign {
+        bank: AccountKind,
+    },
+}
+
 /// What `Store::undo_manual_category` did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CategoryUndone {
@@ -364,7 +375,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     source TEXT NOT NULL DEFAULT 'plaid',
     nickname TEXT,
     hidden INTEGER NOT NULL DEFAULT 0,
-    item_id TEXT
+    item_id TEXT,
+    kind_override TEXT
 );
 CREATE TABLE IF NOT EXISTS transactions (
     id TEXT PRIMARY KEY,
@@ -522,7 +534,9 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// v14: accounts.item_id (the connection, filled at the next sync);
 /// txn_matches.retired_by + each leg's flag before the accept, so unaccept
 /// restores exactly (pairs accepted earlier have none: best effort).
-const SCHEMA_VERSION: i64 = 14;
+/// v15: accounts.kind_override (the owner's account type; `kind` stays the
+/// bank's).
+const SCHEMA_VERSION: i64 = 15;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -649,6 +663,9 @@ impl Store {
             ] {
                 self.add_column_if_missing(table, column, decl)?;
             }
+        }
+        if version < 15 {
+            self.add_column_if_missing("accounts", "kind_override", "TEXT")?;
         }
         self.conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -861,7 +878,9 @@ impl Store {
 
     fn query_accounts(&self, filter: &str) -> rusqlite::Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(&format!(
-            "SELECT id, org, name, kind, balance_cents, currency, last_synced, source, nickname, hidden, item_id
+            "SELECT id, org, name, COALESCE(kind_override, kind), balance_cents, currency,
+                    last_synced, source, nickname, hidden, item_id,
+                    CASE WHEN kind_override IS NULL THEN NULL ELSE kind END
              FROM accounts {filter} ORDER BY name"
         ))?;
         let rows = stmt.query_map([], |r| {
@@ -878,6 +897,9 @@ impl Store {
                 nickname: r.get(8)?,
                 hidden: r.get(9)?,
                 item_id: r.get(10)?,
+                kind_from_bank: r
+                    .get::<_, Option<String>>(11)?
+                    .map(|k| AccountKind::from_str(&k)),
             })
         })?;
         rows.collect()
@@ -1111,6 +1133,125 @@ impl Store {
         Ok(CategoryEdit { rule_id, undo })
     }
 
+    /// Put a moved row in a Moved group (Invest, Save, LoanPaydown or
+    /// Transfer = between own accounts) and teach it: the merchant's exact
+    /// flag rule (the one `apply_flags` matches first) is re-pointed or added,
+    /// and the merchant's other rows get now what the next `apply_flags`
+    /// pass would give them. Every row changed is recorded for
+    /// `undo_moved_group`. One transaction. None = no such row.
+    pub fn set_moved_group(
+        &self,
+        txn_id: &str,
+        flag: TxnFlag,
+    ) -> rusqlite::Result<Option<GroupEdit>> {
+        let Some(t) = self.transaction(txn_id)? else {
+            return Ok(None);
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let mut rows = Vec::new();
+        let mut set = |id: &str, prev: TxnFlag| -> rusqlite::Result<()> {
+            let overridden: bool = tx.query_row(
+                "SELECT flag_overridden FROM transactions WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )?;
+            tx.execute(
+                "UPDATE transactions SET flag = ?1, flag_overridden = 1 WHERE id = ?2",
+                params![flag.as_str(), id],
+            )?;
+            rows.push(FlagPrior {
+                txn_id: id.to_string(),
+                flag: prev,
+                overridden,
+            });
+            Ok(())
+        };
+        if t.flag != flag {
+            set(&t.id, t.flag)?;
+        }
+        let pattern = normalize_payee(t.merchant());
+        let mut rule = None;
+        let mut rule_id = None;
+        if !pattern.is_empty() {
+            let existing: Option<(i64, String)> = tx
+                .query_row(
+                    "SELECT id, flag FROM flag_rules
+                     WHERE match_type = 'exact' AND pattern = ?1 ORDER BY id LIMIT 1",
+                    params![pattern],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            match existing {
+                Some((id, old)) if old == flag.as_str() => rule_id = Some(id),
+                Some((id, old)) => {
+                    tx.execute(
+                        "UPDATE flag_rules SET flag = ?1 WHERE id = ?2",
+                        params![flag.as_str(), id],
+                    )?;
+                    rule_id = Some(id);
+                    rule = Some(FlagRuleUndo {
+                        id,
+                        prev_flag: TxnFlag::from_str(&old),
+                    });
+                }
+                None => {
+                    let id = self.add_flag_rule(MatchType::Exact, &pattern, flag)?;
+                    rule_id = Some(id);
+                    rule = Some(FlagRuleUndo {
+                        id,
+                        prev_flag: None,
+                    });
+                }
+            }
+            // The merchant's other rows, as `apply_flags` would treat them.
+            for u in self.all_transactions_including_hidden()? {
+                if u.id == t.id || normalize_payee(u.merchant()) != pattern {
+                    continue;
+                }
+                let downgrade = flag == TxnFlag::Transfer && u.flag.is_saving();
+                if u.flag != flag && !downgrade {
+                    set(&u.id, u.flag)?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(Some(GroupEdit {
+            changed: rows.len(),
+            rule_id,
+            undo: GroupUndo { flag, rows, rule },
+        }))
+    }
+
+    /// Reverse one `set_moved_group` edit: each row it changed gets its
+    /// previous flag back if it still has the edit's, and the rule is deleted
+    /// (if the edit created it) or re-pointed back, if it still says the
+    /// edit's flag. Returns the rows restored. One transaction.
+    pub fn undo_moved_group(&self, undo: &GroupUndo) -> rusqlite::Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        for r in &undo.rows {
+            n += tx.execute(
+                "UPDATE transactions SET flag = ?1, flag_overridden = ?2
+                 WHERE id = ?3 AND flag = ?4",
+                params![r.flag.as_str(), r.overridden, r.txn_id, undo.flag.as_str()],
+            )?;
+        }
+        if let Some(rule) = &undo.rule {
+            match rule.prev_flag {
+                None => tx.execute(
+                    "DELETE FROM flag_rules WHERE id = ?1 AND flag = ?2",
+                    params![rule.id, undo.flag.as_str()],
+                )?,
+                Some(prev) => tx.execute(
+                    "UPDATE flag_rules SET flag = ?1 WHERE id = ?2 AND flag = ?3",
+                    params![prev.as_str(), rule.id, undo.flag.as_str()],
+                )?,
+            };
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     /// The first exact category rule on `pattern`: `(id, category)`.
     fn exact_rule(&self, pattern: &str) -> rusqlite::Result<Option<(i64, String)>> {
         let mut stmt = self.conn.prepare(
@@ -1285,6 +1426,41 @@ impl Store {
             params![hidden, id],
         )?;
         Ok(n > 0)
+    }
+
+    /// Set the account's type, overriding what the bank reports; `None`, or
+    /// the bank's own type, clears the override. Survives re-sync. Only
+    /// within one sign convention: an asset type (checking, savings,
+    /// investment, other) can't become a debt (credit, loan) or back, since
+    /// the stored balance's sign follows the bank's type.
+    pub fn set_account_kind(
+        &self,
+        id: &str,
+        kind: Option<AccountKind>,
+    ) -> rusqlite::Result<SetKind> {
+        let bank: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT kind FROM accounts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(bank) = bank.map(|k| AccountKind::from_str(&k)) else {
+            return Ok(SetKind::NotFound);
+        };
+        let debt = |k: AccountKind| matches!(k, AccountKind::Credit | AccountKind::Loan);
+        if let Some(k) = kind {
+            if debt(k) != debt(bank) {
+                return Ok(SetKind::CrossesSign { bank });
+            }
+        }
+        let over = kind.filter(|k| *k != bank).map(|k| k.as_str());
+        self.conn.execute(
+            "UPDATE accounts SET kind_override = ?1 WHERE id = ?2",
+            params![over, id],
+        )?;
+        Ok(SetKind::Done)
     }
 
     /// Ids of hidden accounts.
@@ -1594,7 +1770,7 @@ impl Store {
     /// suppressing a CardPayment with no offsetting charges present.
     pub fn has_credit_account(&self) -> rusqlite::Result<bool> {
         let n: i64 = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM accounts WHERE kind = ?1)",
+            "SELECT EXISTS(SELECT 1 FROM accounts WHERE COALESCE(kind_override, kind) = ?1)",
             params![AccountKind::Credit.as_str()],
             |r| r.get(0),
         )?;
@@ -2091,6 +2267,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         let got = s.accounts().unwrap();
@@ -2595,6 +2772,102 @@ mod tests {
         assert_eq!(status(&s, p), MatchStatus::Proposed);
     }
 
+    fn account_of(id: &str, kind: AccountKind) -> Account {
+        Account {
+            id: id.into(),
+            org: "Bank".into(),
+            name: "Account".into(),
+            kind,
+            balance: Money::from_cents(100),
+            currency: "USD".into(),
+            last_synced: 0,
+            source: default_source(),
+            nickname: None,
+            hidden: false,
+            item_id: None,
+            kind_from_bank: None,
+        }
+    }
+
+    #[test]
+    fn the_owners_account_type_wins_and_survives_a_sync() {
+        let s = Store::open_in_memory().unwrap();
+        let a = account_of("hysa", AccountKind::Checking);
+        s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
+        assert_eq!(
+            s.set_account_kind("hysa", Some(AccountKind::Savings))
+                .unwrap(),
+            SetKind::Done
+        );
+        s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
+        let got = &s.accounts().unwrap()[0];
+        assert_eq!(got.kind, AccountKind::Savings);
+        assert_eq!(got.kind_from_bank, Some(AccountKind::Checking));
+        assert!(!s.has_credit_account().unwrap());
+
+        // An asset can't become a debt (the balance sign follows the bank).
+        assert_eq!(
+            s.set_account_kind("hysa", Some(AccountKind::Credit))
+                .unwrap(),
+            SetKind::CrossesSign {
+                bank: AccountKind::Checking
+            }
+        );
+        assert_eq!(s.set_account_kind("nope", None).unwrap(), SetKind::NotFound);
+        // Back to the bank's type clears the override.
+        s.set_account_kind("hysa", Some(AccountKind::Checking))
+            .unwrap();
+        let got = &s.accounts().unwrap()[0];
+        assert_eq!(got.kind, AccountKind::Checking);
+        assert_eq!(got.kind_from_bank, None);
+    }
+
+    #[test]
+    fn a_moved_group_teaches_the_merchant_and_undoes_whole() {
+        let s = Store::open_in_memory().unwrap();
+        let mut rows = vec![
+            txn("a", "chk", 100, -10_000, false),
+            txn("b", "chk", 200, -20_000, false),
+            txn("c", "chk", 300, -5_000, false),
+            txn("other", "chk", 300, -5_000, false),
+        ];
+        for r in rows.iter_mut().take(3) {
+            r.payee = Some("ACME INVEST XFER".into());
+            r.flag = TxnFlag::Invest;
+        }
+        rows[2].flag = TxnFlag::Transfer;
+        rows[3].payee = Some("Coffee".into());
+        s.upsert_transactions(&rows).unwrap();
+        let flag = |id: &str| s.transaction(id).unwrap().unwrap().flag;
+
+        let edit = s.set_moved_group("a", TxnFlag::Save).unwrap().unwrap();
+        assert_eq!(edit.changed, 3);
+        assert!(edit.rule_id.is_some());
+        assert_eq!([flag("a"), flag("b"), flag("c")], [TxnFlag::Save; 3]);
+        assert_eq!(flag("other"), TxnFlag::Spending);
+        // A future row from the merchant follows the rule.
+        let mut d = txn("d", "chk", 400, -1_000, false);
+        d.payee = Some("ACME INVEST XFER".into());
+        s.upsert_transactions(&[d]).unwrap();
+        s.apply_flags().unwrap();
+        assert_eq!(flag("d"), TxnFlag::Save);
+
+        // Undo restores the three rows and drops the rule it created; the
+        // row the rule caught later keeps its flag.
+        assert_eq!(s.undo_moved_group(&edit.undo).unwrap(), 3);
+        assert_eq!(flag("a"), TxnFlag::Invest);
+        assert_eq!(flag("b"), TxnFlag::Invest);
+        assert_eq!(flag("c"), TxnFlag::Transfer);
+        assert!(s.flag_rules().unwrap().is_empty());
+        assert_eq!(flag("d"), TxnFlag::Save);
+
+        // Between doesn't pull a row out of a finer group.
+        let edit = s.set_moved_group("c", TxnFlag::Transfer).unwrap().unwrap();
+        assert_eq!(edit.changed, 0);
+        assert_eq!(flag("a"), TxnFlag::Invest);
+        assert!(s.set_moved_group("nope", TxnFlag::Save).unwrap().is_none());
+    }
+
     #[test]
     fn a_fixture_pull_keeps_the_connection_a_sync_recorded() {
         let s = Store::open_in_memory().unwrap();
@@ -2610,6 +2883,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: Some("item1".into()),
+            kind_from_bank: None,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         a.item_id = None;
@@ -2706,6 +2980,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
         s.set_account_nickname("acct1", Some("Travel Card")).unwrap();
@@ -2733,6 +3008,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }
     }
 
@@ -3530,6 +3806,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }])
         .unwrap();
         assert!(s.has_credit_account().unwrap());

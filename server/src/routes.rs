@@ -755,6 +755,89 @@ async fn set_account_nickname(
     .map(Json)
 }
 
+#[derive(Deserialize)]
+struct GroupBody {
+    /// "Invest" | "Save" | "LoanPaydown" | "Transfer" (between own accounts).
+    flag: TxnFlag,
+}
+
+/// Put a moved row in a Moved group and teach the merchant
+/// (`Store::set_moved_group`). 400 for a flag that isn't a Moved group, 404
+/// for an unknown row.
+async fn set_group(
+    State(state): State<AppState>,
+    Path(txn_id): Path<String>,
+    Json(body): Json<GroupBody>,
+) -> ApiResult<outflow_core::GroupEdit> {
+    if !matches!(
+        body.flag,
+        TxnFlag::Invest | TxnFlag::Save | TxnFlag::LoanPaydown | TxnFlag::Transfer
+    ) {
+        return Err(ApiError::bad_request(format!(
+            "{:?} isn't a Moved group",
+            body.flag
+        )));
+    }
+    let id = txn_id.clone();
+    let edit = with_store(&state, move |s| {
+        s.set_moved_group(&id, body.flag).map_err(|e| e.to_string())
+    })
+    .await?;
+    edit.map(Json).ok_or_else(|| {
+        ApiError(
+            axum::http::StatusCode::NOT_FOUND,
+            format!("no transaction {txn_id}"),
+        )
+    })
+}
+
+/// Reverse a group edit with the token it returned; returns the rows put
+/// back (rows changed since keep their flag).
+async fn undo_group(
+    State(state): State<AppState>,
+    Json(undo): Json<outflow_core::GroupUndo>,
+) -> ApiResult<usize> {
+    with_store(&state, move |s| {
+        s.undo_moved_group(&undo).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct KindBody {
+    /// "Checking" | "Savings" | "Investment" | "Other" | "Credit" | "Loan";
+    /// null = the bank's type.
+    kind: Option<outflow_core::AccountKind>,
+}
+
+/// Set an account's type over the bank's (`Store::set_account_kind`). 404
+/// unknown account, 400 when it would turn an asset into a debt or back.
+async fn set_account_kind(
+    State(state): State<AppState>,
+    Path(account_id): Path<String>,
+    Json(body): Json<KindBody>,
+) -> ApiResult<()> {
+    use outflow_core::SetKind;
+    let id = account_id.clone();
+    let done = with_store(&state, move |s| {
+        s.set_account_kind(&id, body.kind)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    match done {
+        SetKind::Done => Ok(Json(())),
+        SetKind::NotFound => Err(ApiError(
+            axum::http::StatusCode::NOT_FOUND,
+            format!("no account {account_id}"),
+        )),
+        SetKind::CrossesSign { bank } => Err(ApiError::bad_request(format!(
+            "the bank reports this account as {}: it can't change between an asset and a debt",
+            bank.as_str()
+        ))),
+    }
+}
+
 async fn apply_flags(State(state): State<AppState>) -> ApiResult<usize> {
     with_store(&state, |s| s.apply_flags().map_err(|e| e.to_string()))
         .await
@@ -900,6 +983,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/txn/{txn_id}/flag", post(set_flag))
         .route("/account/{account_id}/nickname", post(set_account_nickname))
         .route("/account/{account_id}/hidden", post(set_account_hidden))
+        .route("/account/{account_id}/kind", post(set_account_kind))
+        .route("/txn/{txn_id}/group", post(set_group))
+        .route("/txn/{txn_id}/group/undo", post(undo_group))
         .route("/apply_flags", post(apply_flags))
         .route("/pull", post(pull))
         .route("/reset_data", post(reset_data))
@@ -1000,6 +1086,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         };
         store
             .upsert_accounts(&[acct("acct-1"), acct("acct-2")])
@@ -1144,6 +1231,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_group_edit_regroups_the_merchant_and_undoes() {
+        let app = app_with_two_accounts();
+        let (st, _) = post_json(
+            app.clone(),
+            "/txn/t1/group",
+            serde_json::json!({ "flag": "Spending" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "Spending isn't a Moved group");
+        let (st, edit) = post_json(
+            app.clone(),
+            "/txn/t1/group",
+            serde_json::json!({ "flag": "Save" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(edit["changed"], 1);
+        assert_eq!(edit["undo"]["rows"][0]["flag"], "Spending");
+        let (st, n) = post_json(app.clone(), "/txn/t1/group/undo", edit["undo"].clone()).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(n, 1);
+        let (st, _) = post_json(
+            app,
+            "/txn/nope/group",
+            serde_json::json!({ "flag": "Save" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn an_account_type_can_change_within_its_sign() {
+        let app = app_with_two_accounts();
+        let (st, _) = post_json(
+            app.clone(),
+            "/account/acct-2/kind",
+            serde_json::json!({ "kind": "Savings" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, accts) = get_json(app.clone(), "/accounts").await;
+        let a2 = accts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == "acct-2")
+            .unwrap()
+            .clone();
+        assert_eq!(a2["kind"], "Savings");
+        assert_eq!(a2["kind_from_bank"], "Checking");
+        let (st, _) = post_json(
+            app.clone(),
+            "/account/acct-2/kind",
+            serde_json::json!({ "kind": "Credit" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        let (st, _) = post_json(
+            app,
+            "/account/nope/kind",
+            serde_json::json!({ "kind": null }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn reset_preview_counts_without_deleting() {
         let app = app_with_two_accounts();
         let (status, v) = get_json(app.clone(), "/reset/preview").await;
@@ -1178,6 +1332,7 @@ mod tests {
                 nickname: None,
                 hidden: false,
                 item_id: None,
+                kind_from_bank: None,
             }])
             .unwrap();
         let sec = Security {
@@ -1248,6 +1403,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         };
         let accounts = [
             acct("chk", AccountKind::Checking, 2_000_00),
@@ -1548,6 +1704,7 @@ mod tests {
                 nickname: None,
                 hidden: false,
                 item_id: None,
+                kind_from_bank: None,
             }])
             .unwrap();
         let mut out = txn("sav-out", -5000, "To Savings");
@@ -1766,6 +1923,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }];
         store.upsert_accounts(&accounts).unwrap();
         let secs = [Security {
@@ -1829,6 +1987,7 @@ mod tests {
                 nickname: None,
                 hidden: false,
                 item_id: None,
+                kind_from_bank: None,
             }])
             .unwrap();
         let t = |id: &str, date: &str| InvestmentTxn {

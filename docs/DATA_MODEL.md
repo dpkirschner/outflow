@@ -87,11 +87,11 @@ keys off. Plaid calendar dates (`YYYY-MM-DD`) are anchored at **local noon** so
 they never straddle a month boundary. All enums have `as_str`/`from_str` for
 string round-tripping in SQLite.
 
-## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 14)
+## SQLite schema (`core/src/store.rs`, SCHEMA_VERSION = 15)
 
 | Table | Role | Key notes |
 |---|---|---|
-| `accounts` | latest account snapshot | upsert by `id`; `source` column; user-owned `nickname` + `hidden` (never overwritten by a re-pull); `item_id` = the Plaid connection it last synced through (set by the sync, kept by a fixture pull; NULL until a v14+ sync) |
+| `accounts` | latest account snapshot | upsert by `id`; `source` column; user-owned `nickname` + `hidden` (never overwritten by a re-pull); `item_id` = the Plaid connection it last synced through (set by the sync, kept by a fixture pull; NULL until a v14+ sync); `kind` = the bank's type, `kind_override` = the owner's (v15; reads return `COALESCE(kind_override, kind)` as `Account.kind`, with `kind_from_bank` set when overridden; only within assets or within debts, since the balance sign follows the bank's type) |
 | `transactions` | the durable archive | grows past the providers' pull windows; this is the permanent history; `source` column; `pfc_primary`/`pfc_detailed` (Plaid's category, refreshed on re-sync) and `flag_overridden` (0/1, see below) |
 | `category_rules` | learned/manual rules | `match_type` (exact/contains), `pattern` (lowercased), `category` |
 | `flag_rules` | learned/manual suppression rules | same shape but carries a `flag` — an independent axis |
@@ -123,7 +123,8 @@ once from `raw` (`backfill_pfc_columns`; a row is marked overridden when its
 stored flag differs from what its category gives, so no effective flag
 changes), v13 data-only: `merchant_overrides` keeps one mark — the ledger's
 `dismissed` became `ignored`, `committed`/`kept` rows were deleted, v14
-`accounts.item_id` + `txn_matches.retired_by` and the legs' prior flags. The v10
+`accounts.item_id` + `txn_matches.retired_by` and the legs' prior flags, v15
+`accounts.kind_override`. The v10
 and v11 backfills still parse `raw`; nothing after v12 does.
 Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.

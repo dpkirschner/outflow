@@ -94,6 +94,7 @@ mod tests {
             nickname: None,
             hidden: false,
             item_id: None,
+            kind_from_bank: None,
         }
     }
 

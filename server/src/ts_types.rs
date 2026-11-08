@@ -59,6 +59,10 @@ fn render() -> String {
                 CategoryEdit,
                 CategoryUndo,
                 RuleUndo,
+                GroupEdit,
+                GroupUndo,
+                FlagPrior,
+                FlagRuleUndo,
             ]
         );
     }

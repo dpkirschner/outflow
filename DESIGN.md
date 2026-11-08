@@ -426,8 +426,11 @@ those capsules.
 
 ### Transaction table (Flow)
 - Sortable headers are buttons with `aria-sort`; amounts are signed and
-  tabular, In amounts also In Green. Moved rows carry a "Moved · group" tag
-  in place of a category; the name and amount stay full Text, never green.
+  tabular, In amounts also In Green. Moved rows carry their group in place of a
+  category, as a select dressed as the tag (CSS triangle caret, 24px tall):
+  picking a group teaches the merchant, with one Undo for every row it
+  changed; a card payment's tag stays plain (its match decides it). The
+  name and amount stay full Text, never green.
   Category is a dashed-underline control that
   opens a select: a pointer pick saves, a keyboard pick saves on Enter or
   on leaving the field, Escape cancels. The row action sits at the end of

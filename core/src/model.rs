@@ -76,6 +76,11 @@ pub struct Account {
     /// their next sync. Settings lists accounts under their connection by it.
     #[serde(default)]
     pub item_id: Option<String>,
+    /// The type the bank reports, when the owner changed it
+    /// (`Store::set_account_kind`): `kind` is then the owner's choice. None =
+    /// `kind` is the bank's. Survives re-sync, like `nickname`.
+    #[serde(default)]
+    pub kind_from_bank: Option<AccountKind>,
 }
 
 /// One instrument from `/investments/holdings/get` (fund, stock, cash sweep).
@@ -452,6 +457,49 @@ pub struct RuleUndo {
     /// None: the edit created the rule, undo deletes it. Some: the edit
     /// re-pointed the merchant's existing rule, undo puts this back.
     pub prev_category: Option<String>,
+}
+
+/// What `Store::set_moved_group` did: how many rows it regrouped (the
+/// row picked plus the merchant's other rows the learned rule now covers),
+/// and the token that reverses exactly this edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct GroupEdit {
+    pub changed: usize,
+    /// The merchant's exact flag rule (new or re-pointed); None for a row
+    /// with no merchant.
+    pub rule_id: Option<i64>,
+    /// Send back to `POST /txn/{txn_id}/group/undo` as is.
+    pub undo: GroupUndo,
+}
+
+/// The state one group edit replaced. Undo restores each row only while it
+/// still has the edit's flag, and the rule only while it still says it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct GroupUndo {
+    pub flag: TxnFlag,
+    pub rows: Vec<FlagPrior>,
+    pub rule: Option<FlagRuleUndo>,
+}
+
+/// A row's flag before a group edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct FlagPrior {
+    pub txn_id: String,
+    pub flag: TxnFlag,
+    pub overridden: bool,
+}
+
+/// The rule half of a group edit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct FlagRuleUndo {
+    pub id: i64,
+    /// None: the edit created the rule, undo deletes it. Some: it re-pointed
+    /// the merchant's existing rule, undo puts this back.
+    pub prev_flag: Option<TxnFlag>,
 }
 
 /// One row of the sync history (`sync_log`).

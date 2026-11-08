@@ -15,6 +15,7 @@ import type {
   DayTotals,
   ExchangeResult,
   FlowMonth,
+  GroupEdit,
   MatchView,
   MerchantSpend,
   NetWorthChange,
@@ -43,7 +44,8 @@ export const account: Account = {
   "source": "plaid",
   "nickname": "Test card",
   "hidden": false,
-  "item_id": null
+  "item_id": null,
+  "kind_from_bank": null
 };
 
 export const transaction: Transaction = {
@@ -314,7 +316,8 @@ export const balancesView: BalancesView = {
             "source": "plaid",
             "nickname": null,
             "hidden": false,
-            "item_id": null
+            "item_id": null,
+            "kind_from_bank": null
           },
           "group": "investments",
           "cash": 31250,
@@ -368,7 +371,8 @@ export const balancesView: BalancesView = {
             "source": "plaid",
             "nickname": "Test card",
             "hidden": false,
-            "item_id": null
+            "item_id": null,
+            "kind_from_bank": null
           },
           "group": "credit",
           "cash": 0,
@@ -646,6 +650,25 @@ export const categoryEdit: CategoryEdit = {
     "rule": {
       "id": 12,
       "prev_category": null
+    }
+  }
+};
+
+export const groupEdit: GroupEdit = {
+  "changed": 2,
+  "rule_id": 7,
+  "undo": {
+    "flag": "Save",
+    "rows": [
+      {
+        "txn_id": "txn-demo-002",
+        "flag": "Invest",
+        "overridden": false
+      }
+    ],
+    "rule": {
+      "id": 7,
+      "prev_flag": null
     }
   }
 };

@@ -1169,6 +1169,47 @@ button.fl-lane-figure {
   max-width: 100%;
   white-space: normal;
 }
+/* A moved row's group: the tag is a select. The caret is a CSS triangle in
+   the tag's colour; the select fills the tag so the target is the tag. */
+.fl-cat-cell .fl-tag-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fl-tag-pick:hover {
+  color: var(--lg-text);
+  border-color: var(--lg-dim);
+}
+.fl-tag-pick select {
+  appearance: none;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 18px 2px 6px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.fl-tag-pick::after {
+  content: "";
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  margin-top: -2px;
+  border: 4px solid transparent;
+  border-bottom: 0;
+  border-top-color: currentColor;
+  pointer-events: none;
+}
+.fl-tag-pick select option {
+  background: var(--lg-panel);
+  color: var(--lg-text);
+}
 .fl-pager {
   display: flex;
   gap: 12px;
@@ -2520,4 +2561,8 @@ button.fl-lane-figure {
   font-size: 0.75rem;
   line-height: 1.55;
   color: var(--lg-faint);
+}
+.cx-kind option {
+  background: var(--lg-panel);
+  color: var(--lg-text);
 }

@@ -10,7 +10,7 @@
 // recurring merchant (Recurring.tsx) drills in the same way, by merchant over
 // the recurring window instead of the month.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type SortKey } from "../api";
+import { api, type MovedGroup, type SortKey } from "../api";
 import type {
   Account,
   CategorySpend,
@@ -22,6 +22,7 @@ import type {
   RecurringView,
   TxnRow,
   CategoryUndo,
+  GroupEdit,
   TxnFlag,
   TxnPage,
 } from "../types";
@@ -73,6 +74,64 @@ const MOVED_LABEL: Record<Exclude<TxnFlag, "Spending">, string> = {
   LoanPaydown: "Loan paydown",
   Transfer: "Between own accounts",
 };
+
+const GROUPS: [MovedGroup, string][] = [
+  ["Invest", "Invest"],
+  ["Save", "Save"],
+  ["LoanPaydown", "Loan paydown"],
+  ["Transfer", "Between own accounts"],
+];
+
+/** A moved row's group, as a select dressed as the Moved tag. A pointer
+ *  pick saves at once; keyboard browsing saves on Enter or on leaving the
+ *  field (arrow keys change a closed select on some platforms), Escape
+ *  cancels. */
+function GroupPick({
+  t,
+  onPick,
+}: {
+  t: TxnRow;
+  onPick: (t: TxnRow, g: MovedGroup) => void;
+}) {
+  const [draft, setDraft] = useState<MovedGroup | null>(null);
+  const keyNav = useRef(false);
+  const commit = (g: MovedGroup | null) => {
+    setDraft(null);
+    if (g && g !== t.flag) onPick(t, g);
+  };
+  return (
+    <label className="fl-tag fl-tag-pick">
+      <span className="fl-sr">Moved group for {t.display_name}</span>
+      <select
+        value={draft ?? t.flag}
+        onPointerDown={() => (keyNav.current = false)}
+        onBlur={() => commit(draft)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit(draft);
+          } else if (e.key === "Escape") {
+            e.stopPropagation(); // don't also clear the drill-down
+            setDraft(null);
+          } else if (e.key !== "Tab") {
+            keyNav.current = true;
+          }
+        }}
+        onChange={(e) => {
+          const g = e.target.value as MovedGroup;
+          if (keyNav.current) setDraft(g);
+          else commit(g);
+        }}
+      >
+        {GROUPS.map(([g, label]) => (
+          <option key={g} value={g}>
+            {label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 /** What the table is drilled into. Every field maps to a core filter. */
 export interface Pick {
@@ -931,6 +990,35 @@ function TxnTable({
     }
   };
 
+  const groupLabel = (g: MovedGroup) => GROUPS.find(([k]) => k === g)?.[1] ?? g;
+  const setTxnGroup = async (t: TxnRow, g: MovedGroup) => {
+    markFocus(t.id, ".fl-tag-pick select");
+    try {
+      const edit = await api.setGroup(t.id, g);
+      const others = edit.changed - (t.flag !== g ? 1 : 0);
+      notify({
+        kind: "ok",
+        text:
+          `${t.display_name}: now ${groupLabel(g)}` +
+          (others > 0 ? `, with ${others} more of its rows` : "") +
+          (edit.rule_id !== null ? ". New ones will be too." : "."),
+        action: { label: "Undo", run: () => void undoGroup(t, edit) },
+      });
+      await Promise.all([load(), onFiguresChanged()]);
+    } catch (err) {
+      notify({ kind: "err", text: errMessage(err) });
+    }
+  };
+  const undoGroup = async (t: TxnRow, edit: GroupEdit) => {
+    try {
+      await api.undoGroup(t.id, edit.undo);
+      notify({ kind: "ok", text: `${t.display_name}: back as it was.` });
+      await Promise.all([load(), onFiguresChanged()]);
+    } catch (err) {
+      notify({ kind: "err", text: errMessage(err) });
+    }
+  };
+
   const acctFor = (id: string) => accounts.find((a) => a.id === id);
   const narrowed = !!(debounced || account);
   const clearNarrowing = () => {
@@ -987,7 +1075,10 @@ function TxnTable({
         <td className="fl-cat-cell">
           {/* A move has a group, not a category: the lanes never read its
               category, so there's nothing to set. */}
-          {moved ? (
+          {/* A card payment's group comes from its match (Settings). */}
+          {moved && t.flag !== "CardPayment" ? (
+            <GroupPick t={t} onPick={(row, g) => void setTxnGroup(row, g)} />
+          ) : moved ? (
             <span className="fl-tag">
               <span className="fl-sr">Moved: </span>
               {MOVED_LABEL[t.flag as Exclude<TxnFlag, "Spending">]}
@@ -1094,10 +1185,22 @@ function TxnTable({
       );
     }
     if (pick && single) {
+      const movedGroup =
+        pick.lane === "invest" ||
+        pick.lane === "save" ||
+        pick.lane === "loan_paydown" ||
+        pick.lane === "between";
       return (
         <>
           {n}, total <b>{signedCents(single.total_cents)}</b>
           {narrowNote}
+          {movedGroup && (
+            <span className="fl-total-hint">
+              {" "}
+              Only the checking and card side counts here. The other side, on a savings,
+              investment or loan account or one that isn't linked, isn't counted again.
+            </span>
+          )}
         </>
       );
     }

@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { api, type LinkErrorReport } from "../api";
-import type { Account, PlaidItem, SyncEntry } from "../types";
+import type { Account, AccountKind, PlaidItem, SyncEntry } from "../types";
 import { SourceChip, accountDisplayLabel, accountSource, agoLabel } from "./accounts";
 import type { ToastMsg } from "./Toast";
 import { isOauthReturn, navigate, pathOf } from "../route";
@@ -278,6 +278,30 @@ export function Connections({
     }
   };
 
+  // An account's type decides what Flow counts it as (a savings account is
+  // the far side of a move) and where Holdings puts it. The owner can change
+  // what the bank reports, within assets or within debts.
+  const KINDS_ASSET: AccountKind[] = ["Checking", "Savings", "Investment", "Other"];
+  const KINDS_DEBT: AccountKind[] = ["Credit", "Loan"];
+  const setKind = async (a: Account, k: AccountKind) => {
+    const bank = a.kind_from_bank ?? a.kind;
+    try {
+      await api.setAccountKind(a.id, k === bank ? null : k);
+      const label = accountDisplayLabel(a.name, a.nickname);
+      notify({
+        kind: "ok",
+        text:
+          k === bank
+            ? `${label} is ${k.toLowerCase()} again, as the bank reports it.`
+            : `${label} now counts as ${k.toLowerCase()}.`,
+      });
+      await refresh();
+      onChanged();
+    } catch (err) {
+      notify({ kind: "err", text: errMessage(err) });
+    }
+  };
+
   // Accounts sit under their connection: the one each last synced through
   // (item_id). An account that hasn't synced since that was recorded falls
   // back to its institution name; anything unplaced (a fixture pull, an
@@ -301,6 +325,20 @@ export function Connections({
       <SourceChip s={accountSource(a)} />
       {a.hidden && <span className="cx-hidden-tag">hidden</span>}
       <span className="cx-acct-acts">
+      <select
+        className="cx-mini cx-kind"
+        aria-label={`Type of ${accountDisplayLabel(a.name, a.nickname)}`}
+        value={a.kind}
+        onChange={(e) => void setKind(a, e.target.value as AccountKind)}
+      >
+        {(["Credit", "Loan"].includes(a.kind_from_bank ?? a.kind) ? KINDS_DEBT : KINDS_ASSET).map(
+          (k) => (
+            <option key={k} value={k}>
+              {k === (a.kind_from_bank ?? a.kind) ? `${k} (bank's)` : k}
+            </option>
+          ),
+        )}
+      </select>
       {editing === a.id ? (
         <input
           className="cx-nick-input"
@@ -380,7 +418,8 @@ export function Connections({
             <p className="st-blurb">
               Give an account a nickname to spot it at a glance; the last four digits stay. Hide one
               to drop it and its transactions from every view. It keeps syncing, and you can show it
-              again here.
+              again here. If the bank reports the wrong type (a high-yield cash account as checking,
+              say), change it: money moved into a savings account counts once, from checking.
             </p>
             <ul className="cx-items">
               {items.map((it) => (

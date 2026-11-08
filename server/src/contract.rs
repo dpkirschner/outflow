@@ -57,6 +57,7 @@ fn account() -> Account {
         nickname: Some("Test card".into()),
         hidden: false,
         item_id: None,
+        kind_from_bank: None,
     }
 }
 
@@ -73,6 +74,7 @@ fn checking() -> Account {
         nickname: None,
         hidden: false,
         item_id: None,
+        kind_from_bank: None,
     }
 }
 
@@ -314,6 +316,7 @@ fn balances_view() -> BalancesView {
         nickname: None,
         hidden: false,
         item_id: None,
+        kind_from_bank: None,
     };
     let cash_row = HoldingRow {
         security_id: "sec-demo-mmf".into(),
@@ -727,6 +730,25 @@ fn category_edit() -> outflow_core::CategoryEdit {
     }
 }
 
+fn group_edit() -> outflow_core::GroupEdit {
+    outflow_core::GroupEdit {
+        changed: 2,
+        rule_id: Some(7),
+        undo: outflow_core::GroupUndo {
+            flag: TxnFlag::Save,
+            rows: vec![outflow_core::FlagPrior {
+                txn_id: "txn-demo-002".into(),
+                flag: TxnFlag::Invest,
+                overridden: false,
+            }],
+            rule: Some(outflow_core::FlagRuleUndo {
+                id: 7,
+                prev_flag: None,
+            }),
+        },
+    }
+}
+
 fn reset_preview() -> outflow_core::ResetPreview {
     outflow_core::ResetPreview {
         transactions: 1_200,
@@ -788,6 +810,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("ResetPreview", j(reset_preview())),
         ("CategorizeResult", j(categorize_result())),
         ("CategoryEdit", j(category_edit())),
+        ("GroupEdit", j(group_edit())),
         // perks_routes.rs
         ("PerksReport", j(perks_report())),
         // plaid_routes.rs

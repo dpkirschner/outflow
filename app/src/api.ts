@@ -26,6 +26,9 @@ import type {
   ResetPreview,
   CategoryEdit,
   CategoryUndo,
+  GroupEdit,
+  GroupUndo,
+  AccountKind,
 } from "./types";
 
 // Request-side shapes. types.ts is generated from the Rust response DTOs;
@@ -33,6 +36,9 @@ import type {
 // live here, next to the calls that use them.
 
 export type SortKey = "date" | "amount" | "merchant" | "category";
+
+/** The flags a moved row can be grouped under (Transfer = between own accounts). */
+export type MovedGroup = Extract<TxnFlag, "Invest" | "Save" | "LoanPaydown" | "Transfer">;
 
 /** A Stock range: a period spelling (`2026-11`, `this-year`), or a first day
  *  (`YYYY-MM-DD`, through today), or neither for all of history. */
@@ -245,6 +251,15 @@ export const api = {
   // flag is the serde variant name, e.g. "Transfer" | "CardPayment" | "Spending".
   setFlag: (txnId: string, flag: TxnFlag, learn: boolean) =>
     post<number | null>(`/txn/${encodeURIComponent(txnId)}/flag`, { flag, learn }),
+  // Put a moved row in a Moved group and teach its merchant; returns how many
+  // rows changed and the undo token.
+  setGroup: (txnId: string, flag: MovedGroup) =>
+    post<GroupEdit>(`/txn/${encodeURIComponent(txnId)}/group`, { flag }),
+  undoGroup: (txnId: string, undo: GroupUndo) =>
+    post<number>(`/txn/${encodeURIComponent(txnId)}/group/undo`, undo),
+  // An account's type over the bank's; null = the bank's again.
+  setAccountKind: (accountId: string, kind: AccountKind | null) =>
+    post<void>(`/account/${encodeURIComponent(accountId)}/kind`, { kind }),
   // Rename an account. Empty string clears the nickname (chip reverts to name).
   setAccountNickname: (accountId: string, nickname: string) =>
     post<void>(`/account/${encodeURIComponent(accountId)}/nickname`, { nickname }),

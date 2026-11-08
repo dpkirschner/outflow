@@ -49,6 +49,12 @@ export type Account = {
    * their next sync. Settings lists accounts under their connection by it.
    */
   item_id: string | null,
+  /**
+   * The type the bank reports, when the owner changed it
+   * (`Store::set_account_kind`): `kind` is then the owner's choice. None =
+   * `kind` is the bank's. Survives re-sync, like `nickname`.
+   */
+  kind_from_bank: AccountKind | null,
 };
 
 export type Transaction = {
@@ -164,6 +170,55 @@ export type RuleUndo = {
    * re-pointed the merchant's existing rule, undo puts this back.
    */
   prev_category: string | null,
+};
+
+/**
+ * What `Store::set_moved_group` did: how many rows it regrouped (the
+ * row picked plus the merchant's other rows the learned rule now covers),
+ * and the token that reverses exactly this edit.
+ */
+export type GroupEdit = {
+  changed: number,
+  /**
+   * The merchant's exact flag rule (new or re-pointed); None for a row
+   * with no merchant.
+   */
+  rule_id: number | null,
+  /**
+   * Send back to `POST /txn/{txn_id}/group/undo` as is.
+   */
+  undo: GroupUndo,
+};
+
+/**
+ * The state one group edit replaced. Undo restores each row only while it
+ * still has the edit's flag, and the rule only while it still says it.
+ */
+export type GroupUndo = {
+  flag: TxnFlag,
+  rows: Array<FlagPrior>,
+  rule: FlagRuleUndo | null,
+};
+
+/**
+ * A row's flag before a group edit.
+ */
+export type FlagPrior = {
+  txn_id: string,
+  flag: TxnFlag,
+  overridden: boolean,
+};
+
+/**
+ * The rule half of a group edit.
+ */
+export type FlagRuleUndo = {
+  id: number,
+  /**
+   * None: the edit created the rule, undo deletes it. Some: it re-pointed
+   * the merchant's existing rule, undo puts this back.
+   */
+  prev_flag: TxnFlag | null,
 };
 
 export type PeriodKind = "Week" | "Month" | "Quarter" | "Year" | "Custom";

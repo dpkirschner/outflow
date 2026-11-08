@@ -10,7 +10,8 @@
     "source": "plaid",
     "nickname": "Test card",
     "hidden": false,
-    "item_id": null
+    "item_id": null,
+    "kind_from_bank": null
   },
   "Transaction": {
     "id": "txn-demo-001",
@@ -273,7 +274,8 @@
               "source": "plaid",
               "nickname": null,
               "hidden": false,
-              "item_id": null
+              "item_id": null,
+              "kind_from_bank": null
             },
             "group": "investments",
             "cash": 31250,
@@ -327,7 +329,8 @@
               "source": "plaid",
               "nickname": "Test card",
               "hidden": false,
-              "item_id": null
+              "item_id": null,
+              "kind_from_bank": null
             },
             "group": "credit",
             "cash": 0,
@@ -593,6 +596,24 @@
       "rule": {
         "id": 12,
         "prev_category": null
+      }
+    }
+  },
+  "GroupEdit": {
+    "changed": 2,
+    "rule_id": 7,
+    "undo": {
+      "flag": "Save",
+      "rows": [
+        {
+          "txn_id": "txn-demo-002",
+          "flag": "Invest",
+          "overridden": false
+        }
+      ],
+      "rule": {
+        "id": 7,
+        "prev_flag": null
       }
     }
   },

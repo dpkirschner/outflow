@@ -287,7 +287,8 @@ pub(crate) enum Cmd {
         #[arg(long, default_value_t = 14)]
         expiring_days: i64,
     },
-    /// Recent sync runs.
+    /// What needs you (connections, card payments to review, last sync),
+    /// then recent sync runs. --json: {"upkeep": ..., "sync_log": [...]}.
     Status {
         #[arg(long, default_value_t = 20)]
         limit: usize,
@@ -1520,9 +1521,12 @@ fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> Result<(), Strin
 
 fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
     let log = store.sync_log(limit).map_err(|e| format!("{e}"))?;
+    let up = outflow_core::upkeep(store).map_err(|e| format!("{e}"))?;
     if json {
-        return json_out(&log);
+        return json_out(&serde_json::json!({ "upkeep": up, "sync_log": log }));
     }
+    print_upkeep(&up);
+    println!();
     for s in &log {
         let outcome = match (s.finished, &s.note) {
             (None, _) => "running".to_string(),
@@ -1538,6 +1542,29 @@ fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// The upkeep lines `status` leads with (core::upkeep, same as /api/upkeep).
+fn print_upkeep(up: &outflow_core::Upkeep) {
+    match up.last_synced {
+        Some(t) => println!("last synced {}", date_label(t)),
+        None => println!("never synced"),
+    }
+    if up.total == 0 {
+        println!("nothing needs you");
+    }
+    for c in &up.connections {
+        println!(
+            "connection  {}: {} ({})",
+            c.institution, c.status, c.item_id
+        );
+    }
+    if up.proposed_matches > 0 {
+        println!(
+            "review      {} card payment(s) to review",
+            up.proposed_matches
+        );
+    }
 }
 
 /// Local match handling mirrors the server handlers exactly: accept flags both

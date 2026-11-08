@@ -71,6 +71,8 @@ money            i64-cents type, decimal parse, display
           │                worth change, earned − spent, saved, each with its
           │                usual, plus the unusual list (reuses stock, query
           │                flow_over, recurring::build)
+          ├ upkeep         summary() → Upkeep: connections not ok, matches to
+          │                review, last sync (Settings, status, check-in)
           ├ categorize     RuleSet, precedence
           ├ plaid          pure Plaid JSON → domain (sign flips, kind mapping,
           │                flag/category seeding from personal_finance_category)

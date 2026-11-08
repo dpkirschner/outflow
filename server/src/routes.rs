@@ -739,6 +739,16 @@ async fn has_credit_account(State(state): State<AppState>) -> ApiResult<bool> {
     .map(Json)
 }
 
+/// What needs the owner now: connections not ok, card payments to review,
+/// the newest successful sync (core::upkeep).
+async fn upkeep(State(state): State<AppState>) -> ApiResult<outflow_core::Upkeep> {
+    with_store(&state, |s| {
+        outflow_core::upkeep(s).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
 async fn reset_data(State(state): State<AppState>) -> ApiResult<()> {
     with_store(&state, |s| s.reset_data().map_err(|e| e.to_string()))
         .await
@@ -841,6 +851,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/categories", get(categories))
         .route("/has_credit_account", get(has_credit_account))
         .route("/sync_log", get(sync_log))
+        .route("/upkeep", get(upkeep))
         .route("/categorize", post(categorize))
         .route("/categorize_llm", post(categorize_llm))
         .route("/txn/{txn_id}/category", post(set_category))
@@ -996,6 +1007,28 @@ mod tests {
         .await
         .unwrap()
         .status()
+    }
+
+    #[tokio::test]
+    async fn upkeep_counts_what_needs_the_owner() {
+        let app = app_with_two_accounts();
+        let (status, v) = get_json(app.clone(), "/upkeep").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["proposed_matches"], 1);
+        assert_eq!(v["connections"], serde_json::json!([]));
+        assert_eq!(v["last_synced"], serde_json::Value::Null);
+        assert_eq!(v["total"], 1);
+        // Hiding the bank leg's account takes the pair out of review.
+        let st = post_status(
+            app.clone(),
+            "/account/acct-2/hidden",
+            serde_json::json!({ "hidden": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        let (_, v) = get_json(app, "/upkeep").await;
+        assert_eq!(v["proposed_matches"], 0);
+        assert_eq!(v["total"], 0);
     }
 
     /// /balances groups accounts, counts a money-market holding and an

@@ -20,19 +20,20 @@
 //!   `LARGE_CHARGE_MIN_HISTORY` charges; at most `LARGE_CHARGE_MAX_ITEMS`,
 //!   largest first.
 //! - **Attention**: a connection not "ok", card-payment matches waiting for
-//!   review. These are about now, so they show for any period.
+//!   review (`upkeep::summary`). These are about now, so they show for any
+//!   period.
 //!
 //! A check that can't run is listed in `not_checked` with its reason, so the
 //! screen says why instead of showing nothing.
 
-use crate::model::MatchStatus;
-use crate::model::{Transaction, TxnMatch};
+use crate::model::Transaction;
 use crate::period::{Period, PeriodKind};
 use crate::query::{account_kinds, flow_over, lane_of, Lane};
 use crate::recurring::{self, Change, RecurringView};
 use crate::stock::{net_worth_change, ChangeReason, NetWorthChange};
 use crate::store::Store;
 use crate::subscriptions::normalize_payee;
+use crate::upkeep;
 use chrono::{Datelike, Local, Months, NaiveDate, TimeZone};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
@@ -444,21 +445,23 @@ fn summary(c: &NetWorthChange) -> NetWorthSummary {
     }
 }
 
-/// Connections and match reviews that need the owner now.
+/// Connections and match reviews that need the owner now: the upkeep
+/// summary (`upkeep::summary`), so the numbers match Settings and `status`.
 fn attention(store: &Store) -> rusqlite::Result<Vec<Unusual>> {
-    let mut out = Vec::new();
-    for it in store.plaid_items()? {
-        if it.status != "ok" {
-            let mut u = Unusual::new(UnusualKind::Connection, it.institution.clone());
-            u.item_id = Some(it.item_id.clone());
-            u.status = Some(it.status.clone());
-            out.push(u);
-        }
-    }
-    let waiting: Vec<TxnMatch> = store.matches(Some(MatchStatus::Proposed))?;
-    if !waiting.is_empty() {
+    let up = upkeep::summary(store)?;
+    let mut out: Vec<Unusual> = up
+        .connections
+        .into_iter()
+        .map(|c| {
+            let mut u = Unusual::new(UnusualKind::Connection, c.institution);
+            u.item_id = Some(c.item_id);
+            u.status = Some(c.status);
+            u
+        })
+        .collect();
+    if up.proposed_matches > 0 {
         let mut u = Unusual::new(UnusualKind::MatchReview, "Card payments to review");
-        u.count = Some(waiting.len());
+        u.count = Some(up.proposed_matches);
         out.push(u);
     }
     Ok(out)
@@ -555,7 +558,7 @@ fn percentile(v: &mut [i64], pct: u32) -> i64 {
 #[allow(clippy::inconsistent_digit_grouping)] // dollars_cents literals
 mod tests {
     use super::*;
-    use crate::model::{Account, AccountKind, MatchConfidence, Transaction, TxnFlag};
+    use crate::model::{Account, AccountKind, MatchConfidence, MatchStatus, Transaction, TxnFlag};
     use crate::money::Money;
 
     fn noon(y: i32, m: u32, d: u32) -> i64 {

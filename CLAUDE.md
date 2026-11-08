@@ -71,7 +71,9 @@ effect), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`):
 --direction out|in --uncategorized] [--period P | --since D --until D]`
 (`--lane` = exactly the rows behind a `report --by monthly` figure; on a
 card payment `--direction out` = bank side, `in` = card side), `accounts`,
-`matches`, `status`.
+`matches`, `status` (what needs you: connections not ok, card payments
+to review, last sync; then recent sync runs; `--json` =
+`{upkeep, sync_log}` in both modes).
 DB path from `--db` or `OUTFLOW_DB`.
 
 One date group everywhere (`core::period`): `--period` takes `2026-11`,

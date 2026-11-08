@@ -115,7 +115,12 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
             Some(serde_json::json!({ "category": category, "learn": !no_learn })),
         ),
         Cmd::Accounts { all } => remote.get(&format!("/accounts?include_hidden={all}")),
-        Cmd::Status { limit } => remote.get(&format!("/sync_log?limit={limit}")),
+        // Same shape as local `status --json`: {"upkeep": ..., "sync_log": [...]}.
+        Cmd::Status { limit } => {
+            let up = remote.get("/upkeep")?;
+            let log = remote.get(&format!("/sync_log?limit={limit}"))?;
+            Ok(format!("{{\"upkeep\":{up},\"sync_log\":{log}}}"))
+        }
         // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
         Cmd::Perks {
             lookback,

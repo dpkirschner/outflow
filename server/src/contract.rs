@@ -696,6 +696,19 @@ fn match_view() -> MatchView {
     }
 }
 
+fn upkeep() -> outflow_core::Upkeep {
+    outflow_core::Upkeep {
+        connections: vec![outflow_core::ConnectionIssue {
+            item_id: "item-demo-001".into(),
+            institution: "Demo Bank".into(),
+            status: "login_required".into(),
+        }],
+        proposed_matches: 2,
+        last_synced: Some(T0 + DAY),
+        total: 3,
+    }
+}
+
 fn categorize_result() -> CategorizeResult {
     CategorizeResult {
         rule: 18,
@@ -738,6 +751,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("ActivityRow", j(activity_row())),
         ("SyncEntry", j(sync_entry())),
         ("SyncReport", j(sync_report())),
+        ("Upkeep", j(upkeep())),
         ("CategorizeResult", j(categorize_result())),
         // perks_routes.rs
         ("PerksReport", j(perks_report())),

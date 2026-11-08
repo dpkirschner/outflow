@@ -51,7 +51,7 @@ server's job), `categorize [--llm]`,
 `holdings [--account A --ticker T --history --since D]`, `activity [--account A
 --ticker T --type T --since D --until D]`, `perks [--file F
 --lookback 3mo|6mo|12mo|all --expiring-days N]`, `matches list|accept
-<id>|reject <id>`, `status [--limit]`.
+<id>|reject <id>`, `status [--limit]` (upkeep summary, then sync runs).
 
 `holdings` (and `/api/holdings`) also emits one synthetic row per investment
 account whose balance its positions don't cover: `security_id`

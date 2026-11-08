@@ -105,6 +105,12 @@ fn render() -> String {
         );
     }
 
+    // --- core::upkeep ---
+    {
+        use outflow_core::upkeep::*;
+        decls!(&cfg, out, [ConnectionIssue, Upkeep]);
+    }
+
     // --- core::recurring ---
     {
         use outflow_core::recurring::*;

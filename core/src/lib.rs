@@ -14,6 +14,7 @@ pub mod stock;
 pub mod store;
 pub mod subscriptions;
 pub mod transfers;
+pub mod upkeep;
 
 pub use activity::{activity, ActivityFilter, ActivityRow};
 pub use balances::{
@@ -56,3 +57,4 @@ pub use stock::{
 pub use store::{FlagRule, PlaidBatch, Store, UpsertResult};
 pub use subscriptions::{detect_rhythms, normalize_payee, RhythmGroup, StreamCadence};
 pub use transfers::{detect_card_payments, MatchOptions, ProposedMatch};
+pub use upkeep::{summary as upkeep, ConnectionIssue, Upkeep};

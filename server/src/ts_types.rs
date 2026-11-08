@@ -85,6 +85,26 @@ fn render() -> String {
         );
     }
 
+    // --- core::checkin ---
+    {
+        use outflow_core::checkin::*;
+        decls!(
+            &cfg,
+            out,
+            [
+                CheckIn,
+                NetWorthSummary,
+                FlowSummary,
+                Usual,
+                UnusualKind,
+                Unusual,
+                Check,
+                NotCheckedReason,
+                NotChecked
+            ]
+        );
+    }
+
     // --- core::recurring ---
     {
         use outflow_core::recurring::*;

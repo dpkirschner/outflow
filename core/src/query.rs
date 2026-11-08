@@ -345,7 +345,7 @@ fn is_refund(t: &Transaction, kind: AccountKind) -> bool {
 }
 
 /// Account kind by id; an unknown account reads as `Other`.
-fn account_kinds(store: &Store) -> rusqlite::Result<impl Fn(&str) -> AccountKind> {
+pub(crate) fn account_kinds(store: &Store) -> rusqlite::Result<impl Fn(&str) -> AccountKind> {
     let kinds: HashMap<String, AccountKind> = store
         .accounts()?
         .into_iter()
@@ -540,7 +540,52 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
             continue; // far-side leg of a move
         };
         let (year, month) = ym_local(t.effective_date());
-        let m = months.entry((year, month)).or_insert_with(|| FlowMonth {
+        let m = months
+            .entry((year, month))
+            .or_insert_with(|| FlowMonth::empty(year, month));
+        m.tally(lane, t);
+    }
+    let mut out: Vec<FlowMonth> = months
+        .into_values()
+        .map(|mut m| {
+            m.settle();
+            m
+        })
+        .collect();
+    out.sort_by_key(|m| (m.year, m.month));
+    Ok(out)
+}
+
+/// The lanes over `[since, until)` (epoch seconds, behavioral date) as one
+/// bucket, for periods that aren't a single month (a week, a quarter).
+/// `year`/`month` carry the month `since` falls in. Pending rows count, as
+/// on Flow. Card payments take the larger side over the whole range.
+pub(crate) fn flow_over(
+    txns: &[Transaction],
+    kind: &impl Fn(&str) -> AccountKind,
+    since: i64,
+    until: i64,
+) -> FlowMonth {
+    let f = TxnFilter {
+        since: Some(since),
+        until: Some(until),
+        include_pending: true,
+        include_non_spending: true,
+    };
+    let (year, month) = ym_local(since);
+    let mut m = FlowMonth::empty(year, month);
+    for t in txns.iter().filter(|t| passes(t, &f)) {
+        if let Some(lane) = lane_of(t, kind(&t.account_id)) {
+            m.tally(lane, t);
+        }
+    }
+    m.settle();
+    m
+}
+
+impl FlowMonth {
+    fn empty(year: i64, month: u32) -> FlowMonth {
+        FlowMonth {
             year,
             month,
             in_cents: 0,
@@ -551,7 +596,12 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
             earned_minus_spent_cents: 0,
             saved_cents: 0,
             gap_cents: 0,
-        });
+        }
+    }
+
+    /// Adds one transaction to its lane.
+    fn tally(&mut self, lane: Lane, t: &Transaction) {
+        let m = self;
         let cents = t.amount.cents();
         match lane {
             Lane::In => {
@@ -574,20 +624,16 @@ pub fn flow_lanes(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<FlowMont
             Lane::Between => m.moved.between.add(cents),
         }
     }
-    let mut out: Vec<FlowMonth> = months
-        .into_values()
-        .map(|mut m| {
-            let mv = &mut m.moved;
-            mv.card_payment_cents = mv.card_payment_bank_cents.max(mv.card_payment_card_cents);
-            m.earned_minus_spent_cents = m.in_cents - m.out_cents;
-            let saving = [m.moved.invest, m.moved.save, m.moved.loan_paydown];
-            m.saved_cents = saving.iter().map(|g| g.out_cents - g.in_cents).sum();
-            m.gap_cents = m.earned_minus_spent_cents - m.saved_cents;
-            m
-        })
-        .collect();
-    out.sort_by_key(|m| (m.year, m.month));
-    Ok(out)
+
+    /// The derived figures, once every row is tallied.
+    fn settle(&mut self) {
+        let mv = &mut self.moved;
+        mv.card_payment_cents = mv.card_payment_bank_cents.max(mv.card_payment_card_cents);
+        self.earned_minus_spent_cents = self.in_cents - self.out_cents;
+        let saving = [self.moved.invest, self.moved.save, self.moved.loan_paydown];
+        self.saved_cents = saving.iter().map(|g| g.out_cents - g.in_cents).sum();
+        self.gap_cents = self.earned_minus_spent_cents - self.saved_cents;
+    }
 }
 
 #[cfg(test)]

@@ -49,6 +49,10 @@ vs spending; file from `--file`/`OUTFLOW_PERKS`),
 cash + invested − credit − loans = net worth, brokerage cash shown as
 "incl. $X uninvested"; daily trend of the same breakdown from per-sync
 snapshots),
+`checkin [--period P]` (one week / month / quarter, default this month: net
+worth change, earned − spent, saved, each with its usual, and what's
+unusual: new or changed recurring merchants, large one-off charges,
+connections and match reviews; checks that didn't run say why),
 `change [--period P | --since D --until D]` (net worth change, default this
 month: Markets = gain net of contributions on measurable investment accounts,
 Added = the rest, unmeasured accounts named; per-account change + gain),

@@ -111,7 +111,7 @@ pub fn recurring(store: &Store, through: NaiveDate, now: i64) -> rusqlite::Resul
     Ok(build(&all, &ignored, through, now))
 }
 
-fn build(
+pub(crate) fn build(
     all: &[Transaction],
     ignored: &HashSet<String>,
     through: NaiveDate,

@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod balances;
 pub mod categorize;
+pub mod checkin;
 pub mod llm;
 pub mod model;
 pub mod money;
@@ -21,6 +22,10 @@ pub use balances::{
     HoldingRow, PositionFilter, PositionPoint, PositionRow, Totals,
 };
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
+pub use checkin::{
+    checkin, Check, CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual,
+    UnusualKind, Usual,
+};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
     account_display_label, Account, AccountKind, BalanceSnapshot, CategorySource, Holding,

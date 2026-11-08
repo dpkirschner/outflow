@@ -128,6 +128,7 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         Cmd::Report { .. }
         | Cmd::Balances { .. }
         | Cmd::Change { .. }
+        | Cmd::Checkin { .. }
         | Cmd::Holdings(_)
         | Cmd::Activity(_)
         | Cmd::Recurring { .. }
@@ -235,6 +236,10 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
         Cmd::Change { period } => {
             let p = crate::change_period(period, today)?;
             with_query("/net-worth/change", &[p.to_query()])
+        }
+        Cmd::Checkin { period } => {
+            let p = crate::checkin_period(period.as_deref(), today)?;
+            with_query("/checkin", &[p.to_query()])
         }
         Cmd::Recurring { period, .. } => {
             let mut q = Vec::new();

@@ -110,6 +110,84 @@
     "saved_cents": 95000,
     "gap_cents": 95000
   },
+  "CheckIn": {
+    "period": {
+      "kind": "Month",
+      "start": "2026-10-01",
+      "end": "2026-11-01"
+    },
+    "label": "2026-10",
+    "in_progress": false,
+    "net_worth": {
+      "start_cents": 17105698,
+      "end_cents": 18288775,
+      "start_at": 1790794800,
+      "end_at": 1793473200,
+      "change_cents": 1183077,
+      "change_bp": 691,
+      "reason": null,
+      "markets_cents": 713884,
+      "added_cents": 469193,
+      "excluded": [
+        "Demo 401(k)"
+      ],
+      "partial_start": false
+    },
+    "flow": {
+      "in_cents": 600000,
+      "out_cents": 412345,
+      "earned_minus_spent_cents": 187655,
+      "saved_cents": 100000,
+      "gap_cents": 87655
+    },
+    "usual": {
+      "periods": 12,
+      "in_cents": 600000,
+      "out_cents": 380000,
+      "earned_minus_spent_cents": 220000,
+      "saved_cents": 100000,
+      "net_worth_periods": 1,
+      "net_worth_change_cents": null
+    },
+    "unusual": [
+      {
+        "kind": "recurring_up",
+        "label": "SAMPLE STREAMING",
+        "cents": 2299,
+        "usual_cents": 1549,
+        "change_pct": 48.4,
+        "merchant": "sample streaming",
+        "txn_id": null,
+        "account_id": null,
+        "day": null,
+        "month": "2026-10",
+        "item_id": null,
+        "status": null,
+        "count": null
+      },
+      {
+        "kind": "large_charge",
+        "label": "SAMPLE FURNITURE",
+        "cents": 120000,
+        "usual_cents": 18250,
+        "change_pct": null,
+        "merchant": "sample furniture",
+        "txn_id": "txn-demo-1",
+        "account_id": "acct-demo-checking",
+        "day": "2026-10-12",
+        "month": null,
+        "item_id": null,
+        "status": null,
+        "count": null
+      }
+    ],
+    "not_checked": [
+      {
+        "check": "large_charges",
+        "reason": "short_history"
+      }
+    ]
+  },
   "RecurringView": {
     "month": "2026-11",
     "since": "2025-12-01",

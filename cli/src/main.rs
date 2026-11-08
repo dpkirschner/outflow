@@ -243,6 +243,15 @@ pub(crate) enum Cmd {
         #[command(flatten)]
         period: PeriodArgs,
     },
+    /// Check-in for a week, month or quarter (default this month): net worth
+    /// change, earned - spent and saved, each against its usual (median of
+    /// the 12 periods before), and what's unusual: new or changed recurring
+    /// merchants, large one-off charges, connections and match reviews.
+    Checkin {
+        /// 2026-11, 2026-W45, 2026-Q4, or this-/last- week|month|quarter.
+        #[arg(long, value_name = "P")]
+        period: Option<String>,
+    },
     /// Net worth change over a period (default this month), split into
     /// Markets (gain net of contributions on measurable investment accounts)
     /// + Added (everything else), with per-account change and gain.
@@ -1024,6 +1033,135 @@ fn signed(cents: i64) -> String {
     format!("{sign}{}", dollars(cents.abs()))
 }
 
+/// `checkin`'s period: the one given, else this month.
+pub(crate) fn checkin_period(p: Option<&str>, today: NaiveDate) -> Result<Period, String> {
+    Period::parse(p.unwrap_or("this-month"), today).map_err(|e| e.to_string())
+}
+
+fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
+    use outflow_core::{Check, NotCheckedReason, UnusualKind};
+    let today = today_local();
+    let p = checkin_period(period, today)?;
+    let c = outflow_core::checkin(store, p, today, now_secs()).map_err(|e| format!("{e}"))?;
+    if json {
+        return json_out(&c);
+    }
+    let usual = |u: Option<i64>| {
+        u.map(|v| format!("   usual {}", signed(v)))
+            .unwrap_or_default()
+    };
+    println!(
+        "{}  ({} to {}){}",
+        c.label,
+        p.start,
+        p.last_day(),
+        if c.in_progress { "  so far" } else { "" }
+    );
+    let n = &c.net_worth;
+    match n.change_cents {
+        Some(ch) => println!(
+            "net worth change  {}{}   markets {}   added {}{}",
+            signed(ch),
+            n.change_bp
+                .map(|bp| format!(" ({})", signed_pct(bp)))
+                .unwrap_or_default(),
+            n.markets_cents.map(signed).unwrap_or_else(|| "-".into()),
+            n.added_cents.map(signed).unwrap_or_else(|| "-".into()),
+            usual(c.usual.net_worth_change_cents)
+        ),
+        None => println!("net worth change  -  (fewer than two snapshots in the period)"),
+    }
+    if !n.excluded.is_empty() {
+        println!(
+            "  added includes unmeasured accounts: {}",
+            n.excluded.join(", ")
+        );
+    }
+    let f = &c.flow;
+    println!(
+        "earned - spent    {}{}",
+        signed(f.earned_minus_spent_cents),
+        usual(c.usual.earned_minus_spent_cents)
+    );
+    println!(
+        "saved             {}{}",
+        signed(f.saved_cents),
+        usual(c.usual.saved_cents)
+    );
+    println!(
+        "  in {}   out {}   left in checking {}   (usual over {} earlier periods)",
+        dollars(f.in_cents),
+        dollars(f.out_cents),
+        signed(f.gap_cents),
+        c.usual.periods
+    );
+    println!();
+    if c.unusual.is_empty() {
+        println!("nothing unusual");
+    }
+    for u in &c.unusual {
+        let amt = |v: Option<i64>| v.map(dollars).unwrap_or_else(|| "-".into());
+        let line = match u.kind {
+            UnusualKind::Connection => format!(
+                "connection  {}: {}",
+                u.label,
+                u.status.as_deref().unwrap_or("?")
+            ),
+            UnusualKind::MatchReview => {
+                format!(
+                    "review      {} card payment(s) to review",
+                    u.count.unwrap_or(0)
+                )
+            }
+            UnusualKind::NewRecurring => format!(
+                "new         {}  {} a charge, first {}",
+                u.label,
+                amt(u.cents),
+                u.day.as_deref().unwrap_or("?")
+            ),
+            UnusualKind::RecurringUp | UnusualKind::RecurringDown => format!(
+                "{}        {}  {} in {} vs usual {}{}",
+                if u.kind == UnusualKind::RecurringUp {
+                    "up  "
+                } else {
+                    "down"
+                },
+                u.label,
+                amt(u.cents),
+                u.month.as_deref().unwrap_or("?"),
+                amt(u.usual_cents),
+                u.change_pct
+                    .map(|p| format!(" ({p:+.0}%)"))
+                    .unwrap_or_default()
+            ),
+            UnusualKind::LargeCharge => format!(
+                "large       {}  {} on {} (your 95th percentile {})  [{}]",
+                u.label,
+                amt(u.cents),
+                u.day.as_deref().unwrap_or("?"),
+                amt(u.usual_cents),
+                u.txn_id.as_deref().unwrap_or("")
+            ),
+        };
+        println!("  {line}");
+    }
+    for nc in &c.not_checked {
+        let what = match nc.check {
+            Check::RecurringChanges => "recurring cost changes",
+            Check::NewRecurring => "new recurring merchants",
+            Check::LargeCharges => "large charges",
+        };
+        let why = match nc.reason {
+            NotCheckedReason::Week => "monthly costs aren't judged by the week",
+            NotCheckedReason::InProgress => "no completed month in the period yet",
+            NotCheckedReason::ShortHistory => "too few charges before the period",
+            NotCheckedReason::Range => "check-in covers weeks, months and quarters",
+        };
+        println!("  not checked: {what} ({why})");
+    }
+    Ok(())
+}
+
 fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), String> {
     use outflow_core::{ChangeReason, GainReason};
     let p = change_period(period, today_local())?;
@@ -1520,6 +1658,7 @@ fn run() -> Result<(), String> {
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),
         Cmd::Change { period } => cmd_change(&store, &period, cli.json),
+        Cmd::Checkin { period } => cmd_checkin(&store, period.as_deref(), cli.json),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),

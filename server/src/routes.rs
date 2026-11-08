@@ -609,6 +609,32 @@ async fn recurring(
 }
 
 #[derive(Deserialize)]
+struct CheckinParams {
+    /// A week, month or quarter (`2026-W45`, `2026-11`, `2026-Q4`,
+    /// `this-week`...). Default: this month.
+    period: Option<String>,
+}
+
+/// The check-in for one period: net worth change, earned - spent and saved,
+/// each with its usual, and what's unusual (core::checkin).
+async fn checkin(
+    State(state): State<AppState>,
+    Query(p): Query<CheckinParams>,
+) -> ApiResult<outflow_core::CheckIn> {
+    let today = today_local();
+    let period = match blank(p.period.as_deref()) {
+        Some(s) => Period::parse(s, today).map_err(ApiError::bad_request)?,
+        None => Period::current(outflow_core::PeriodKind::Month, today),
+    };
+    let now = now_secs();
+    with_store(&state, move |s| {
+        outflow_core::checkin(s, period, today, now).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
 struct IgnoredBody {
     /// Normalized merchant, as `RecurringMerchant::merchant`.
     merchant: String,
@@ -809,6 +835,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
         .route("/flow", get(flow))
+        .route("/checkin", get(checkin))
         .route("/recurring", get(recurring))
         .route("/recurring/ignored", post(set_recurring_ignored))
         .route("/categories", get(categories))
@@ -1175,6 +1202,18 @@ mod tests {
         assert_eq!(row("brk")["gain"], 0);
         assert_eq!(row("hsa")["gain_reason"], "cash");
         let (status, _) = get_json(app.clone(), "/net-worth/change?period=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // /checkin: defaults to this month; same net worth as the change.
+        let (status, ci) = get_json(app.clone(), "/checkin").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ci["period"]["kind"], "Month");
+        assert_eq!(ci["in_progress"], true);
+        assert!(ci["unusual"].is_array());
+        let (status, ci) = get_json(app.clone(), "/checkin?period=this-week").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(ci["period"]["kind"], "Week");
+        let (status, _) = get_json(app.clone(), "/checkin?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // /holdings/change: one holdings snapshot (the second sync kept the

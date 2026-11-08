@@ -212,6 +212,77 @@ fn recurring_view() -> RecurringView {
     }
 }
 
+fn checkin() -> outflow_core::CheckIn {
+    use outflow_core::checkin::*;
+    let mut up = Unusual {
+        kind: UnusualKind::RecurringUp,
+        label: "SAMPLE STREAMING".into(),
+        cents: Some(2_299),
+        usual_cents: Some(1_549),
+        change_pct: Some(48.4),
+        merchant: Some("sample streaming".into()),
+        txn_id: None,
+        account_id: Some("acct-demo-checking".into()),
+        day: None,
+        month: Some("2026-10".into()),
+        item_id: None,
+        status: None,
+        count: None,
+    };
+    let mut large = up.clone();
+    large.kind = UnusualKind::LargeCharge;
+    large.label = "SAMPLE FURNITURE".into();
+    large.cents = Some(120_000);
+    large.usual_cents = Some(18_250);
+    large.change_pct = None;
+    large.merchant = Some("sample furniture".into());
+    large.txn_id = Some("txn-demo-1".into());
+    large.day = Some("2026-10-12".into());
+    large.month = None;
+    up.account_id = None;
+    let p = outflow_core::Period::parse("2026-10", NaiveDate::from_ymd_opt(2026, 11, 7).unwrap())
+        .unwrap();
+    CheckIn {
+        period: p,
+        label: "2026-10".into(),
+        in_progress: false,
+        net_worth: NetWorthSummary {
+            start_cents: Some(17_105_698),
+            end_cents: Some(18_288_775),
+            start_at: Some(1_790_794_800),
+            end_at: Some(1_793_473_200),
+            change_cents: Some(1_183_077),
+            change_bp: Some(691),
+            reason: None,
+            markets_cents: Some(713_884),
+            added_cents: Some(469_193),
+            excluded: vec!["Demo 401(k)".into()],
+            partial_start: false,
+        },
+        flow: FlowSummary {
+            in_cents: 600_000,
+            out_cents: 412_345,
+            earned_minus_spent_cents: 187_655,
+            saved_cents: 100_000,
+            gap_cents: 87_655,
+        },
+        usual: Usual {
+            periods: 12,
+            in_cents: Some(600_000),
+            out_cents: Some(380_000),
+            earned_minus_spent_cents: Some(220_000),
+            saved_cents: Some(100_000),
+            net_worth_periods: 1,
+            net_worth_change_cents: None,
+        },
+        unusual: vec![up, large],
+        not_checked: vec![NotChecked {
+            check: Check::LargeCharges,
+            reason: NotCheckedReason::ShortHistory,
+        }],
+    }
+}
+
 fn holding_row() -> HoldingRow {
     HoldingRow {
         security_id: "sec-demo-fund".into(),
@@ -656,6 +727,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("CategorySpend", j(category_spend())),
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
+        ("CheckIn", j(checkin())),
         ("RecurringView", j(recurring_view())),
         ("BalancesView", j(balances_view())),
         ("DayTotals", j(day_totals())),

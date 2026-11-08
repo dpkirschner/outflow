@@ -253,6 +253,153 @@ export type FlowMonth = {
 };
 
 /**
+ * One period's check-in.
+ */
+export type CheckIn = {
+  period: Period,
+  /**
+   * The period's spelling (`2026-11`, `2026-W45`, `2026-Q4`).
+   */
+  label: string,
+  /**
+   * The period reaches today, so its figures are "so far".
+   */
+  in_progress: boolean,
+  net_worth: NetWorthSummary,
+  flow: FlowSummary,
+  usual: Usual,
+  /**
+   * Largest concern first: attention, then recurring changes, then large
+   * charges.
+   */
+  unusual: Array<Unusual>,
+  /**
+   * Checks that didn't run for this period, and why.
+   */
+  not_checked: Array<NotChecked>,
+};
+
+/**
+ * The Holdings hero figures for the period (`/net-worth/change` has the
+ * rest).
+ */
+export type NetWorthSummary = {
+  start_cents: number | null,
+  end_cents: number | null,
+  start_at: number | null,
+  end_at: number | null,
+  change_cents: number | null,
+  change_bp: number | null,
+  reason: ChangeReason | null,
+  /**
+   * Markets + Added == change, exactly.
+   */
+  markets_cents: number | null,
+  added_cents: number | null,
+  /**
+   * Investment accounts whose gain is unknown: their whole change is in
+   * Added.
+   */
+  excluded: Array<string>,
+  partial_start: boolean,
+};
+
+/**
+ * The Flow figures for the period (`/flow` has the lanes).
+ */
+export type FlowSummary = {
+  in_cents: number,
+  /**
+   * Spending net of refunds, positive = spent.
+   */
+  out_cents: number,
+  earned_minus_spent_cents: number,
+  saved_cents: number,
+  /**
+   * Earned − spent minus saved: cash left in checking.
+   */
+  gap_cents: number,
+};
+
+/**
+ * Each figure's median over the earlier periods; None without enough.
+ */
+export type Usual = {
+  /**
+   * How many earlier periods the Flow medians cover.
+   */
+  periods: number,
+  in_cents: number | null,
+  out_cents: number | null,
+  earned_minus_spent_cents: number | null,
+  saved_cents: number | null,
+  /**
+   * How many earlier periods had a net worth change.
+   */
+  net_worth_periods: number,
+  net_worth_change_cents: number | null,
+};
+
+export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge";
+
+/**
+ * One unusual item. Which fields are set depends on `kind`; each item
+ * carries what an agent or the screen needs to show the rows behind it.
+ */
+export type Unusual = {
+  kind: UnusualKind,
+  /**
+   * Merchant as the bank writes it, institution, or a short phrase.
+   */
+  label: string,
+  /**
+   * The charge (large charge), or the month's spend (recurring), positive.
+   */
+  cents: number | null,
+  /**
+   * What it's compared with: the merchant's usual monthly cost, or the
+   * large-charge threshold.
+   */
+  usual_cents: number | null,
+  /**
+   * Signed % against the usual (recurring up/down).
+   */
+  change_pct: number | null,
+  /**
+   * `normalize_payee` key: `merchant=` on `/transactions`.
+   */
+  merchant: string | null,
+  txn_id: string | null,
+  account_id: string | null,
+  /**
+   * Day of the charge or first charge, `YYYY-MM-DD`.
+   */
+  day: string | null,
+  /**
+   * The month a recurring change was judged on, `YYYY-MM`.
+   */
+  month: string | null,
+  /**
+   * Connection: Plaid item and its status.
+   */
+  item_id: string | null,
+  status: string | null,
+  /**
+   * Match review: how many wait.
+   */
+  count: number | null,
+};
+
+export type Check = "recurring_changes" | "new_recurring" | "large_charges";
+
+export type NotCheckedReason = "week" | "in_progress" | "short_history" | "range";
+
+export type NotChecked = {
+  check: Check,
+  reason: NotCheckedReason,
+};
+
+/**
  * How a recurring merchant's cost moved.
  */
 export type Change = "New" | "Up" | "Down" | "Steady";

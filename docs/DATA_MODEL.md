@@ -301,6 +301,33 @@ change`. Visible accounts only.
   current month can read `contributions_unknown` and later flip to
   measurable. That's expected; nothing is estimated in between.
 
+### Check-in (`core/src/checkin.rs`)
+
+`checkin(store, period, today, now)` behind `GET /api/checkin` and
+`outflow checkin`. One week, month or quarter; the constants are at the top
+of the module.
+
+- **Figures**: net worth change, Markets and Added (as `/net-worth/change`);
+  in, out, earned − spent, saved and the gap over the whole period (Flow's
+  lane rules via `query::flow_over`; a card payment takes the larger side
+  over the period).
+- **Usual**: median of up to 12 periods of the same kind just before this
+  one, counting Flow periods only from the first transaction on, and net
+  worth periods only when they have a change. Fewer than 3: none.
+- **Unusual**, in this order:
+  - Attention, for any period (it's about now): a Plaid item whose status
+    isn't `ok`; proposed card-payment matches.
+  - Recurring (months and quarters, from `recurring::build`): a new
+    merchant whose first charge falls in the period; Up/Down (> 25%) on
+    each completed month of the period, latest month kept per merchant.
+    A month in progress gets new merchants only; a week gets neither.
+  - Large charges: an Out charge (negative, Out lane, pending included)
+    from a merchant not on the recurring list, at or above the nearest-rank
+    95th percentile of single Out charges in the 12 months before the
+    period. Needs 30 such charges; at most 5, largest first.
+- A check that didn't run is in `not_checked` with its reason (`week`,
+  `in_progress`, `short_history`, `range`), so the screen can say why.
+
 ## Card-payment matching (`core/src/transfers.rs`)
 
 `detect_card_payments(accounts, txns, already_decided, opts)` pairs an outflow

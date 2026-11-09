@@ -116,7 +116,10 @@ Plaid against sandbox: set `OUTFLOW_PLAID_CLIENT_ID`, `OUTFLOW_PLAID_SECRET`,
 Makefile shortcuts (`make help` lists them all): `make test` / `make web` /
 `make run` (rebuilds `app/dist`, then serves) / `make serve` (serves the
 existing `app/dist`) / `make dev` / `make deps` / `make types` / `make check`
-(the gate: fmt, clippy, tests, types.ts + contract freshness, `tsc`).
+(the gate: fmt, clippy, tests, types.ts + contract freshness, `tsc`,
+`make leakscan`) / `make release-draft` + `make release` and
+`make deploy-build` + `make deploy` (see RELEASING.md). None of these touch
+the deployed server: it runs a release from the data dir, not this checkout.
 
 ## Definition of done (project)
 

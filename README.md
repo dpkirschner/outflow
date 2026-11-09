@@ -75,7 +75,8 @@ Deeper reference lives in [`docs/`](docs/):
 [development](docs/DEVELOPMENT.md) ·
 [API](docs/API.md) ·
 [gotchas](docs/GOTCHAS.md) ·
-[deployment](docs/DEPLOYMENT.md).
+[deployment](docs/DEPLOYMENT.md) ·
+[releasing](docs/RELEASING.md).
 
 ## Getting started
 

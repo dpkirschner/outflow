@@ -335,6 +335,7 @@ fn checkin() -> outflow_core::CheckIn {
             cents: 187_655,
             usual_cents: 220_000,
             diff_cents: -32_345,
+            far: false,
             outside: false,
             worse: true,
             in_diff_cents: Some(0),

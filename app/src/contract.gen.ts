@@ -199,6 +199,7 @@ export const checkIn: CheckIn = {
     "cents": 187655,
     "usual_cents": 220000,
     "diff_cents": -32345,
+    "far": false,
     "outside": false,
     "worse": true,
     "in_diff_cents": 0,

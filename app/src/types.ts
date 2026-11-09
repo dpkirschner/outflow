@@ -519,8 +519,13 @@ export type Versus = {
    */
   diff_cents: number,
   /**
-   * Far from the usual: at least `VERSUS_BAND_PCT`% of usual spending
-   * away, and beyond the earlier periods' usual spread.
+   * At least `VERSUS_BAND_PCT`% of usual spending away from the usual.
+   * Far but not `outside` = a big difference that's still within how
+   * much these periods swing (a rent week); say so, don't call it usual.
+   */
+  far: boolean,
+  /**
+   * Far, and beyond the earlier periods' usual spread.
    */
   outside: boolean,
   /**

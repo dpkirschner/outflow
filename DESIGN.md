@@ -372,8 +372,12 @@ those capsules.
   ("In October, net worth rose $309.88 and you kept $151.72 of what you
   earned, $1,713.88 less than usual; Oakwood Furniture and Skyline Airways
   were $1,855.00 of it."), then a Text Dim tail that counts what needs you
-  and what looks unusual (minor items not counted). Inside the usual range
-  it says so ("within your usual range"); a week is read by what you spent,
+  and what looks unusual (minor items not counted). Close to usual it says
+  so ("within your usual range"). A big difference that's still within how
+  much these periods swing (a rent week) says the difference and that it
+  happens ("$1,240.00 more than usual, as some of your weeks are"), with
+  nothing named behind it; only a period outside that swing names the
+  items. A week is read by what you spent,
   since paydays swing earned − spent. Numbers in prose are words up to
   nine. Nothing above it but the
   strip and the title bar, so the figures under it read as the evidence.

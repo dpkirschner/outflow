@@ -505,22 +505,31 @@ function byDay(c: CheckInData): string | null {
 }
 
 /** The headline figure against its usual, as a clause tail. */
-function versusWords(v: Versus | null, by: string | null): React.ReactNode {
+function versusWords(
+  v: Versus | null,
+  by: string | null,
+  unit: string,
+): React.ReactNode {
   if (!v) return null;
   const when = by ? ` by ${by}` : "";
-  if (!v.outside) return <>, within your usual range{when}</>;
+  if (!v.far) return <>, within your usual range{when}</>;
   const amount = <b>{unsignedCents(Math.abs(v.diff_cents))}</b>;
+  // Far from the usual but within how these periods swing (a rent week):
+  // say the difference, and that it happens.
+  const swing = v.outside ? "" : `, as some of your ${unit}s are`;
   // After "kept $X" or "spent $X", more / less reads right; after "spent
   // more than you earned" it would read backwards, so: behind / ahead.
   if (v.figure === "earned_minus_spent" && v.cents <= 0)
     return (
       <>
         , {amount} {v.diff_cents > 0 ? "ahead of" : "behind"} your usual{when}
+        {swing}
       </>
     );
   return (
     <>
       , {amount} {v.diff_cents > 0 ? "more" : "less"} than usual{when}
+      {swing}
     </>
   );
 }
@@ -548,6 +557,12 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
   const v = c.versus;
   const by = byDay(c);
   const ve = sofar ? "'ve" : "";
+  const unit =
+    c.period.kind === "Week"
+      ? "week"
+      : c.period.kind === "Quarter"
+        ? "quarter"
+        : "month";
 
   const clauses: React.ReactNode[] = [];
   if (nw !== null) {
@@ -568,7 +583,7 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
       // A week: paydays make earned − spent swing, so spending is the read.
       <>
         you{ve} spent <b>{unsignedCents(f.out_cents)}</b>
-        {versusWords(v, by)}
+        {versusWords(v, by, unit)}
       </>
     ) : f.in_cents === 0 && f.out_cents === 0 ? (
       <>nothing came in or went out</>
@@ -576,18 +591,18 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
       <>
         you{ve} kept <b>{unsignedCents(f.earned_minus_spent_cents)}</b> of what
         you earned
-        {versusWords(v, by)}
+        {versusWords(v, by, unit)}
       </>
     ) : f.earned_minus_spent_cents < 0 ? (
       <>
         you{ve} spent <b>{unsignedCents(-f.earned_minus_spent_cents)}</b> more
         than you earned
-        {versusWords(v, by)}
+        {versusWords(v, by, unit)}
       </>
     ) : (
       <>
         you{ve} spent exactly what you earned
-        {versusWords(v, by)}
+        {versusWords(v, by, unit)}
       </>
     ),
   );

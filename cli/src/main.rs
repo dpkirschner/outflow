@@ -1115,9 +1115,15 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
             outflow_core::checkin::VersusFigure::Spent => "spent",
             outflow_core::checkin::VersusFigure::EarnedMinusSpent => "earned - spent",
         };
-        let judged = if v.outside { "outside" } else { "within" };
+        let judged = if v.outside {
+            "outside the usual"
+        } else if v.far {
+            "far from the usual, as some periods are"
+        } else {
+            "within the usual"
+        };
         print!(
-            "versus usual      {what} {} vs {}{by}: {} ({judged} the usual)",
+            "versus usual      {what} {} vs {}{by}: {} ({judged})",
             signed(v.cents),
             signed(v.usual_cents),
             signed(v.diff_cents)

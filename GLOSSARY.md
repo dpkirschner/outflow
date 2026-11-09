@@ -108,7 +108,8 @@ product direction behind these terms is in
   cut to the same day (**usual to date**), so Nov 1–8 reads against Oct
   1–8. The check-in compares its headline figure (earned − spent; spent,
   for a week) with its usual and, when it's notably worse, names the
-  unusual items behind it. A month check-in also judges every finished
+  unusual items behind it. A big difference that's within how much those
+  periods swing (a rent week) is said, but not called unusual. A month check-in also judges every finished
   month the same way, so the month strip can mark the ones well below
   their usual.
 - **Holdings**: the Stock screen.

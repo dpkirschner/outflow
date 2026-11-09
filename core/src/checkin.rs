@@ -191,8 +191,11 @@ pub struct Versus {
     pub usual_cents: i64,
     /// `cents - usual_cents`.
     pub diff_cents: i64,
-    /// Far from the usual: at least `VERSUS_BAND_PCT`% of usual spending
-    /// away, and beyond the earlier periods' usual spread.
+    /// At least `VERSUS_BAND_PCT`% of usual spending away from the usual.
+    /// Far but not `outside` = a big difference that's still within how
+    /// much these periods swing (a rent week); say so, don't call it usual.
+    pub far: bool,
+    /// Far, and beyond the earlier periods' usual spread.
     pub outside: bool,
     /// Kept less, or spent more, than usual.
     pub worse: bool,
@@ -640,7 +643,7 @@ fn month_marks(
         let usual_em = median(earlier.iter().map(|e| e.earned_minus_spent_cents).collect());
         let spending = median(earlier.iter().map(|e| e.out_cents).collect());
         let mut past: Vec<i64> = earlier.iter().map(|e| e.earned_minus_spent_cents).collect();
-        let (_, worse, outside) = judge(
+        let (_, worse, _, outside) = judge(
             false,
             f.earned_minus_spent_cents,
             usual_em,
@@ -664,15 +667,14 @@ fn judge(
     usual_cents: i64,
     spending: i64,
     past: &mut [i64],
-) -> (i64, bool, bool) {
+) -> (i64, bool, bool, bool) {
     let low = percentile(past, VERSUS_SPREAD_PCT);
     let high = percentile(past, 100 - VERSUS_SPREAD_PCT);
     let diff = cents - usual_cents;
     let worse = if week { diff > 0 } else { diff < 0 };
-    let outside = spending > 0
-        && diff.abs() * 100 >= VERSUS_BAND_PCT * spending
-        && (cents < low || cents > high);
-    (diff, worse, outside)
+    let far = spending > 0 && diff.abs() * 100 >= VERSUS_BAND_PCT * spending;
+    let outside = far && (cents < low || cents > high);
+    (diff, worse, far, outside)
 }
 
 /// Marks small and frequent-merchant items minor (module docs).
@@ -716,7 +718,7 @@ fn versus(
             }
         })
         .collect();
-    let (diff, worse, outside) = judge(week, cents, usual_cents, spending, &mut past);
+    let (diff, worse, far, outside) = judge(week, cents, usual_cents, spending, &mut past);
     let mut contributors: Vec<Contributor> = if outside && worse {
         unusual
             .iter()
@@ -745,6 +747,7 @@ fn versus(
         cents,
         usual_cents,
         diff_cents: diff,
+        far,
         outside,
         worse,
         in_diff_cents: (figure == VersusFigure::EarnedMinusSpent)
@@ -1299,6 +1302,22 @@ mod tests {
         assert_eq!(v.contributors[0].label, "Furniture Barn");
         assert_eq!(v.contributors[0].cents, 1200_00);
         assert!(v.contributors.len() <= VERSUS_MAX_CONTRIBUTORS);
+    }
+
+    #[test]
+    fn a_rent_sized_week_is_far_but_not_outside() {
+        // Weeks of $100 with a $300 rent week every fourth: $300 is far from
+        // the usual $100, but within how these weeks swing.
+        let mut past = vec![100, 100, 100, 300, 100, 100, 100, 300, 100, 100, 100, 300];
+        let (diff, worse, far, outside) = judge(true, 300, 100, 100, &mut past);
+        assert_eq!(diff, 200);
+        assert!(worse && far && !outside);
+        // Beyond the swing: outside too.
+        let (_, _, far, outside) = judge(true, 900, 100, 100, &mut past);
+        assert!(far && outside);
+        // Close to usual: neither.
+        let (_, _, far, outside) = judge(true, 110, 100, 100, &mut past);
+        assert!(!far && !outside);
     }
 
     #[test]

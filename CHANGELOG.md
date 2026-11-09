@@ -5,6 +5,16 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.2 (2026-11-09)
+
+### Features
+
+- `outflow backup --to PATH`: a verified snapshot of the DB, still encrypted with the same key, safe while the server runs. The CLI also reads the DB key from `OUTFLOW_DB_KEY_FILE` now (ho-fm2.2) ([5c8b3b6](https://github.com/dpkirschner/outflow/commit/5c8b3b6))
+
+### Docs
+
+- Point DEVELOPMENT.md and the README at releases (ho-fpd.5) ([376216a](https://github.com/dpkirschner/outflow/commit/376216a))
+
 ## v2026.11.1 (2026-11-08)
 
 Deploys now install a published release into its own folder and run it

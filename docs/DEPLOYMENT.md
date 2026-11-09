@@ -100,10 +100,11 @@ container, an automation/agent user with a shell:
 1. **Run as the human's account.** `UserName` is the account whose 0600 secrets
    the server reads. Not root, not a shared service account.
 2. **Nothing else may write what the daemon executes or serves.** Whoever can
-   write `target/release/outflow-server` can run arbitrary code *as the daemon's
-   user* by swapping the binary; whoever can write `app/dist` can inject JS into
-   the SPA and lift the API token out of your browser's localStorage. Either one
-   makes `UserName` decoration.
+   write `releases/<tag>/outflow-server` can run arbitrary code *as the daemon's
+   user* by swapping the binary; whoever can write `releases/<tag>/dist` can
+   inject JS into the SPA and lift the API token out of your browser's
+   localStorage. Either one makes `UserName` decoration. Both live under the
+   data dir (0700, below), never in a working copy.
 
 So the account that runs the daemon needs **its own clone**, built in its own
 home, writable by nobody else. A checkout sitting in some other account's home
@@ -115,9 +116,16 @@ working copy.
 sudo -u YOU -i          # as the account that will run it
 git clone https://github.com/dpkirschner/outflow.git ~/code/outflow
 cd ~/code/outflow && rustup default stable   # toolchains are per-user
-cd app && npm install && npm run build && cd ..
-cargo build --release -p outflow-server -p outflow-cli
+scripts/deploy.sh build vYYYY.MM.N           # a published release tag
 ```
+
+The daemon runs a **release**, never the working copy. `scripts/deploy.sh
+build` checks the tag is a published release on `main`, builds it in a
+separate worktree (`~/outflow-build`), and stages it in the data dir as
+`releases/<tag>/` (server, CLI, `dist/`, a `BUILD` note). launchd runs
+`releases/current`, a symlink to the live release, so building or switching
+branches in `~/code/outflow` never changes what's served. See
+[RELEASING.md](RELEASING.md) for cutting releases.
 
 ### The plist
 
@@ -132,9 +140,9 @@ cargo build --release -p outflow-server -p outflow-cli
   <key>UserName</key><string>YOU</string>
   <key>GroupName</key><string>staff</string>
   <key>ProgramArguments</key><array>
-    <string>/Users/YOU/code/outflow/target/release/outflow-server</string>
+    <string>/Users/YOU/Library/Application Support/outflow/releases/current/outflow-server</string>
   </array>
-  <key>WorkingDirectory</key><string>/Users/YOU/code/outflow</string>
+  <key>WorkingDirectory</key><string>/Users/YOU/Library/Application Support/outflow</string>
   <key>EnvironmentVariables</key><dict>
     <!-- Set the data dir explicitly. A daemon gets no HOME, and the server
          falls back to "." — the DB and plaid-tokens.json would land in
@@ -144,7 +152,7 @@ cargo build --release -p outflow-server -p outflow-cli
     <key>TZ</key><string>America/New_York</string> <!-- your zone -->
     <key>OUTFLOW_DATA_DIR</key><string>/Users/YOU/Library/Application Support/outflow</string>
     <key>OUTFLOW_LISTEN</key><string>127.0.0.1:8080</string>
-    <key>OUTFLOW_WEB_DIR</key><string>/Users/YOU/code/outflow/app/dist</string>
+    <key>OUTFLOW_WEB_DIR</key><string>/Users/YOU/Library/Application Support/outflow/releases/current/dist</string>
     <key>OUTFLOW_PLAID_CLIENT_ID</key><string>YOUR_CLIENT_ID</string>
     <key>OUTFLOW_PLAID_SECRET_FILE</key><string>/Users/YOU/Library/Application Support/outflow/plaid-secret</string>
     <key>OUTFLOW_PLAID_ENV</key><string>production</string>
@@ -171,11 +179,38 @@ sudo chmod 644 /Library/LaunchDaemons/com.outflow.server.plist
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.outflow.server.plist
 ```
 
-Restart after a rebuild:
+Install the first release before loading it (the plist points at
+`releases/current`), or load it and run the install below, which bootstraps it.
+
+### Deploying a release
+
+Every deploy is a release. In a terminal (sudo asks for a password):
 
 ```
-sudo launchctl kickstart -k system/com.outflow.server
+scripts/deploy.sh build vYYYY.MM.N     # no sudo; nothing live changes
+scripts/deploy.sh install vYYYY.MM.N   # or: make deploy TAG=vYYYY.MM.N
 ```
+
+`install` stops the daemon, copies the DB to `outflow.db.pre-<tag>`, points
+`releases/current` at the tag, starts it, and checks every page, the main API
+endpoints (with the read-only token) and `GET /api/version`, which must report
+the tag. `--check SCRIPT` adds a release-specific check:
+`python3 SCRIPT DIR` runs on the fetched JSON. It then keeps the newest five
+releases and three DB backups (the live release and the rollback target are
+always kept). An older plist that still points at a working copy is moved to
+`releases/current` by the first install: the old binary and UI are kept as
+`releases/pre-releases` and the old plist next to the DB as
+`com.outflow.server.plist.pre-releases`.
+
+```
+scripts/deploy.sh status               # live tag, installed releases, history
+scripts/deploy.sh rollback             # back to the previous release
+scripts/deploy.sh rollback vX --restore-db   # also restore the DB backup
+                                       # taken before the live release
+```
+
+A plain restart (no new release) is still
+`sudo launchctl kickstart -k system/com.outflow.server`.
 
 Logs go to the daemon user's `~/Library/Logs`, not `/tmp` — `/tmp` is
 world-readable and world-writable, so anyone on the box could read the server's

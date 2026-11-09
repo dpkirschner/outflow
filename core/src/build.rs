@@ -2,7 +2,7 @@
 //!
 //! `scripts/deploy.sh build <tag>` compiles with `OUTFLOW_VERSION=<tag>`;
 //! cargo rebuilds when that variable changes. Any other build (dev, tests,
-//! `make prod`) has no version.
+//! `make run`) has no version.
 
 use serde::Serialize;
 

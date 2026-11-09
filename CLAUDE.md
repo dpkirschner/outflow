@@ -166,7 +166,13 @@ is a release, versioned `vYYYY.MM.N` (N from 0 each month); notes live in
   tag). Then **show the user the notes and ask once**: that yes covers pushing,
   `git push --atomic origin main V`, which publishes (the tag runs
   `.github/workflows/release.yml`). Afterwards confirm the workflow went green.
-- Before any deploy, cut the release first and deploy that tag.
+- Deploy = a published release. After the release workflow is green, run
+  `scripts/deploy.sh build V` yourself (no sudo), then hand the user
+  `scripts/deploy.sh install V` (sudo, their terminal; `--check SCRIPT` for a
+  release-specific data check). Confirm with `outflow --server … status` or
+  `GET /api/version`. Rollback: `scripts/deploy.sh rollback [V] [--restore-db]`.
+  launchd runs `<data dir>/releases/current`, never this checkout, so building
+  here doesn't touch the live server (docs/DEPLOYMENT.md).
 - Never move or delete a pushed tag (a ruleset blocks it); fix forward with the
   next N. `main` blocks force-push; only for a history rewrite the user has
   approved does the ruleset get switched off, then back on.

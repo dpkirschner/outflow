@@ -42,6 +42,21 @@ git push --atomic origin main vYYYY.MM.N
 
 git-cliff is needed for drafting only (`brew install git-cliff`).
 
+## Deploying
+
+A deploy installs a published release; see
+[DEPLOYMENT.md](DEPLOYMENT.md#deploying-a-release). After the release
+workflow is green:
+
+```
+scripts/deploy.sh build vYYYY.MM.N     # no sudo
+scripts/deploy.sh install vYYYY.MM.N   # sudo, in a terminal
+```
+
+The build compiles with `OUTFLOW_VERSION=<tag>`, so the server answers
+`GET /api/version` (and `outflow status`) with the tag it was built from.
+`scripts/deploy.sh rollback` goes back to the previous release.
+
 ## Mistakes
 
 Release tags can't be moved or deleted (a GitHub ruleset on `v*`). A

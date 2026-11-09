@@ -277,8 +277,22 @@ auth tier it needs.
 
 The DB is the permanent archive — back up the daemon user's
 `~/Library/Application Support/outflow/` (DB + plaid-tokens.json + the API
-token files + key file if encrypted). Time Machine covers it if the mini has a
-backup target.
+token files + key file if encrypted).
+
+Don't copy the live DB file: the server may be mid-write. Snapshot it with the
+CLI instead, then back up the snapshot. It is safe while the server runs:
+
+```
+OUTFLOW_DB_KEY_FILE="$HOME/Library/Application Support/outflow/db-key" outflow --db "$HOME/Library/Application Support/outflow/outflow.db" backup --to "$HOME/outflow-backups/outflow-$(date +%F).db"
+```
+
+`backup` copies one consistent snapshot with SQLite's online backup API,
+keeps it encrypted with the same key, writes it 0600, and refuses to
+overwrite. It checks the copy (integrity check, schema version, row count per
+table) before the file appears under its name, so a file at `--to` is always a
+verified backup. It never migrates the live DB, so a newer CLI is safe to run
+against an older server. `--json` gives the per-table counts. The CLI must be
+built with `--features encryption` for an encrypted DB.
 
 Only one of those is unrecoverable: **the DB key**. Re-linking banks re-mints
 Plaid tokens and the API tokens are one `openssl rand` away, but a lost

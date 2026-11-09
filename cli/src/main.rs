@@ -188,6 +188,14 @@ impl ActivityArgs {
 
 #[derive(Subcommand)]
 pub(crate) enum Cmd {
+    /// Write a consistent, verified snapshot of the DB to a new file, still
+    /// encrypted with the same key (safe while the server runs). Refuses to
+    /// overwrite; the file is 0600. Local only.
+    Backup {
+        /// Where to write the snapshot (must not exist).
+        #[arg(long)]
+        to: String,
+    },
     /// Ingest a Plaid fixture file offline (`--from-file`); live syncs run on
     /// the server (use `--server URL pull`).
     Pull {
@@ -522,19 +530,48 @@ fn build_filter(period: &PeriodArgs, posted_only: bool) -> Result<TxnFilter, Str
     Ok(f)
 }
 
+/// The SQLCipher key: `OUTFLOW_DB_KEY`, else `OUTFLOW_DB_KEY_FILE` (0600).
+/// Neither set = plaintext. A secret: env or a 0600 file, never argv.
+fn db_key() -> Result<Option<String>, String> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    if let Some(k) = env("OUTFLOW_DB_KEY") {
+        return Ok(Some(k));
+    }
+    match env("OUTFLOW_DB_KEY_FILE") {
+        Some(p) => outflow_core::secrets::read_secret_file(&p).map(Some),
+        None => Ok(None),
+    }
+}
+
 fn open_store(db: &str) -> Result<Store, String> {
-    // With the encryption feature, an OUTFLOW_DB_KEY opens the DB via SQLCipher.
-    // The key is a secret: read from the environment only, never argv or the DB.
     #[cfg(feature = "encryption")]
-    {
-        if let Ok(key) = std::env::var("OUTFLOW_DB_KEY") {
-            if !key.is_empty() {
-                return Store::open_encrypted(db, &key)
-                    .map_err(|e| format!("open encrypted db {db}: {e}"));
-            }
-        }
+    if let Some(key) = db_key()? {
+        return Store::open_encrypted(db, &key).map_err(|e| format!("open encrypted db {db}: {e}"));
     }
     Store::open(db).map_err(|e| format!("open db {db}: {e}"))
+}
+
+/// `backup` opens the DB itself, without migrating (see `core::backup`).
+fn cmd_backup(db: &str, to: &str, json: bool) -> Result<(), String> {
+    let key = db_key()?;
+    let r = outflow_core::backup::backup_db(db, to, key.as_deref())?;
+    if json {
+        return json_out(&r);
+    }
+    println!(
+        "backed up {db} → {}: {:.1} MB, {}, schema v{}, {} tables, {} rows, integrity ok",
+        r.path,
+        r.bytes as f64 / 1_048_576.0,
+        if r.encrypted {
+            "encrypted"
+        } else {
+            "plaintext"
+        },
+        r.schema_version,
+        r.tables.len(),
+        r.total_rows()
+    );
+    Ok(())
 }
 
 fn now_secs() -> i64 {
@@ -1749,8 +1786,12 @@ fn run() -> Result<(), String> {
     if let Some(server) = &cli.server {
         return run_remote(server, &cli.cmd);
     }
+    if let Cmd::Backup { to } = &cli.cmd {
+        return cmd_backup(&cli.db, to, cli.json);
+    }
     let store = open_store(&cli.db)?;
     match cli.cmd {
+        Cmd::Backup { .. } => unreachable!("handled above"),
         Cmd::Pull { from_file } => cmd_pull(&store, from_file),
         Cmd::Categorize { llm } => cmd_categorize(&store, llm),
         Cmd::Report {

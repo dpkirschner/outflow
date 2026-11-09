@@ -75,8 +75,10 @@ effect), plus server/JSON mode (`--server URL`/`OUTFLOW_SERVER`, `--json`):
 card payment `--direction out` = bank side, `in` = card side), `accounts`,
 `matches`, `status` (what needs you: connections not ok, card payments
 to review, last sync; then recent sync runs; `--json` =
-`{upkeep, sync_log}` in both modes).
-DB path from `--db` or `OUTFLOW_DB`.
+`{upkeep, sync_log}` in both modes), and local-only `backup --to PATH`
+(verified snapshot, same key, 0600, never overwrites or migrates; safe
+while the server runs).
+DB path from `--db` or `OUTFLOW_DB`; key from `OUTFLOW_DB_KEY[_FILE]`.
 
 One date group everywhere (`core::period`): `--period` takes `2026-11`,
 `2026-W45`, `2026-Q4`, `2026`, or `this-`/`last-` `week|month|quarter|year`;
@@ -124,11 +126,12 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
 - **`core/`** — pure domain, zero GUI/network deps by default. `money` → `model`
   → `store` (SQLite via rusqlite) → `query` / `subscriptions` / `recurring` / `categorize` /
   `llm` / `plaid` (pure Plaid JSON→domain parser) / `transfers` (card-payment
-  matcher). Source of truth; every front-end calls it directly so **CLI and web
+  matcher) / `backup` (verified snapshot, never migrates) / `secrets` (0600
+  files). Source of truth; every front-end calls it directly so **CLI and web
   run identical domain logic**.
 - **`net/`** — networked adapters (sync ureq): `plaid` (Link/exchange/sync
-  transport), `plaid_tokens` (0600 token file), `secrets` (0600-file
-  helpers), `anthropic` (`Prompter`).
+  transport), `plaid_tokens` (0600 token file), `secrets` (re-exports
+  core's), `anthropic` (`Prompter`).
 - **`cli/`** — headless `outflow` binary; clap subcommands map to core calls
   (direct DB) or to the server API (`--server`, for agents/scripts).
 - **`server/`** — axum + tokio. `Arc<Mutex<Store>>` bridged with

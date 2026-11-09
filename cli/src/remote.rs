@@ -115,11 +115,21 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
             Some(serde_json::json!({ "category": category, "learn": !no_learn })),
         ),
         Cmd::Accounts { all } => remote.get(&format!("/accounts?include_hidden={all}")),
-        // Same shape as local `status --json`: {"upkeep": ..., "sync_log": [...]}.
+        // Same shape as local `status --json`: {"version": ..., "upkeep": ...,
+        // "sync_log": [...]}, with the server's version. A server older than
+        // /version reports null.
         Cmd::Status { limit } => {
+            let version = remote
+                .get("/version")
+                .ok()
+                .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
+                .map(|v| v["version"].clone())
+                .unwrap_or(serde_json::Value::Null);
             let up = remote.get("/upkeep")?;
             let log = remote.get(&format!("/sync_log?limit={limit}"))?;
-            Ok(format!("{{\"upkeep\":{up},\"sync_log\":{log}}}"))
+            Ok(format!(
+                "{{\"version\":{version},\"upkeep\":{up},\"sync_log\":{log}}}"
+            ))
         }
         // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
         Cmd::Perks {

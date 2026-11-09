@@ -687,6 +687,9 @@
     "last_synced": 1768521600,
     "total": 3
   },
+  "BuildInfo": {
+    "version": "v2026.11.0"
+  },
   "ResetPreview": {
     "transactions": 1200,
     "oldest_day": "2024-01-15",

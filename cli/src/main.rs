@@ -17,6 +17,7 @@ mod remote;
 #[derive(Parser)]
 #[command(
     name = "outflow",
+    version = outflow_core::build::VERSION.unwrap_or("unreleased build"),
     about = "Where your money is and where it's going: Stock, Flow, Check-in, from a local archive or a running outflow-server"
 )]
 struct Cli {
@@ -304,7 +305,9 @@ pub(crate) enum Cmd {
         expiring_days: i64,
     },
     /// What needs you (connections, card payments to review, last sync),
-    /// then recent sync runs. --json: {"upkeep": ..., "sync_log": [...]}.
+    /// then recent sync runs. --json: {"version": ..., "upkeep": ...,
+    /// "sync_log": [...]}; version is this CLI's build locally, the server's
+    /// with --server.
     Status {
         /// Sync runs to list.
         #[arg(long, default_value_t = 20)]
@@ -1627,9 +1630,15 @@ fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> Result<(), Strin
 fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
     let log = store.sync_log(limit).map_err(|e| format!("{e}"))?;
     let up = outflow_core::upkeep(store).map_err(|e| format!("{e}"))?;
+    let version = outflow_core::build::VERSION;
     if json {
-        return json_out(&serde_json::json!({ "upkeep": up, "sync_log": log }));
+        return json_out(&serde_json::json!({
+            "version": version,
+            "upkeep": up,
+            "sync_log": log,
+        }));
     }
+    println!("version: {}", version.unwrap_or("unreleased build"));
     print_upkeep(&up);
     println!();
     for s in &log {

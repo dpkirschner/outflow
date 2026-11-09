@@ -8,6 +8,7 @@ import type {
   Account,
   ActivityRow,
   BalancesView,
+  BuildInfo,
   CategorizeResult,
   CategoryEdit,
   CategorySpend,
@@ -737,6 +738,10 @@ export const upkeep: Upkeep = {
   "proposed_matches": 2,
   "last_synced": 1768521600,
   "total": 3
+};
+
+export const buildInfo: BuildInfo = {
+  "version": "v2026.11.0"
 };
 
 export const resetPreview: ResetPreview = {

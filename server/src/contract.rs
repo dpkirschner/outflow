@@ -881,6 +881,12 @@ fn entries() -> Vec<(&'static str, String)> {
         ("SyncEntry", j(sync_entry())),
         ("SyncReport", j(sync_report())),
         ("Upkeep", j(upkeep())),
+        (
+            "BuildInfo",
+            j(outflow_core::BuildInfo {
+                version: Some("v2026.11.0".into()),
+            }),
+        ),
         ("ResetPreview", j(reset_preview())),
         ("CategorizeResult", j(categorize_result())),
         ("CategoryEdit", j(category_edit())),

@@ -862,6 +862,11 @@ async fn upkeep(State(state): State<AppState>) -> ApiResult<outflow_core::Upkeep
     .map(Json)
 }
 
+/// Which release this server was built from (null for a non-release build).
+async fn version() -> Json<outflow_core::BuildInfo> {
+    Json(outflow_core::build_info())
+}
+
 /// What `POST /reset_data` would delete and what the next sync can't bring
 /// back (core::reset), for the confirm step.
 async fn reset_preview(State(state): State<AppState>) -> ApiResult<outflow_core::ResetPreview> {
@@ -976,6 +981,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/has_credit_account", get(has_credit_account))
         .route("/sync_log", get(sync_log))
         .route("/upkeep", get(upkeep))
+        .route("/version", get(version))
         .route("/categorize", post(categorize))
         .route("/categorize_llm", post(categorize_llm))
         .route("/txn/{txn_id}/category", post(set_category))
@@ -1138,6 +1144,14 @@ mod tests {
         .await
         .unwrap()
         .status()
+    }
+
+    #[tokio::test]
+    async fn version_reports_the_build() {
+        let (status, v) = get_json(app_with_two_accounts(), "/version").await;
+        assert_eq!(status, StatusCode::OK);
+        let want = outflow_core::build::VERSION.map(|s| serde_json::json!(s));
+        assert_eq!(v["version"], want.unwrap_or(serde_json::Value::Null));
     }
 
     #[tokio::test]

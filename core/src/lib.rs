@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod balances;
+pub mod build;
 pub mod categorize;
 pub mod checkin;
 pub mod llm;
@@ -23,6 +24,7 @@ pub use balances::{
     summarize as summarize_balances, AccountBalance, BalancesView, DayTotals, Group, GroupBalance,
     HoldingRow, PositionFilter, PositionPoint, PositionRow, Totals,
 };
+pub use build::{build_info, BuildInfo};
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 pub use checkin::{
     checkin, Check, CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual,

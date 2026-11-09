@@ -650,6 +650,17 @@ export type NotChecked = {
 };
 
 /**
+ * Which build is answering (`GET /api/version`, `outflow status`).
+ */
+export type BuildInfo = {
+  /**
+   * Release tag (`vYYYY.MM.N`) this binary was built from; null for a
+   * build that isn't a release.
+   */
+  version: string | null,
+};
+
+/**
  * A connection that needs the owner.
  */
 export type ConnectionIssue = {

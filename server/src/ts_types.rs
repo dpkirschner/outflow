@@ -117,6 +117,12 @@ fn render() -> String {
         );
     }
 
+    // --- core::build ---
+    {
+        use outflow_core::build::*;
+        decls!(&cfg, out, [BuildInfo]);
+    }
+
     // --- core::upkeep ---
     {
         use outflow_core::upkeep::*;

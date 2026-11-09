@@ -17,3 +17,6 @@ agent.md
 # graphify knowledge graph (generated locally, refreshed by git hooks)
 graphify-out/
 .impeccable/critique/
+
+# Python bytecode (scripts/leakscan tests)
+__pycache__/

@@ -99,7 +99,9 @@ serves** (reach for it after a UI change); **`make serve` skips the rebuild**
 and serves whatever's already in `app/dist` (backend-only iteration). Running
 the bare server binary never rebuilds the frontend, so a stale `app/dist`
 serves the old bundle. `make check` is the gate: fmt-check, clippy, tests (server included), the
-types.ts/contract freshness check and `tsc`.
+types.ts/contract freshness check, `tsc`, and `make leakscan` (personal-data scan of all
+history: `scripts/leakscan.py`, exceptions in `.leakscan-allow`, the private denylist via
+`LEAKSCAN_DENYLIST_FILE`; CI runs the same scan in `.github/workflows/leakscan.yml`).
 
 Server env: `OUTFLOW_DB`, `OUTFLOW_LISTEN` (default 127.0.0.1:8080),
 `OUTFLOW_WEB_DIR` (default app/dist), `OUTFLOW_PLAID_CLIENT_ID`,

@@ -8,7 +8,7 @@ APP_DIR := app
 DB ?= $(HOME)/outflow-dev.db
 
 .DEFAULT_GOAL := help
-.PHONY: help dev web server run serve prod deps test check types fmt lint pull clean
+.PHONY: help dev web server run serve prod deps test check types fmt lint leakscan pull clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' \
@@ -46,6 +46,7 @@ check: ## Pre-commit gate: fmt, clippy, tests, types.ts + API contract freshness
 	cargo test -p outflow-core -p outflow-net
 	cargo test -p outflow-server --features ts
 	cd $(APP_DIR) && npx tsc --noEmit
+	$(MAKE) --no-print-directory leakscan
 
 types: ## Regenerate app/src/types.ts + the API contract snapshot from the Rust DTOs
 	UPDATE_TYPES=1 cargo test -p outflow-server --features ts -- types_ts contract
@@ -55,6 +56,10 @@ fmt: ## Format all Rust code
 
 lint: ## Clippy across the workspace, warnings as errors
 	cargo clippy --workspace --all-targets -- -D warnings
+
+leakscan: ## Scan all history for personal data (shape rules, plus a denylist from LEAKSCAN_DENYLIST_FILE)
+	python3 -I -m unittest discover -s scripts -p 'test_*.py'
+	python3 -I scripts/leakscan.py --all
 
 pull: ## Ingest the offline Plaid fixture into $(DB)
 	cargo run -p outflow-cli -- --db "$(DB)" pull --from-file examples/plaid-fixture.json

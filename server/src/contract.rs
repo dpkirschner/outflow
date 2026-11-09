@@ -263,6 +263,8 @@ fn checkin() -> outflow_core::CheckIn {
         count: None,
         gap_days: Some(30),
         per_charge: false,
+        impact_cents: Some(750),
+        minor: true,
     };
     let mut late = up.clone();
     late.kind = UnusualKind::Late;
@@ -274,6 +276,10 @@ fn checkin() -> outflow_core::CheckIn {
     late.day = Some("2026-07-14".into());
     late.month = None;
     late.gap_days = Some(61);
+    late.impact_cents = Some(4_000);
+    late.minor = false;
+    late.change_pct = Some(-40.0);
+    late.month = Some("2026-07".into());
     let mut large = up.clone();
     large.kind = UnusualKind::LargeCharge;
     large.label = "SAMPLE FURNITURE".into();
@@ -285,6 +291,8 @@ fn checkin() -> outflow_core::CheckIn {
     large.day = Some("2026-10-12".into());
     large.month = None;
     large.gap_days = None;
+    large.impact_cents = Some(120_000);
+    large.minor = false;
     up.account_id = None;
     let p = outflow_core::Period::parse("2026-10", NaiveDate::from_ymd_opt(2026, 11, 7).unwrap())
         .unwrap();
@@ -320,8 +328,19 @@ fn checkin() -> outflow_core::CheckIn {
             saved_cents: Some(100_000),
             net_worth_periods: 1,
             net_worth_change_cents: None,
+            to_date: None,
         },
-        unusual: vec![up, large, late],
+        versus: Some(Versus {
+            figure: VersusFigure::EarnedMinusSpent,
+            cents: 187_655,
+            usual_cents: 220_000,
+            diff_cents: -32_345,
+            outside: false,
+            worse: true,
+            in_diff_cents: Some(0),
+            contributors: vec![],
+        }),
+        unusual: vec![large, late, up],
         not_checked: vec![NotChecked {
             check: Check::LargeCharges,
             reason: NotCheckedReason::ShortHistory,

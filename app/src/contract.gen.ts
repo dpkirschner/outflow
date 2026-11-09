@@ -191,26 +191,20 @@ export const checkIn: CheckIn = {
     "earned_minus_spent_cents": 220000,
     "saved_cents": 100000,
     "net_worth_periods": 1,
-    "net_worth_change_cents": null
+    "net_worth_change_cents": null,
+    "to_date": null
+  },
+  "versus": {
+    "figure": "earned_minus_spent",
+    "cents": 187655,
+    "usual_cents": 220000,
+    "diff_cents": -32345,
+    "outside": false,
+    "worse": true,
+    "in_diff_cents": 0,
+    "contributors": []
   },
   "unusual": [
-    {
-      "kind": "recurring_up",
-      "label": "SAMPLE STREAMING",
-      "cents": 2299,
-      "usual_cents": 1549,
-      "change_pct": 48.4,
-      "merchant": "sample streaming",
-      "txn_id": null,
-      "account_id": null,
-      "day": null,
-      "month": "2026-10",
-      "item_id": null,
-      "status": null,
-      "count": null,
-      "gap_days": 30,
-      "per_charge": false
-    },
     {
       "kind": "large_charge",
       "label": "SAMPLE FURNITURE",
@@ -226,24 +220,47 @@ export const checkIn: CheckIn = {
       "status": null,
       "count": null,
       "gap_days": null,
-      "per_charge": false
+      "per_charge": false,
+      "impact_cents": 120000,
+      "minor": false
     },
     {
       "kind": "late",
       "label": "SAMPLE GROOMER",
       "cents": 8000,
       "usual_cents": null,
-      "change_pct": null,
+      "change_pct": -40.0,
       "merchant": "sample groomer",
       "txn_id": null,
       "account_id": "acct-demo-checking",
       "day": "2026-07-14",
-      "month": null,
+      "month": "2026-07",
       "item_id": null,
       "status": null,
       "count": null,
       "gap_days": 61,
-      "per_charge": false
+      "per_charge": false,
+      "impact_cents": 4000,
+      "minor": false
+    },
+    {
+      "kind": "recurring_up",
+      "label": "SAMPLE STREAMING",
+      "cents": 2299,
+      "usual_cents": 1549,
+      "change_pct": 48.4,
+      "merchant": "sample streaming",
+      "txn_id": null,
+      "account_id": null,
+      "day": null,
+      "month": "2026-10",
+      "item_id": null,
+      "status": null,
+      "count": null,
+      "gap_days": 30,
+      "per_charge": false,
+      "impact_cents": 750,
+      "minor": true
     }
   ],
   "not_checked": [

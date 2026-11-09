@@ -28,6 +28,15 @@ typography:
     fontSize: "23px"
     fontWeight: 700
     letterSpacing: "-0.5px"
+  answer:
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "22px"
+    fontWeight: 450
+  hero-figure:
+    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+    fontSize: "24px"
+    fontWeight: 650
+    fontFeature: "tnum"
   figure:
     fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
     fontSize: "20px"
@@ -213,6 +222,10 @@ the numbers. Hierarchy comes from weight and size, not from a second family.
 ### Hierarchy
 - **Wordmark** (700, 23px, -0.5px tracking): the product name in the header
   only.
+- **Answer** (450, 22px; 19px below 720px; money in 650): Check-in's one
+  sentence, the home screen's focal moment.
+- **Hero figure** (650, 24px, tabular): figures open on the page under a
+  focal moment (Check-in's three, the Flow headline pair).
 - **Figure** (650, 20px, tabular): headline numbers in stat tiles: net
   worth, totals.
 - **Title** (600, 16px): section headings on a screen (Connections,
@@ -343,9 +356,14 @@ those capsules.
 
 ### Answer in words (Check-in)
 - Check-in's focal moment: one sentence at 22px (450, money in 650,
-  tabular) saying what the period did ("In October, net worth rose $309.88
-  and you kept $172.51 of what you earned."), then a Text Dim tail that
-  counts what needs you and what looks unusual. Nothing above it but the
+  tabular) saying what the period did and how that compares with usual
+  ("In October, net worth rose $309.88 and you kept $151.72 of what you
+  earned, $1,713.88 less than usual; Oakwood Furniture and Skyline Airways
+  were $1,855.00 of it."), then a Text Dim tail that counts what needs you
+  and what looks unusual (minor items not counted). Inside the usual range
+  it says so ("within your usual range"); a week is read by what you spent,
+  since paydays swing earned − spent. Numbers in prose are words up to
+  nine. Nothing above it but the
   strip and the title bar, so the figures under it read as the evidence.
   Below 720px it drops to 19px.
 
@@ -353,8 +371,11 @@ those capsules.
 - Three figures open on the page (no card), split by Hairlines like the
   Flow headline pair but at 24px: Net worth change, Earned − spent, Saved.
   Each has one Text Dim line of parts (Markets · Added, in · out, what
-  stayed as cash) and one "usually" line with the usual in Text and 600.
-  One Text Faint footnote says what "usually" means. In Month view each
+  stayed as cash) and one "usually" line with the usual in Text and 600;
+  while the period is in progress it reads "usually −$54.66 by Nov 8" (the
+  earlier periods cut to the same day). A week shows Spent in place of
+  Earned − spent, and Saved has no usual line. One Text Faint footnote says
+  what "usually" means. In Month view each
   figure is a link (dotted Text Faint underline) to Holdings or Flow for
   that month; week and quarter figures are plain, since those screens
   don't show weeks or quarters. Below 720px they stack with Hairlines
@@ -369,7 +390,15 @@ those capsules.
   the signed amount when there is one, and the destination (Flow /
   Settings) in Text Faint. Rows open the destination already filtered:
   Flow drilled to the merchant (recurring window, or the charge's month
-  for a large charge), Settings scrolled to the section.
+  for a large charge), Settings scrolled to the section. Back returns focus
+  to the row (or figure) that was used.
+- Order comes from core: what needs you, then by money at stake. Minor items
+  (a place you visit every few weeks going quiet or changing, or a change
+  under $20 a month) fold into one closed `<details>` row at the end of the
+  card ("Two smaller changes", Text Dim), whose rows open in place. The
+  large-charge threshold is said once, on the first large row.
+- Week / quarter steppers use `aria-disabled`, never `disabled`, so focus
+  stays put at the first or current period; 40px below 480px.
 - Checks that didn't run are a Text Faint list under the card, in words
   ("Recurring cost changes wait for a finished month.").
 - Below 720px each row is note and destination, then name and detail with

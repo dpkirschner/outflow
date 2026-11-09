@@ -22,6 +22,27 @@ export default function App() {
     const label = SCREENS.find((s) => s.screen === tab)?.label;
     document.title = label ? `outflow · ${label}` : "outflow";
   }, [tab]);
+  // A screen change that drops focus (the link that was used is gone) puts
+  // it on the new screen's heading, not the page. A screen that moves focus
+  // itself (a drill-down, Back to a Check-in row) does so later and wins.
+  const firstScreen = useRef(true);
+  useEffect(() => {
+    if (firstScreen.current) {
+      firstScreen.current = false;
+      return;
+    }
+    // Checked again for a moment: a screen swaps its loading <main> for the
+    // loaded one, which drops focus a second time.
+    const place = () => {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      const h1 = document.querySelector<HTMLElement>("main h1");
+      if (!lost || !h1) return;
+      if (!h1.hasAttribute("tabindex")) h1.setAttribute("tabindex", "-1");
+      h1.focus({ preventScroll: true });
+    };
+    const timers = [0, 300, 900, 1800].map((ms) => window.setTimeout(place, ms));
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [tab]);
   // Upkeep that needs a look (core's upkeep total: connections to reconnect
   // + card payments to review). Shown as a badge on the Settings tab.
   const [attention, setAttention] = useState(0);

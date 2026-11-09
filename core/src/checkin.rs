@@ -23,6 +23,24 @@
 //!   review (`upkeep::summary`). These are about now, so they show for any
 //!   period.
 //!
+//! - **Usual to date** (a period in progress): each earlier period cut to
+//!   the same number of days, so Nov 1–8 is read against Oct 1–8, Sep 1–8…
+//! - **Minor** items (decided 2026-11-08, ho-2mj.5.3): late or up / down for
+//!   a merchant charged every `MINOR_GAP_DAYS` days or more often (a place
+//!   you visit, not a bill), and up / down by less than
+//!   `MINOR_CHANGE_CENTS`. Still reported, marked `minor`, listed last; the
+//!   screen folds them into one row.
+//! - **Versus usual**: the period's headline figure (earned − spent; spent
+//!   on a week, where paydays make earned − spent swing) against its usual.
+//!   Outside the usual when the difference is at least `VERSUS_BAND_PCT`% of
+//!   usual spending and the figure falls outside the
+//!   `VERSUS_SPREAD_PCT`–(100 − it) percentile range of the earlier periods
+//!   (weekly spending swings a lot); when it's worse, the largest money items behind it are
+//!   named (`VERSUS_MAX_CONTRIBUTORS`).
+//! - Order: attention, then other items by money (`impact_cents`), minor
+//!   last. One row per merchant: a merchant late and changed in the same
+//!   period shows once, as late, carrying the change.
+//!
 //! A check that can't run is listed in `not_checked` with its reason, so the
 //! screen says why instead of showing nothing.
 
@@ -34,7 +52,7 @@ use crate::stock::{net_worth_change, ChangeReason, NetWorthChange};
 use crate::store::Store;
 use crate::subscriptions::{display_merchant, normalize_payee};
 use crate::upkeep;
-use chrono::{Datelike, Local, Months, NaiveDate, TimeZone};
+use chrono::{Datelike, Days, Local, Months, NaiveDate, TimeZone};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 
@@ -51,6 +69,18 @@ pub const LARGE_CHARGE_LOOKBACK_MONTHS: u32 = 12;
 pub const LARGE_CHARGE_MIN_HISTORY: usize = 30;
 /// At most this many large charges are listed.
 pub const LARGE_CHARGE_MAX_ITEMS: usize = 5;
+/// A recurring merchant charged this often or more (usual gap in days) is a
+/// place you visit: its late or up / down items are minor.
+pub const MINOR_GAP_DAYS: i64 = 20;
+/// An up / down smaller than this (against the usual) is minor.
+pub const MINOR_CHANGE_CENTS: i64 = 20_00;
+/// The headline figure is outside its usual when the difference is at least
+/// this % of usual spending.
+pub const VERSUS_BAND_PCT: i64 = 25;
+/// ...and outside this low / high percentile of the earlier periods.
+pub const VERSUS_SPREAD_PCT: u32 = 10;
+/// At most this many items are named behind a worse-than-usual figure.
+pub const VERSUS_MAX_CONTRIBUTORS: usize = 3;
 
 /// One period's check-in.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -64,8 +94,10 @@ pub struct CheckIn {
     pub net_worth: NetWorthSummary,
     pub flow: FlowSummary,
     pub usual: Usual,
-    /// Largest concern first: attention, then recurring changes, then large
-    /// charges.
+    /// The headline figure against its usual; None without a usual.
+    pub versus: Option<Versus>,
+    /// Attention first, then by `impact_cents` (largest first), minor items
+    /// last.
     pub unusual: Vec<Unusual>,
     /// Checks that didn't run for this period, and why.
     pub not_checked: Vec<NotChecked>,
@@ -106,7 +138,7 @@ pub struct FlowSummary {
 }
 
 /// Each figure's median over the earlier periods; None without enough.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Usual {
     /// How many earlier periods the Flow medians cover.
@@ -118,6 +150,52 @@ pub struct Usual {
     /// How many earlier periods had a net worth change.
     pub net_worth_periods: usize,
     pub net_worth_change_cents: Option<i64>,
+    /// Set while the period is in progress: the medians are of the earlier
+    /// periods cut to the same length, through this day of this period
+    /// (`YYYY-MM-DD`, today).
+    pub to_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum VersusFigure {
+    /// Months and quarters: `flow.earned_minus_spent_cents`.
+    EarnedMinusSpent,
+    /// Weeks: `flow.out_cents` (a payday week isn't unusual).
+    Spent,
+}
+
+/// The headline figure against its usual.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Versus {
+    pub figure: VersusFigure,
+    pub cents: i64,
+    pub usual_cents: i64,
+    /// `cents - usual_cents`.
+    pub diff_cents: i64,
+    /// Far from the usual: at least `VERSUS_BAND_PCT`% of usual spending
+    /// away, and beyond the earlier periods' usual spread.
+    pub outside: bool,
+    /// Kept less, or spent more, than usual.
+    pub worse: bool,
+    /// Earned − spent only: `flow.in_cents` minus its usual (how much of the
+    /// difference is income).
+    pub in_diff_cents: Option<i64>,
+    /// When outside and worse: the unusual items with the most money behind
+    /// the difference (large charges, recurring costs up), largest first,
+    /// each at least a tenth of the difference.
+    pub contributors: Vec<Contributor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct Contributor {
+    pub label: String,
+    pub merchant: Option<String>,
+    /// Its share, positive: the charge, or a cost's rise over its usual.
+    pub cents: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -155,7 +233,8 @@ pub struct Unusual {
     /// months before (`change_pct`'s base); for a large charge, the
     /// threshold; for a new merchant, unset.
     pub usual_cents: Option<i64>,
-    /// Signed % against the usual (recurring up/down).
+    /// Signed % against the usual (recurring up/down). On a late item: a
+    /// change judged earlier in the period, in `month`, if there was one.
     pub change_pct: Option<f64>,
     /// `normalize_payee` key: `merchant=` on `/transactions`.
     pub merchant: Option<String>,
@@ -176,6 +255,13 @@ pub struct Unusual {
     /// monthly): `cents` is the charge and `usual_cents` the usual charge,
     /// not monthly totals.
     pub per_charge: bool,
+    /// Money at stake, positive, for ordering: the charge (large), the
+    /// difference from the usual (up / down), the usual monthly cost (new,
+    /// late). None for attention items.
+    pub impact_cents: Option<i64>,
+    /// A small or frequent-merchant item (see the module docs); the screen
+    /// folds these into one row.
+    pub minor: bool,
 }
 
 impl Unusual {
@@ -196,6 +282,8 @@ impl Unusual {
             count: None,
             gap_days: None,
             per_charge: false,
+            impact_cents: None,
+            minor: false,
         }
     }
 }
@@ -249,8 +337,7 @@ pub fn checkin(
     let activity = store.investment_txns()?;
     let ignored = store.ignored_merchants()?;
 
-    let nw = |p: &Period| {
-        let (since, until) = p.bounds();
+    let nw_over = |since: i64, until: i64| {
         net_worth_change(
             &accounts,
             &securities,
@@ -261,9 +348,23 @@ pub fn checkin(
             Some(until),
         )
     };
+    let nw = |p: &Period| {
+        let (since, until) = p.bounds();
+        nw_over(since, until)
+    };
     let (since, until) = period.bounds();
     let flow = flow_over(&txns, &kind, since, until);
     let in_progress = period.end > today;
+    // In progress: earlier periods are cut to the days elapsed so far.
+    let elapsed = in_progress.then(|| {
+        Days::new(((today - period.start).num_days() + 1).clamp(1, period.days() as i64) as u64)
+    });
+    let cut = |p: &Period| -> (i64, i64) {
+        match elapsed {
+            Some(n) => (day_start(p.start), day_start((p.start + n).min(p.end))),
+            None => p.bounds(),
+        }
+    };
 
     // Usual: the earlier periods of the same kind.
     let first_day = txns
@@ -284,13 +385,16 @@ pub fn checkin(
     let flows: Vec<_> = covered
         .iter()
         .map(|p| {
-            let (s, u) = p.bounds();
+            let (s, u) = cut(p);
             flow_over(&txns, &kind, s, u)
         })
         .collect();
     let nw_changes: Vec<i64> = earlier
         .iter()
-        .filter_map(|p| nw(p).change.map(|m| m.cents()))
+        .filter_map(|p| {
+            let (s, u) = cut(p);
+            nw_over(s, u).change.map(|m| m.cents())
+        })
         .collect();
     let med = |v: Vec<i64>| (v.len() >= USUAL_MIN_PERIODS).then(|| median(v));
     let usual = Usual {
@@ -301,6 +405,7 @@ pub fn checkin(
         saved_cents: med(flows.iter().map(|f| f.saved_cents).collect()),
         net_worth_periods: nw_changes.len(),
         net_worth_change_cents: med(nw_changes),
+        to_date: elapsed.map(|_| today.min(period.last_day()).to_string()),
     };
 
     let mut unusual = attention(store)?;
@@ -355,12 +460,16 @@ pub fn checkin(
             for u in charge_changes(&last_view, since, until) {
                 changed.insert(u.merchant.clone().unwrap_or_default(), u);
             }
-            let mut changed: Vec<Unusual> = changed.into_values().collect();
-            changed.sort_by(|a, b| {
-                let gap = |u: &Unusual| (u.cents.unwrap_or(0) - u.usual_cents.unwrap_or(0)).abs();
-                gap(b).cmp(&gap(a))
-            });
-            unusual.extend(changed);
+            // One row per merchant: late wins (the latest state) and carries
+            // the change judged earlier in the period.
+            for mut l in late(&last_view, since, until) {
+                if let Some(c) = l.merchant.as_ref().and_then(|m| changed.remove(m)) {
+                    l.change_pct = c.change_pct;
+                    l.month = c.month;
+                }
+                unusual.push(l);
+            }
+            unusual.extend(changed.into_values());
         }
         PeriodKind::Year | PeriodKind::Custom => {
             for check in [Check::NewRecurring, Check::RecurringChanges] {
@@ -417,6 +526,7 @@ pub fn checkin(
                         u.txn_id = Some(t.id.clone());
                         u.account_id = Some(t.account_id.clone());
                         u.day = local_day(t.effective_date()).map(|d| d.to_string());
+                        u.impact_cents = Some(c);
                         u
                     }),
             );
@@ -428,28 +538,130 @@ pub fn checkin(
         });
     }
 
-    // Late: recurring merchants that went quiet during the period. Each
-    // shows once, in the period it became late.
-    if calendar {
+    // Late on a week: recurring merchants that went quiet during it (month
+    // and quarter add theirs above, merged with the changes).
+    if period.kind == PeriodKind::Week {
         unusual.extend(late(&last_view, since, until));
     }
 
+    for u in &mut unusual {
+        mark_minor(u);
+    }
+    // Attention first (already first, kept in order), then by money, minor
+    // last. Stable, so equal items keep the order they were found in.
+    unusual.sort_by_key(|u| {
+        let attention = matches!(u.kind, UnusualKind::Connection | UnusualKind::MatchReview);
+        (
+            !attention,
+            u.minor,
+            std::cmp::Reverse(u.impact_cents.unwrap_or(0)),
+        )
+    });
+
+    let flow = FlowSummary {
+        in_cents: flow.in_cents,
+        out_cents: flow.out_cents,
+        earned_minus_spent_cents: flow.earned_minus_spent_cents,
+        saved_cents: flow.saved_cents,
+        gap_cents: flow.gap_cents,
+    };
+    let versus = versus(period.kind, &flow, &usual, &flows, &unusual);
     let change = nw(&period);
     Ok(CheckIn {
         label: period.to_string(),
         period,
         in_progress,
         net_worth: summary(&change),
-        flow: FlowSummary {
-            in_cents: flow.in_cents,
-            out_cents: flow.out_cents,
-            earned_minus_spent_cents: flow.earned_minus_spent_cents,
-            saved_cents: flow.saved_cents,
-            gap_cents: flow.gap_cents,
-        },
+        flow,
         usual,
+        versus,
         unusual,
         not_checked,
+    })
+}
+
+/// Marks small and frequent-merchant items minor (module docs).
+fn mark_minor(u: &mut Unusual) {
+    let frequent = u.gap_days.is_some_and(|g| g <= MINOR_GAP_DAYS);
+    u.minor = match u.kind {
+        UnusualKind::Late => frequent,
+        UnusualKind::RecurringUp | UnusualKind::RecurringDown => {
+            frequent || u.impact_cents.unwrap_or(0) < MINOR_CHANGE_CENTS
+        }
+        _ => false,
+    };
+}
+
+/// The headline figure against its usual (module docs).
+fn versus(
+    kind: PeriodKind,
+    f: &FlowSummary,
+    usual: &Usual,
+    earlier: &[crate::query::FlowMonth],
+    unusual: &[Unusual],
+) -> Option<Versus> {
+    let spending = usual.out_cents?;
+    let week = kind == PeriodKind::Week;
+    let (figure, cents, usual_cents) = if week {
+        (VersusFigure::Spent, f.out_cents, spending)
+    } else {
+        (
+            VersusFigure::EarnedMinusSpent,
+            f.earned_minus_spent_cents,
+            usual.earned_minus_spent_cents?,
+        )
+    };
+    let mut past: Vec<i64> = earlier
+        .iter()
+        .map(|e| {
+            if week {
+                e.out_cents
+            } else {
+                e.earned_minus_spent_cents
+            }
+        })
+        .collect();
+    let low = percentile(&mut past, VERSUS_SPREAD_PCT);
+    let high = percentile(&mut past, 100 - VERSUS_SPREAD_PCT);
+    let diff = cents - usual_cents;
+    let worse = if week { diff > 0 } else { diff < 0 };
+    let outside = spending > 0
+        && diff.abs() * 100 >= VERSUS_BAND_PCT * spending
+        && (cents < low || cents > high);
+    let mut contributors: Vec<Contributor> = if outside && worse {
+        unusual
+            .iter()
+            .filter_map(|u| {
+                let cents = match u.kind {
+                    UnusualKind::LargeCharge => u.cents?,
+                    UnusualKind::RecurringUp => u.impact_cents?,
+                    _ => return None,
+                };
+                Some(Contributor {
+                    label: u.label.clone(),
+                    merchant: u.merchant.clone(),
+                    cents,
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    // Named only when worth a tenth of the difference or more.
+    contributors.retain(|c| c.cents * 10 >= diff.abs());
+    contributors.sort_by_key(|c| std::cmp::Reverse(c.cents));
+    contributors.truncate(VERSUS_MAX_CONTRIBUTORS);
+    Some(Versus {
+        figure,
+        cents,
+        usual_cents,
+        diff_cents: diff,
+        outside,
+        worse,
+        in_diff_cents: (figure == VersusFigure::EarnedMinusSpent)
+            .then(|| usual.in_cents.map(|u| f.in_cents - u))
+            .flatten(),
+        contributors,
     })
 }
 
@@ -504,6 +716,7 @@ fn new_recurring(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> {
             u.merchant = Some(r.merchant.clone());
             u.account_id = Some(r.account_id.clone());
             u.day = local_day(r.first_seen).map(|d| d.to_string());
+            u.impact_cents = Some(r.monthly_cents);
             u
         })
         .collect();
@@ -530,6 +743,7 @@ fn recurring_changes(view: &RecurringView, month: NaiveDate) -> Vec<Unusual> {
             u.account_id = Some(r.account_id.clone());
             u.month = Some(format!("{:04}-{:02}", month.year(), month.month()));
             u.gap_days = Some(r.gap_days);
+            u.impact_cents = u.cents.zip(u.usual_cents).map(|(c, b)| (c - b).abs());
             Some(u)
         })
         .collect()
@@ -562,6 +776,7 @@ fn charge_changes(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> 
             u.month = Some(format!("{:04}-{:02}", day.year(), day.month()));
             u.gap_days = Some(r.gap_days);
             u.per_charge = true;
+            u.impact_cents = u.usual_cents.map(|b| (latest.cents - b).abs());
             Some(u)
         })
         .collect()
@@ -581,6 +796,7 @@ fn late(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> {
             u.account_id = Some(r.account_id.clone());
             u.day = local_day(r.last_seen).map(|d| d.to_string());
             u.gap_days = Some(r.gap_days);
+            u.impact_cents = Some(r.monthly_cents);
             Some((at, u))
         })
         .collect();
@@ -978,5 +1194,122 @@ mod tests {
         let q3 = run(&s, "2026-Q3");
         assert!(find(&q3, UnusualKind::RecurringUp, "sample groomer").is_some());
         assert!(find(&q3, UnusualKind::Late, "sample plumber").is_some());
+    }
+
+    #[test]
+    fn month_compares_with_usual_and_names_what_moved_it() {
+        let s = seed();
+        let c = run(&s, "2026-10");
+        let v = c.versus.as_ref().expect("usual exists");
+        assert_eq!(v.figure, VersusFigure::EarnedMinusSpent);
+        assert_eq!(v.cents, c.flow.earned_minus_spent_cents);
+        assert_eq!(Some(v.usual_cents), c.usual.earned_minus_spent_cents);
+        assert_eq!(v.diff_cents, v.cents - v.usual_cents);
+        assert!(v.outside && v.worse);
+        assert_eq!(v.in_diff_cents, Some(0), "payroll as usual");
+        assert_eq!(v.contributors[0].label, "Furniture Barn");
+        assert_eq!(v.contributors[0].cents, 1200_00);
+        assert!(v.contributors.len() <= VERSUS_MAX_CONTRIBUTORS);
+    }
+
+    #[test]
+    fn unusual_is_ordered_by_money_with_minor_last() {
+        let s = seed();
+        let c = run(&s, "2026-10");
+        assert_eq!(c.unusual[0].kind, UnusualKind::LargeCharge);
+        let up = find(&c, UnusualKind::RecurringUp, "streamflix").unwrap();
+        // $7.50 over its usual: minor, listed after everything else.
+        assert!(up.minor);
+        assert_eq!(up.impact_cents, Some(22_99 - up.usual_cents.unwrap()));
+        let first_minor = c.unusual.iter().position(|u| u.minor).unwrap();
+        assert!(c.unusual[first_minor..].iter().all(|u| u.minor));
+        assert!(!c.unusual[0].minor);
+        let money: Vec<i64> = c.unusual[..first_minor]
+            .iter()
+            .map(|u| u.impact_cents.unwrap_or(0))
+            .collect();
+        assert!(money.windows(2).all(|w| w[0] >= w[1]), "{money:?}");
+    }
+
+    #[test]
+    fn week_compares_spending_not_paydays() {
+        let s = seed();
+        let w = run(&s, "2026-W42"); // the furniture week
+        let v = w.versus.as_ref().unwrap();
+        assert_eq!(v.figure, VersusFigure::Spent);
+        assert_eq!(v.cents, w.flow.out_cents);
+        assert!(v.worse && v.outside);
+        assert_eq!(v.in_diff_cents, None);
+        assert_eq!(v.contributors[0].cents, 1200_00);
+        // A payday week with ordinary spending isn't outside.
+        let pay = run(&s, "2026-W36"); // Aug 31 - Sep 6, payroll Sep 1
+        assert!(pay.flow.in_cents > 0);
+        assert!(!pay.versus.unwrap().outside);
+    }
+
+    #[test]
+    fn month_in_progress_reads_against_usual_to_date() {
+        let s = seed();
+        let c = run(&s, "2026-11"); // through Nov 7
+        assert_eq!(c.usual.to_date.as_deref(), Some("2026-11-07"));
+        // Earlier months cut to their first 7 days: payroll (the 1st) and
+        // one weekly shop, not Streamflix (the 9th).
+        assert_eq!(c.usual.in_cents, Some(3000_00));
+        assert!(
+            c.usual.out_cents.unwrap() <= 85_00,
+            "{:?}",
+            c.usual.out_cents
+        );
+        assert_eq!(run(&s, "2026-10").usual.to_date, None);
+    }
+
+    #[test]
+    fn late_and_changed_in_one_period_is_one_row() {
+        let s = seed();
+        let mut t = Vec::new();
+        let mut m = NaiveDate::from_ymd_opt(2025, 11, 10).unwrap();
+        let mut i = 0;
+        while m <= NaiveDate::from_ymd_opt(2026, 7, 10).unwrap() {
+            let c = if m.month() == 7 { 20_00 } else { 50_00 };
+            t.push(txn(
+                &format!("gy{i}"),
+                noon(m.year(), m.month(), 10),
+                -c,
+                "Sample Gym",
+            ));
+            m = m + Months::new(1);
+            i += 1;
+        }
+        s.upsert_transactions(&t).unwrap();
+        let q3 = run(&s, "2026-Q3");
+        let rows: Vec<&Unusual> = q3
+            .unusual
+            .iter()
+            .filter(|u| u.merchant.as_deref() == Some("sample gym"))
+            .collect();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].kind, UnusualKind::Late);
+        assert_eq!(rows[0].month.as_deref(), Some("2026-07"));
+        assert!(rows[0].change_pct.unwrap() < -25.0);
+        assert!(!rows[0].minor, "monthly, not a frequent visit");
+    }
+
+    #[test]
+    fn frequent_merchants_go_minor() {
+        let mut u = Unusual::new(UnusualKind::Late, "Corner Spot");
+        u.gap_days = Some(19);
+        mark_minor(&mut u);
+        assert!(u.minor);
+        u.gap_days = Some(30);
+        mark_minor(&mut u);
+        assert!(!u.minor);
+        let mut d = Unusual::new(UnusualKind::RecurringDown, "Bill");
+        d.gap_days = Some(30);
+        d.impact_cents = Some(MINOR_CHANGE_CENTS);
+        mark_minor(&mut d);
+        assert!(!d.minor);
+        d.impact_cents = Some(MINOR_CHANGE_CENTS - 1);
+        mark_minor(&mut d);
+        assert!(d.minor);
     }
 }

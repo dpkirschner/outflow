@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-08T20:54:45+00:00",
+  "generatedAt": "2026-11-09T00:03:00+00:00",
   "title": "Design System: outflow",
   "extensions": {
     "colorMeta": {
@@ -310,6 +310,14 @@
         "displayName": "Wordmark",
         "purpose": "Product name in the header only."
       },
+      "answer": {
+        "displayName": "Answer",
+        "purpose": "Check-in's one sentence, the home screen's focal moment (450, 22px; 19px below 720px; money in 650)."
+      },
+      "hero-figure": {
+        "displayName": "Hero figure",
+        "purpose": "Figures open on the page under a focal moment: Check-in's three, the Flow headline pair (650, 24px, tabular)."
+      },
       "figure": {
         "displayName": "Figure",
         "purpose": "Headline numbers in stat tiles."
@@ -441,6 +449,30 @@
       "description": "Flow: one of the three equal lanes (In / Out / Moved): title, figure, note, rows.",
       "html": "<section class=\"ds-lane\"><h2>Out</h2><p class=\"f\">−$2,870.27</p><p class=\"n\">Spending, after $25.99 of refunds.</p><ul><li><span>Rent</span><span>−$1,850.00</span></li><li><span>Home</span><span>−$475.52</span></li></ul></section>",
       "css": ".ds-lane{font:0.8125rem -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;width:260px;background:var(--lg-panel, #111823);border:1px solid var(--lg-line, #1e2a38);border-radius:12px;padding:14px 16px 12px;color:var(--lg-text, #e6edf3)}.ds-lane h2{margin:0;font-size:0.875rem;font-weight:600}.ds-lane .f{margin:6px 0;font-size:1.25rem;font-weight:650;font-variant-numeric:tabular-nums}.ds-lane .n{margin:0;font-size:0.75rem;color:var(--lg-dim, #8b98a9)}.ds-lane ul{list-style:none;margin:6px 0 0;padding:0;border-top:1px solid var(--lg-line, #1e2a38)}.ds-lane li{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--lg-divider, #172230);font-variant-numeric:tabular-nums}.ds-lane li:last-child{border-bottom:0}"
+    },
+    {
+      "name": "Answer in words",
+      "kind": "custom",
+      "refersTo": "answer-in-words",
+      "description": "Check-in's focal moment: one sentence at 22px (450, money in 650, tabular) saying what the period did and how that compares with usual, then a Text Dim tail that counts what needs you and what looks unusual (minor items not counted). Inside the usual range it says so; a week is read by what you spent. Numbers in prose are words up to nine. Nothing above it but the strip and the title bar. Below 720px it drops to 19px.",
+      "html": "<p class=\"ds-answer\">In October, net worth rose <b>$309.88</b> and you kept <b>$151.72</b> of what you earned, <b>$1,713.88</b> less than usual; Oakwood Furniture and Skyline Airways were <b>$1,855.00</b> of it. <span class=\"tail\">One thing needs you and three look unusual.</span></p>",
+      "css": ".ds-answer{margin:0;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;font-size:1.375rem;line-height:1.4;font-weight:450;letter-spacing:-0.01em;max-width:34em;text-wrap:pretty;color:var(--lg-text, #e6edf3)}.ds-answer b{font-weight:650;font-variant-numeric:tabular-nums}.ds-answer .tail{color:var(--lg-dim, #8b98a9)}@media (max-width:720px){.ds-answer{font-size:1.1875rem}}"
+    },
+    {
+      "name": "Check-in figures",
+      "kind": "custom",
+      "refersTo": "check-in-figures",
+      "description": "Three figures open on the page (no card), split by Hairlines at 24px: Net worth change, Earned − spent (Spent for a week), Saved. Each has a Text Dim line of parts and a \"usually\" line with the usual in Text and 600; in a running period it reads \"usually −$54.66 by Nov 8\". Saved has no usual line in a week. In Month view each figure is a dotted-underline link to Holdings or Flow; week and quarter figures are plain. Below 720px they stack with Hairlines between.",
+      "html": "<dl class=\"ds-cifigs\"><div class=\"fig\"><dt>Net worth change</dt><dd class=\"v\"><a href=\"#\">+$309.88</a></dd><dd class=\"sub\">Markets +$120.40 · Added +$189.48</dd><dd class=\"sub\">usually <b>+$410.00</b></dd></div><div class=\"fig\"><dt>Earned − spent</dt><dd class=\"v\"><a href=\"#\">+$151.72</a></dd><dd class=\"sub\">in $4,210.00 · out −$4,058.28</dd><dd class=\"sub\">usually <b>+$1,865.60</b></dd></div><div class=\"fig\"><dt>Saved</dt><dd class=\"v\"><a href=\"#\">$100.00</a></dd><dd class=\"sub\">$51.72 stayed as cash</dd><dd class=\"sub\">usually <b>$100.00</b></dd></div></dl>",
+      "css": ".ds-cifigs{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-text, #e6edf3)}.ds-cifigs .fig{display:flex;flex-direction:column;gap:3px;padding:2px 24px 2px 0;min-width:0}.ds-cifigs .fig+.fig{padding-left:24px;border-left:1px solid var(--lg-line, #1e2a38)}.ds-cifigs dt{font-size:0.8125rem;color:var(--lg-dim, #8b98a9)}.ds-cifigs dd{margin:0}.ds-cifigs .v{font-size:1.5rem;font-weight:650;line-height:1.2;font-variant-numeric:tabular-nums;padding-bottom:2px}.ds-cifigs a{color:inherit;text-decoration:underline dotted var(--lg-faint, #7a8696);text-decoration-thickness:1px;text-underline-offset:5px;border-radius:4px}.ds-cifigs a:hover{text-decoration-color:var(--lg-teal, #2dd4bf)}.ds-cifigs a:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:2px}.ds-cifigs .sub{font-size:0.75rem;line-height:1.45;color:var(--lg-dim, #8b98a9);font-variant-numeric:tabular-nums}.ds-cifigs .sub b{font-weight:600;color:var(--lg-text, #e6edf3)}@media (max-width:720px){.ds-cifigs{grid-template-columns:minmax(0,1fr)}.ds-cifigs .fig,.ds-cifigs .fig+.fig{padding:12px 0;border-left:0}.ds-cifigs .fig+.fig{border-top:1px solid var(--lg-line, #1e2a38)}}"
+    },
+    {
+      "name": "Unusual list",
+      "kind": "card",
+      "refersTo": "unusual-list",
+      "description": "Check-in: one card of rows ordered by core (what needs you, then money at stake). Each row: the margin note in words (Attention Amber for reconnect / review / new / up / large, Text Dim for down / late), the name as a dotted-underline link whose hit area covers the row, a Text Dim detail line, the signed amount, and the destination in Text Faint. Minor items fold into one closed `<details>` row at the end (`ci-fold`, \"Two smaller changes\" in Text Dim) whose rows open in place. Week / quarter steppers use `aria-disabled`, never `disabled`, and grow to 40px below 480px. Checks that didn't run are a Text Faint list under the card. Below 720px each row is note and destination, then name and detail with the amount right.",
+      "html": "<ul class=\"ds-unusual\"><li class=\"row\"><span class=\"note warn\">up 44%</span><span class=\"main\"><a href=\"#\" class=\"name\">Northside Power</a><span class=\"detail\">$61.20 a month, usually $42.50</span></span><span class=\"amt\">−$61.20</span><span class=\"dest\">Flow</span></li><li class=\"row\"><span class=\"note\">late</span><span class=\"main\"><a href=\"#\" class=\"name\">Harbor Insurance</a><span class=\"detail\">usually by the 3rd</span></span><span class=\"amt\"></span><span class=\"dest\">Flow</span></li><li class=\"fold\"><details><summary><span class=\"ft\">Two smaller changes</span></summary></details></li></ul>",
+      "css": ".ds-unusual{list-style:none;margin:0;padding:0;width:600px;background:var(--lg-panel, #111823);border:1px solid var(--lg-line, #1e2a38);border-radius:12px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif;color:var(--lg-text, #e6edf3)}.ds-unusual .row{position:relative;display:grid;grid-template-columns:5.25rem minmax(0,1fr) auto 4rem;align-items:baseline;column-gap:14px;padding:12px 16px}.ds-unusual .row+.row{border-top:1px solid var(--lg-divider, #172230)}.ds-unusual .row:hover{background:var(--lg-hover, #0e1620)}.ds-unusual .note{font-size:0.75rem;font-weight:600;color:var(--lg-dim, #8b98a9);white-space:nowrap}.ds-unusual .note.warn{color:var(--lg-amber, #fbbf24)}.ds-unusual .main{display:flex;flex-direction:column;gap:2px;min-width:0}.ds-unusual .name{color:var(--lg-text, #e6edf3);font-size:0.875rem;font-weight:600;text-decoration:underline dotted var(--lg-faint, #7a8696);text-decoration-thickness:1px;text-underline-offset:4px}.ds-unusual .name::after{content:\"\";position:absolute;inset:0}.ds-unusual .name:focus-visible{outline:none}.ds-unusual .name:focus-visible::after{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:-4px;border-radius:10px}.ds-unusual .row:hover .name{text-decoration-color:var(--lg-teal, #2dd4bf)}.ds-unusual .detail{font-size:0.75rem;line-height:1.45;color:var(--lg-dim, #8b98a9)}.ds-unusual .amt{font-size:0.8125rem;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}.ds-unusual .dest{font-size:0.75rem;color:var(--lg-faint, #7a8696);text-align:right}.ds-unusual .fold{border-top:1px solid var(--lg-divider, #172230)}.ds-unusual summary{display:flex;align-items:baseline;column-gap:10px;padding:12px 16px;cursor:pointer}.ds-unusual summary:hover{background:var(--lg-hover, #0e1620)}.ds-unusual summary:focus-visible{outline:2px solid var(--lg-teal, #2dd4bf);outline-offset:-2px}.ds-unusual .ft{font-size:0.8125rem;font-weight:600;color:var(--lg-dim, #8b98a9)}@media (max-width:720px){.ds-unusual{width:auto}.ds-unusual .row{grid-template-columns:minmax(0,1fr) auto;row-gap:2px;padding:12px 14px;min-height:44px}.ds-unusual .note{grid-column:1;grid-row:1}.ds-unusual .dest{grid-column:2;grid-row:1}.ds-unusual .main{grid-column:1;grid-row:2}.ds-unusual .amt{grid-column:2;grid-row:2}}"
     },
     {
       "name": "Month strip",

@@ -9,7 +9,7 @@
 // last finished month. Week and quarter step with previous / next.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import type { CheckIn as CheckInData, FlowMonth, NotChecked, Unusual } from "../types";
+import type { CheckIn as CheckInData, FlowMonth, NotChecked, Unusual, Versus } from "../types";
 import {
   errMessage,
   everyFewMonths,
@@ -46,6 +46,28 @@ const LONG_MONTHS = [
 ];
 
 type Load<T> = { state: "loading" } | { state: "error"; error: string } | { state: "ok"; data: T };
+
+// Where a drill-down left from, so Back returns focus there (a row, or a
+// figure). Module state: Check-in unmounts while Flow is open.
+let returnTo: string | null = null;
+
+const NUMBER_WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+
+/** Numbers in prose: words up to nine, digits after. */
+function num(n: number): string {
+  return n < NUMBER_WORDS.length ? NUMBER_WORDS[n] : String(n);
+}
+
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "A, B and C". */
+function listOf(items: string[]): string {
+  return items.length <= 1
+    ? (items[0] ?? "")
+    : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
 
 // ── Dates (period stepping is scaffolding; core decides the edges) ──────────
 
@@ -191,6 +213,24 @@ export function CheckIn({
     if (period) void load(period);
   }, [period, load]);
 
+  // After a change of period, say which one loaded (the step buttons and
+  // the strip change it without moving focus). Not on first load.
+  const [announce, setAnnounce] = useState("");
+  const loads = useRef(0);
+  const loaded = data.state === "ok" ? data.data : null;
+  useEffect(() => {
+    if (!loaded) return;
+    if (loads.current++ > 0) setAnnounce(describe(loaded).title);
+    // Back from a drill-down: focus the link that was used.
+    if (returnTo) {
+      const key = returnTo;
+      returnTo = null;
+      window.requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>(`[data-return="${key}"]`)?.focus(),
+      );
+    }
+  }, [loaded]);
+
   if (flow.state === "error") {
     return (
       <main className="ci-wrap">
@@ -257,11 +297,17 @@ export function CheckIn({
         </h1>
         {nav.view !== "month" && c && (
           <div className="ci-step" role="group" aria-label={`Change ${unitWord}`}>
-            <button className="ci-stepbtn" onClick={() => step(-1)} disabled={atStart}>
+            {/* aria-disabled, not disabled: a button that disables itself
+                would drop keyboard focus to the page. */}
+            <button className="ci-stepbtn" onClick={() => !atStart && step(-1)} aria-disabled={atStart}>
               <Chevron dir="left" />
               <span className="lg-sr">Previous {unitWord}</span>
             </button>
-            <button className="ci-stepbtn" onClick={() => step(1)} disabled={c.in_progress}>
+            <button
+              className="ci-stepbtn"
+              onClick={() => !c.in_progress && step(1)}
+              aria-disabled={c.in_progress}
+            >
               <Chevron dir="right" />
               <span className="lg-sr">Next {unitWord}</span>
             </button>
@@ -281,6 +327,9 @@ export function CheckIn({
         </div>
       </div>
 
+      <p className="lg-sr" role="status">
+        {announce}
+      </p>
       {data.state === "loading" && (
         <p className="ci-quiet" role="status">
           Loading…
@@ -342,14 +391,55 @@ function Chevron({ dir }: { dir: "left" | "right" }) {
 
 const ATTENTION = new Set(["connection", "match_review"]);
 
-function count(n: number, one: string): string {
-  return n === 1 ? `One ${one}` : `${n} ${one}s`;
+/** "Nov 8" for the usual-to-date day, else null. */
+function byDay(c: CheckInData): string | null {
+  return c.usual.to_date ? dayLabel(parseDay(c.usual.to_date)) : null;
+}
+
+/** The headline figure against its usual, as a clause tail. */
+function versusWords(v: Versus | null, by: string | null): React.ReactNode {
+  if (!v) return null;
+  const when = by ? ` by ${by}` : "";
+  if (!v.outside) return <>, within your usual range{when}</>;
+  const amount = <b>{unsignedCents(Math.abs(v.diff_cents))}</b>;
+  // After "kept $X" or "spent $X", more / less reads right; after "spent
+  // more than you earned" it would read backwards, so: behind / ahead.
+  if (v.figure === "earned_minus_spent" && v.cents <= 0)
+    return (
+      <>
+        , {amount} {v.diff_cents > 0 ? "ahead of" : "behind"} your usual{when}
+      </>
+    );
+  return (
+    <>
+      , {amount} {v.diff_cents > 0 ? "more" : "less"} than usual{when}
+    </>
+  );
+}
+
+/** Why it was worse: the items behind it, or a smaller income. */
+function becauseWords(v: Versus | null): string | null {
+  if (!v || !v.outside || !v.worse) return null;
+  if (v.contributors.length > 0) {
+    const sum = v.contributors.reduce((a, x) => a + x.cents, 0);
+    const names = listOf(v.contributors.map((x) => x.label));
+    return v.contributors.length === 1
+      ? `${names} was ${unsignedCents(sum)} of it`
+      : `${names} were ${unsignedCents(sum)} of it`;
+  }
+  const inDiff = v.in_diff_cents ?? 0;
+  if (inDiff < 0 && -inDiff * 2 >= Math.abs(v.diff_cents))
+    return `you earned ${unsignedCents(-inDiff)} less than usual`;
+  return null;
 }
 
 function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
   const sofar = c.in_progress;
   const nw = c.net_worth.change_cents;
   const f = c.flow;
+  const v = c.versus;
+  const by = byDay(c);
+  const ve = sofar ? "'ve" : "";
 
   const clauses: React.ReactNode[] = [];
   if (nw !== null) {
@@ -365,47 +455,74 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
     );
   }
   clauses.push(
-    f.in_cents === 0 && f.out_cents === 0 ? (
+    v?.figure === "spent" ? (
+      // A week: paydays make earned − spent swing, so spending is the read.
+      <>
+        you{ve} spent <b>{unsignedCents(f.out_cents)}</b>
+        {versusWords(v, by)}
+      </>
+    ) : f.in_cents === 0 && f.out_cents === 0 ? (
       <>nothing came in or went out</>
     ) : f.earned_minus_spent_cents > 0 ? (
       <>
-        you{sofar ? "'ve" : ""} kept <b>{unsignedCents(f.earned_minus_spent_cents)}</b> of what you
-        earned
+        you{ve} kept <b>{unsignedCents(f.earned_minus_spent_cents)}</b> of what you earned
+        {versusWords(v, by)}
       </>
     ) : f.earned_minus_spent_cents < 0 ? (
       <>
-        you{sofar ? "'ve" : ""} spent <b>{unsignedCents(-f.earned_minus_spent_cents)}</b> more than
-        you earned
+        you{ve} spent <b>{unsignedCents(-f.earned_minus_spent_cents)}</b> more than you earned
+        {versusWords(v, by)}
       </>
     ) : (
-      <>you{sofar ? "'ve" : ""} spent exactly what you earned</>
+      <>
+        you{ve} spent exactly what you earned
+        {versusWords(v, by)}
+      </>
     ),
   );
+  const because = becauseWords(v);
 
   const lead = sofar ? `So far ${phrase === "this month" || phrase === "this week" || phrase === "this quarter" ? phrase : `in ${phrase}`}` : `In ${phrase}`;
 
+  // Minor items are folded on the list; the sentence counts the rest.
   const needs = c.unusual.filter((u) => ATTENTION.has(u.kind)).length;
-  const odd = c.unusual.length - needs;
+  const odd = c.unusual.filter((u) => !ATTENTION.has(u.kind) && !u.minor).length;
   const unchecked = c.not_checked.length > 0;
   let tail: string;
   if (needs === 0 && odd === 0)
     tail = unchecked ? "Nothing looks unusual in what could be checked." : "Nothing looks unusual.";
-  else if (needs === 0) tail = `${count(odd, "thing")} ${odd === 1 ? "looks" : "look"} unusual.`;
-  else if (odd === 0) tail = `${count(needs, "thing")} ${needs === 1 ? "needs" : "need"} you.`;
+  else if (needs === 0) tail = `${cap(num(odd))} ${odd === 1 ? "thing looks" : "things look"} unusual.`;
+  else if (odd === 0) tail = `${cap(num(needs))} ${needs === 1 ? "thing needs" : "things need"} you.`;
   else
-    tail = `${count(needs, "thing")} ${needs === 1 ? "needs" : "need"} you and ${odd === 1 ? "one looks" : `${odd} look`} unusual.`;
+    tail = `${cap(num(needs))} ${needs === 1 ? "thing needs" : "things need"} you and ${num(odd)} ${
+      odd === 1 ? "looks" : "look"
+    } unusual.`;
 
   return (
     <p className="ci-answer">
       {lead}, {clauses[0]}
-      {clauses.length > 1 && <> and {clauses[1]}</>}. <span className="ci-answer-tail">{tail}</span>
+      {clauses.length > 1 && <> and {clauses[1]}</>}
+      {because && <>; {because}</>}. <span className="ci-answer-tail">{tail}</span>
     </p>
   );
 }
 
 // ── The three figures ───────────────────────────────────────────────────────
 
-function UsualLine({ cents, signed, n, unit }: { cents: number | null; signed: boolean; n: number; unit: string }) {
+function UsualLine({
+  cents,
+  signed,
+  n,
+  unit,
+  by,
+}: {
+  cents: number | null;
+  signed: boolean;
+  n: number;
+  unit: string;
+  /** In progress: "Nov 8", the day the usual is taken to. */
+  by: string | null;
+}) {
   if (cents === null)
     return (
       <span className="ci-usual">
@@ -415,14 +532,23 @@ function UsualLine({ cents, signed, n, unit }: { cents: number | null; signed: b
   return (
     <span className="ci-usual">
       usually <b>{signed ? signedCents(cents) : unsignedCents(cents, true)}</b>
+      {by && <> by {by}</>}
     </span>
   );
 }
 
 /** A figure that opens the screen with its rows (Month view only). */
-function FigureLink({ text, to, where }: { text: string; to: string; where: string }) {
+function FigureLink({ text, to, where, id }: { text: string; to: string; where: string; id: string }) {
   return (
-    <a className="ci-figlink" href={to} onClick={(e) => onLinkClick(e, to)}>
+    <a
+      className="ci-figlink"
+      href={to}
+      data-return={id}
+      onClick={(e) => {
+        returnTo = id;
+        onLinkClick(e, to);
+      }}
+    >
       {text}
       <span className="lg-sr">, open {where}</span>
     </a>
@@ -434,9 +560,16 @@ function Figures({ c, unit, linkMonth }: { c: CheckInData; unit: string; linkMon
   const f = c.flow;
   const u = c.usual;
   const where = linkMonth ? monthLabel(Number(linkMonth.slice(0, 4)), Number(linkMonth.slice(5))) : "";
-  const fig = (text: string, screen: "flow" | "holdings") =>
+  const week = c.period.kind === "Week";
+  const by = byDay(c);
+  const fig = (text: string, screen: "flow" | "holdings", id: string) =>
     linkMonth ? (
-      <FigureLink text={text} to={pathOf(screen)} where={`${where} in ${screen === "flow" ? "Flow" : "Holdings"}`} />
+      <FigureLink
+        id={id}
+        text={text}
+        to={pathOf(screen)}
+        where={`${where} in ${screen === "flow" ? "Flow" : "Holdings"}`}
+      />
     ) : (
       text
     );
@@ -461,7 +594,7 @@ function Figures({ c, unit, linkMonth }: { c: CheckInData; unit: string; linkMon
                 <span className="lg-sr">none</span>
               </>
             ) : (
-              fig(signedCents(nw.change_cents), "holdings")
+              fig(signedCents(nw.change_cents), "holdings", "fig-nw")
             )}
           </dd>
           {nw.change_cents === null ? (
@@ -482,22 +615,40 @@ function Figures({ c, unit, linkMonth }: { c: CheckInData; unit: string; linkMon
           )}
           {nw.partial_start && <dd className="ci-sub">from the first snapshot</dd>}
           <dd>
-            <UsualLine cents={u.net_worth_change_cents} signed n={u.net_worth_periods} unit={unit} />
+            <UsualLine cents={u.net_worth_change_cents} signed n={u.net_worth_periods} unit={unit} by={by} />
           </dd>
         </div>
-        <div className="ci-fig">
-          <dt>Earned − spent</dt>
-          <dd className="ci-figval">{fig(signedCents(f.earned_minus_spent_cents), "flow")}</dd>
-          <dd className="ci-sub">
-            {signedCents(f.in_cents)} in · {signedCents(-f.out_cents)} out
-          </dd>
-          <dd>
-            <UsualLine cents={u.earned_minus_spent_cents} signed n={u.periods} unit={unit} />
-          </dd>
-        </div>
+        {week ? (
+          // A week reads spending: paydays make earned − spent swing.
+          <div className="ci-fig">
+            <dt>Spent</dt>
+            <dd className="ci-figval">{fig(unsignedCents(f.out_cents, true), "flow", "fig-spent")}</dd>
+            <dd className="ci-sub">
+              <span className="ci-nowrap">{signedCents(f.in_cents)}</span> in · earned − spent{" "}
+              <span className="ci-nowrap">{signedCents(f.earned_minus_spent_cents)}</span>
+            </dd>
+            <dd>
+              <UsualLine cents={u.out_cents} signed={false} n={u.periods} unit={unit} by={by} />
+            </dd>
+          </div>
+        ) : (
+          <div className="ci-fig">
+            <dt>Earned − spent</dt>
+            <dd className="ci-figval">
+              {fig(signedCents(f.earned_minus_spent_cents), "flow", "fig-es")}
+            </dd>
+            <dd className="ci-sub">
+              <span className="ci-nowrap">{signedCents(f.in_cents)}</span> in ·{" "}
+              <span className="ci-nowrap">{signedCents(-f.out_cents)}</span> out
+            </dd>
+            <dd>
+              <UsualLine cents={u.earned_minus_spent_cents} signed n={u.periods} unit={unit} by={by} />
+            </dd>
+          </div>
+        )}
         <div className="ci-fig">
           <dt>Saved</dt>
-          <dd className="ci-figval">{fig(unsignedCents(f.saved_cents, true), "flow")}</dd>
+          <dd className="ci-figval">{fig(unsignedCents(f.saved_cents, true), "flow", "fig-saved")}</dd>
           <dd className="ci-sub">
             {f.gap_cents > 0
               ? `${unsignedCents(f.gap_cents)} stayed as cash`
@@ -505,14 +656,17 @@ function Figures({ c, unit, linkMonth }: { c: CheckInData; unit: string; linkMon
                 ? `${unsignedCents(-f.gap_cents)} drawn from cash`
                 : "nothing left as cash"}
           </dd>
-          <dd>
-            <UsualLine cents={u.saved_cents} signed={false} n={u.periods} unit={unit} />
-          </dd>
+          {!week && (
+            <dd>
+              <UsualLine cents={u.saved_cents} signed={false} n={u.periods} unit={unit} by={by} />
+            </dd>
+          )}
         </div>
       </dl>
       <p className="ci-foot">
         Usually is the middle value of the {unit} before this one (up to 12)
-        {c.in_progress ? `; this one isn't over, so its figures are still moving` : ""}.
+        {by ? `, each taken to the same day, since this one isn't over` : ""}
+        {week ? "; a week is read by what you spent, since paydays swing the rest" : ""}.
       </p>
     </section>
   );
@@ -545,6 +699,8 @@ function notCheckedLines(list: NotChecked[]): string[] {
 }
 
 interface Row {
+  key: string;
+  minor: boolean;
   note: string;
   /** Attention Amber note, else Text Dim. */
   warn: boolean;
@@ -568,7 +724,23 @@ function howOften(days: number): string {
   return everyFewMonths(days);
 }
 
-function rowOf(u: Unusual, fallbackMonth: string | null, onDrill: (p: Pick, m: string) => void): Row {
+function rowOf(
+  u: Unusual,
+  i: number,
+  firstLarge: boolean,
+  fallbackMonth: string | null,
+  onDrill: (p: Pick, m: string) => void,
+): Row {
+  const r = rowBody(u, firstLarge, fallbackMonth, onDrill);
+  return { ...r, key: `row-${i}`, minor: u.minor };
+}
+
+function rowBody(
+  u: Unusual,
+  firstLarge: boolean,
+  fallbackMonth: string | null,
+  onDrill: (p: Pick, m: string) => void,
+): Omit<Row, "key" | "minor"> {
   const day = u.day ? parseDay(u.day) : null;
   const flowGo = (pick: Pick, m: string | null) => (m ? () => onDrill(pick, m) : undefined);
   const flowHref = pathOf("flow");
@@ -618,19 +790,27 @@ function rowOf(u: Unusual, fallbackMonth: string | null, onDrill: (p: Pick, m: s
         href: flowHref,
         go: flowGo(merchantPick(false), u.day?.slice(0, 7) ?? fallbackMonth),
       };
-    case "late":
+    case "late": {
+      // Changed earlier in the period, then went quiet: one row, both said.
+      const before =
+        u.change_pct !== null && u.month
+          ? ` ${cap(monthPhrase(u.month))} was ${u.change_pct > 0 ? "up" : "down"} ${Math.round(
+              Math.abs(u.change_pct),
+            )}%.`
+          : "";
       return {
         note: "late",
         warn: false,
         name: u.label,
         detail: `No charge since ${day ? dayLabel(day) : "a while"}; usually ${howOften(u.gap_days ?? 30)}${
           u.cents !== null ? `, about ${unsignedCents(u.cents)} a charge` : ""
-        }.`,
+        }.${before}`,
         cents: null,
         dest: "Flow",
         href: flowHref,
         go: flowGo(merchantPick(false), fallbackMonth),
       };
+    }
     case "recurring_up":
     case "recurring_down": {
       const pct = Math.round(Math.abs(u.change_pct ?? 0));
@@ -652,10 +832,8 @@ function rowOf(u: Unusual, fallbackMonth: string | null, onDrill: (p: Pick, m: s
         note: `${u.kind === "recurring_up" ? "up" : "down"} ${pct}%`,
         warn: u.kind === "recurring_up",
         name: u.label,
-        detail: `${u.cents === 0 ? "No charge in " : ""}${m ? monthPhrase(m) : "this month"}${
-          u.usual_cents !== null
-            ? `, against ${unsignedCents(u.usual_cents)} a month before that`
-            : ""
+        detail: `${cap(m ? monthPhrase(m) : "this month")}${
+          u.usual_cents !== null ? `; usually ${unsignedCents(u.usual_cents)} a month` : ""
         }.`,
         cents: u.cents ? -u.cents : null,
         dest: "Flow",
@@ -668,8 +846,9 @@ function rowOf(u: Unusual, fallbackMonth: string | null, onDrill: (p: Pick, m: s
         note: "large",
         warn: true,
         name: u.label,
+        // The threshold is the same on every large row: say it once.
         detail: `${day ? dayLabel(day) : "One charge"}${
-          u.usual_cents !== null
+          firstLarge && u.usual_cents !== null
             ? `; your top 5% of charges start at ${unsignedCents(u.usual_cents)}`
             : ""
         }.`,
@@ -692,51 +871,52 @@ function UnusualList({
   fallbackMonth: string | null;
   onDrill: (p: Pick, m: string) => void;
 }) {
-  const rows = c.unusual.map((u) => rowOf(u, fallbackMonth, onDrill));
+  const firstLarge = c.unusual.findIndex((u) => u.kind === "large_charge");
+  const all = c.unusual.map((u, i) => rowOf(u, i, i === firstLarge, fallbackMonth, onDrill));
+  const rows = all.filter((r) => !r.minor);
+  const minor = all.filter((r) => r.minor);
   const skipped = notCheckedLines(c.not_checked);
   return (
     <section className="ci-unusual" aria-labelledby="ci-unusual-title">
       <h2 id="ci-unusual-title" className="ci-h2">
         Unusual
-        {rows.length > 0 && <span className="ci-count">{rows.length}</span>}
+        {all.length > 0 && (
+          <span className="ci-count">
+            <span className="lg-sr">, </span>
+            {all.length}
+            <span className="lg-sr"> {all.length === 1 ? "item" : "items"}</span>
+          </span>
+        )}
       </h2>
-      {rows.length === 0 ? (
+      {all.length === 0 ? (
         <p className="ci-none">Nothing stands out in {phrase}.</p>
       ) : (
         <ul className="ci-list">
-          {rows.map((r, i) => (
-            <li key={i} className="ci-row">
-              <span className={r.warn ? "ci-note ci-warn" : "ci-note"}>{r.note}</span>
-              <span className="ci-main">
-                <a
-                  className="ci-name"
-                  href={r.href}
-                  onClick={(e) => {
-                    if (e.defaultPrevented || e.button !== 0) return;
-                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-                    e.preventDefault();
-                    if (r.go) r.go();
-                    else navigate(r.href);
-                  }}
-                >
-                  {r.name}
-                  <span className="lg-sr">
-                    , {r.note}
-                    {r.cents !== null ? `, ${signedCents(r.cents)}` : ""}. {r.detail} Opens in {r.dest}.
-                  </span>
-                </a>
-                <span className="ci-detail" aria-hidden="true">
-                  {r.detail}
-                </span>
-              </span>
-              <span className="ci-amt" aria-hidden="true">
-                {r.cents !== null ? signedCents(r.cents) : ""}
-              </span>
-              <span className="ci-dest" aria-hidden="true">
-                {r.dest}
-              </span>
-            </li>
+          {rows.map((r) => (
+            <RowItem key={r.key} r={r} />
           ))}
+          {minor.length > 0 && (
+            <li className="ci-fold">
+              <details>
+                <summary>
+                  <span className="ci-fold-mark">
+                    <Chevron dir="right" />
+                  </span>
+                  <span className="ci-fold-title">
+                    {cap(num(minor.length))} smaller {minor.length === 1 ? "change" : "changes"}
+                  </span>
+                  <span className="ci-detail">
+                    Places you visit often, and changes under $20 a month
+                  </span>
+                </summary>
+                <ul className="ci-sublist">
+                  {minor.map((r) => (
+                    <RowItem key={r.key} r={r} />
+                  ))}
+                </ul>
+              </details>
+            </li>
+          )}
         </ul>
       )}
       {skipped.length > 0 && (
@@ -747,5 +927,45 @@ function UnusualList({
         </ul>
       )}
     </section>
+  );
+}
+
+function RowItem({ r }: { r: Row }) {
+  return (
+    <li className="ci-row">
+      <span className={r.warn ? "ci-note ci-warn" : "ci-note"} aria-hidden="true">
+        {r.note}
+      </span>
+      <span className="ci-main">
+        <a
+          className="ci-name"
+          href={r.href}
+          data-return={r.key}
+          onClick={(e) => {
+            if (e.defaultPrevented || e.button !== 0) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            returnTo = r.key;
+            if (r.go) r.go();
+            else navigate(r.href);
+          }}
+        >
+          {r.name}
+          <span className="lg-sr">
+            , {r.note}
+            {r.cents !== null ? `, ${signedCents(r.cents)}` : ""}. {r.detail} Opens in {r.dest}.
+          </span>
+        </a>
+        <span className="ci-detail" aria-hidden="true">
+          {r.detail}
+        </span>
+      </span>
+      <span className="ci-amt" aria-hidden="true">
+        {r.cents !== null ? signedCents(r.cents) : ""}
+      </span>
+      <span className="ci-dest" aria-hidden="true">
+        {r.dest}
+      </span>
+    </li>
   );
 }

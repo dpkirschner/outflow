@@ -1069,8 +1069,14 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
     if json {
         return json_out(&c);
     }
+    let by = c
+        .usual
+        .to_date
+        .as_deref()
+        .map(|d| format!(" by {d}"))
+        .unwrap_or_default();
     let usual = |u: Option<i64>| {
-        u.map(|v| format!("   usual {}", signed(v)))
+        u.map(|v| format!("   usual{by} {}", signed(v)))
             .unwrap_or_default()
     };
     println!(
@@ -1118,6 +1124,31 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
         signed(f.gap_cents),
         c.usual.periods
     );
+    if let Some(v) = &c.versus {
+        let what = match v.figure {
+            outflow_core::checkin::VersusFigure::Spent => "spent",
+            outflow_core::checkin::VersusFigure::EarnedMinusSpent => "earned - spent",
+        };
+        let judged = if v.outside { "outside" } else { "within" };
+        print!(
+            "versus usual      {what} {} vs {}{by}: {} ({judged} the usual)",
+            signed(v.cents),
+            signed(v.usual_cents),
+            signed(v.diff_cents)
+        );
+        if let Some(d) = v.in_diff_cents.filter(|d| *d != 0) {
+            print!("; income {}", signed(d));
+        }
+        println!();
+        if !v.contributors.is_empty() {
+            let names: Vec<String> = v
+                .contributors
+                .iter()
+                .map(|x| format!("{} {}", x.label, dollars(x.cents)))
+                .collect();
+            println!("  behind it: {}", names.join(", "));
+        }
+    }
     println!();
     if c.unusual.is_empty() {
         println!("nothing unusual");
@@ -1186,7 +1217,12 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
                 u.txn_id.as_deref().unwrap_or("")
             ),
         };
-        println!("  {line}");
+        let minor = if u.minor { "  (minor)" } else { "" };
+        let earlier = match (u.kind, u.change_pct, u.month.as_deref()) {
+            (UnusualKind::Late, Some(p), Some(m)) => format!("; {m} was {p:+.0}%"),
+            _ => String::new(),
+        };
+        println!("  {line}{earlier}{minor}");
     }
     for nc in &c.not_checked {
         let what = match nc.check {

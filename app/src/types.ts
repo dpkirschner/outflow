@@ -418,8 +418,12 @@ export type CheckIn = {
   flow: FlowSummary,
   usual: Usual,
   /**
-   * Largest concern first: attention, then recurring changes, then large
-   * charges.
+   * The headline figure against its usual; None without a usual.
+   */
+  versus: Versus | null,
+  /**
+   * Attention first, then by `impact_cents` (largest first), minor items
+   * last.
    */
   unusual: Array<Unusual>,
   /**
@@ -487,6 +491,56 @@ export type Usual = {
    */
   net_worth_periods: number,
   net_worth_change_cents: number | null,
+  /**
+   * Set while the period is in progress: the medians are of the earlier
+   * periods cut to the same length, through this day of this period
+   * (`YYYY-MM-DD`, today).
+   */
+  to_date: string | null,
+};
+
+export type VersusFigure = "earned_minus_spent" | "spent";
+
+/**
+ * The headline figure against its usual.
+ */
+export type Versus = {
+  figure: VersusFigure,
+  cents: number,
+  usual_cents: number,
+  /**
+   * `cents - usual_cents`.
+   */
+  diff_cents: number,
+  /**
+   * Far from the usual: at least `VERSUS_BAND_PCT`% of usual spending
+   * away, and beyond the earlier periods' usual spread.
+   */
+  outside: boolean,
+  /**
+   * Kept less, or spent more, than usual.
+   */
+  worse: boolean,
+  /**
+   * Earned − spent only: `flow.in_cents` minus its usual (how much of the
+   * difference is income).
+   */
+  in_diff_cents: number | null,
+  /**
+   * When outside and worse: the unusual items with the most money behind
+   * the difference (large charges, recurring costs up), largest first,
+   * each at least a tenth of the difference.
+   */
+  contributors: Array<Contributor>,
+};
+
+export type Contributor = {
+  label: string,
+  merchant: string | null,
+  /**
+   * Its share, positive: the charge, or a cost's rise over its usual.
+   */
+  cents: number,
 };
 
 export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late";
@@ -513,7 +567,8 @@ export type Unusual = {
    */
   usual_cents: number | null,
   /**
-   * Signed % against the usual (recurring up/down).
+   * Signed % against the usual (recurring up/down). On a late item: a
+   * change judged earlier in the period, in `month`, if there was one.
    */
   change_pct: number | null,
   /**
@@ -549,6 +604,17 @@ export type Unusual = {
    * not monthly totals.
    */
   per_charge: boolean,
+  /**
+   * Money at stake, positive, for ordering: the charge (large), the
+   * difference from the usual (up / down), the usual monthly cost (new,
+   * late). None for attention items.
+   */
+  impact_cents: number | null,
+  /**
+   * A small or frequent-merchant item (see the module docs); the screen
+   * folds these into one row.
+   */
+  minor: boolean,
 };
 
 export type Check = "recurring_changes" | "new_recurring" | "large_charges";

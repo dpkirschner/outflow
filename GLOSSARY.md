@@ -100,7 +100,15 @@ product direction behind these terms is in
   than 25% away from its usual; a recurring merchant that went late; a one-off
   charge that is large compared with your own spending (around your 95th
   percentile); or a connection or match review that needs attention.
-  The thresholds are constants in `core`.
+  The thresholds are constants in `core`. Items about a place you visit
+  every few weeks, or changes under $20 a month, are **minor**: still
+  listed, folded at the end.
+- **Usual**: the middle value (median) of up to 12 periods of the same kind
+  before this one. While a period is in progress, each earlier period is
+  cut to the same day (**usual to date**), so Nov 1–8 reads against Oct
+  1–8. The check-in compares its headline figure (earned − spent; spent,
+  for a week) with its usual and, when it's notably worse, names the
+  unusual items behind it.
 - **Holdings**: the Stock screen.
 - **Flow**: the In / Out / Moved screen, with the transaction table and
   the recurring list.

@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod backup;
 pub mod balances;
 pub mod build;
 pub mod categorize;
@@ -12,6 +13,7 @@ pub mod plaid;
 pub mod query;
 pub mod recurring;
 pub mod reset;
+pub mod secrets;
 pub mod stock;
 pub mod store;
 pub mod subscriptions;

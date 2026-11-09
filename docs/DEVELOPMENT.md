@@ -60,6 +60,7 @@ Subcommands (`outflow <cmd> --help` is the authoritative list of flags):
 | `matches list\|accept\|reject\|unaccept` | card-payment match review |
 | `perks [--file F --lookback 3mo\|6mo\|12mo\|all --expiring-days N]` | card offers vs spending |
 | `status [--limit N]` | what needs you (connections, matches to review, last sync), then sync runs |
+| `backup --to PATH` | a verified snapshot of the DB, encrypted with the same key, safe while the server runs; local only (see DEPLOYMENT §8) |
 
 Dates: every date-filtered command (`report`, `recurring`, `change`,
 `balances --history`, `holdings`, `activity`, `txns`) takes `--period P`
@@ -76,7 +77,8 @@ positions) still appear. History (`--history`) has no such row.
 Global: `--db`/`OUTFLOW_DB`, `--json` (machine-readable; same serde shapes as
 the HTTP API), `--server URL`/`OUTFLOW_SERVER` (needs `--features client`;
 every command becomes one API call and prints the server's JSON verbatim;
-bearer auth via `OUTFLOW_API_TOKEN`).
+bearer auth via `OUTFLOW_API_TOKEN`). With `--features encryption`, the DB
+key comes from `OUTFLOW_DB_KEY`, else `OUTFLOW_DB_KEY_FILE` (0600).
 
 Agent usage over the tailnet:
 

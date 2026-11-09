@@ -91,6 +91,7 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         return remote.get(&path);
     }
     match cmd {
+        Cmd::Backup { .. } => Err("backup reads the DB file directly; drop --server".into()),
         Cmd::Pull { from_file } => {
             if from_file.is_some() {
                 return Err("--from-file reads a LOCAL file; drop --server for it".into());

@@ -5,6 +5,19 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.1 (2026-11-08)
+
+Deploys now install a published release into its own folder and run it
+from there, never from a working copy: `scripts/deploy.sh build`,
+`install`, `rollback` and `status` (see `docs/DEPLOYMENT.md`). The
+server reports which release it is at `GET /api/version`, in
+`outflow status` and in `outflow --version`.
+
+### Features
+
+- Report the release a build came from (ho-fpd.4) ([c54810b](https://github.com/dpkirschner/outflow/commit/c54810b))
+- Deploy releases by tag from their own folder (ho-fpd.4) ([f57b79c](https://github.com/dpkirschner/outflow/commit/f57b79c))
+
 ## v2026.11.0 (2026-11-08)
 
 First tagged release: a baseline after the UI reshape merged into

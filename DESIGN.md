@@ -105,7 +105,7 @@ components:
     backgroundColor: "{colors.selected-fill}"
     textColor: "{colors.text}"
     rounded: "{rounded.control-inner}"
-    padding: "4px 9px"
+    padding: "3px 10px"
   card:
     backgroundColor: "{colors.panel}"
     rounded: "{rounded.card}"
@@ -116,7 +116,7 @@ components:
   nav-tab:
     textColor: "{colors.text-faint}"
     rounded: "{rounded.control}"
-    padding: "5px 11px"
+    padding: "0 11px"
   nav-tab-on:
     backgroundColor: "{colors.selected-fill}"
     textColor: "{colors.text}"
@@ -251,8 +251,10 @@ of stat tiles, then one or more cards. Gaps between blocks are 14–18px;
 inside cards, rows pad 14px by 16px. Settings separates its sections with a
 hairline rule and about 22–28px of space.
 
-Below 640px, stat strips and chart pairs stack and row layouts wrap. The
-phone is a glance surface; desktop is where the layout is tuned.
+Below 720px, stat strips and chart pairs stack and row layouts wrap; at
+480px the densest rows (the transaction and recurring tables, holdings
+positions) tighten further, and below 560px the toast spans the width. The phone is a glance surface; desktop is
+where the layout is tuned.
 
 ## Elevation & Depth
 
@@ -271,7 +273,8 @@ tonal step, never by a shadow.
 ## Shapes
 
 Gently rounded rectangles throughout. Tags and account chips use 4–5px,
-controls 8px (6px for a segment inside a track), stat tiles 10px, cards
+controls 8px (6px for a segment inside a track and for compact 28px
+controls such as the mini Ignore and Restore buttons), stat tiles 10px, cards
 12px. Pills (999px) appear only on badges and status capsules. Status dots
 are circles. Nothing is sharp-cornered and nothing is fully rounded except
 those capsules.
@@ -331,7 +334,10 @@ those capsules.
 - Only a change gets a margin note, in words: "new" and "up 44%" in
   Attention Amber, "down 12%" and "late" in Text Dim. Steady says nothing
   visible. There is no "down 100%": a merchant with no charge is late or
-  steady.
+  steady. Under an up or down note, a Text Dim line says what it compares
+  with ("from $50.00 a month", or "from $85.00 a charge" for a slower
+  merchant), since that base is the months just before the last one, not
+  the usual-per-month column.
 - A merchant charged every few months reads "every ~2 months" under its
   name, and is compared charge to charge. Under that, a Text Dim year line
   ("$489.00 over 12 months, up 10% on the year before") shows once the

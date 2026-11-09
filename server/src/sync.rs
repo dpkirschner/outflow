@@ -356,6 +356,13 @@ fn after_commit(
     }
 }
 
+/// Plaid's answer for an item with Investments consent but no investment
+/// accounts at the bank (an account marked investment here can still be a
+/// plain bank account there). Nothing to fetch, so not a warning.
+fn no_investment_accounts(err: &str) -> bool {
+    err.contains("NO_INVESTMENT_ACCOUNTS")
+}
+
 /// Fetch holdings (when the item has Investments consent and any investment
 /// account) and record this sync point. Never fails the item: transactions
 /// are already committed, so a holdings error keeps the last-known positions,
@@ -387,8 +394,12 @@ fn snapshot_item(
                             .map_err(|e| e.to_string())
                     });
                 }
-                tracing::warn!(item_id = %item.item_id, error = %e, "holdings fetch failed; keeping last-known");
-                warning = Some(format!("holdings not refreshed: {e}"));
+                if no_investment_accounts(&e) {
+                    tracing::debug!(item_id = %item.item_id, "no investment accounts at the bank; no holdings");
+                } else {
+                    tracing::warn!(item_id = %item.item_id, error = %e, "holdings fetch failed; keeping last-known");
+                    warning = Some(format!("holdings not refreshed: {e}"));
+                }
                 None
             }
         }
@@ -486,6 +497,10 @@ fn sync_investment_txns(
             }
             None
         }
+        Err(e) if no_investment_accounts(&e) => {
+            tracing::debug!(item_id = %item.item_id, "no investment accounts at the bank; no investment transactions");
+            None
+        }
         Err(e) => {
             tracing::warn!(item_id = %item.item_id, error = %e, "investment transactions not synced");
             Some(format!("investment transactions not synced: {e}"))
@@ -516,5 +531,15 @@ mod invest_window_tests {
             d("2024-11-04")
         );
         assert_eq!(invest_txn_window_start(today, Some("bad")), d("2024-11-04"));
+    }
+
+    #[test]
+    fn no_investment_accounts_is_recognised() {
+        // Synthetic Plaid error body, as `net::plaid::post` formats it.
+        let e = r#"plaid /investments/holdings/get: HTTP 400: {"error_type":"ITEM_ERROR","error_code":"NO_INVESTMENT_ACCOUNTS"}"#;
+        assert!(no_investment_accounts(e));
+        assert!(!no_investment_accounts(
+            r#"plaid /investments/holdings/get: HTTP 400: {"error_code":"ADDITIONAL_CONSENT_REQUIRED"}"#
+        ));
     }
 }

@@ -81,6 +81,17 @@ pub fn today_local() -> NaiveDate {
     Local::now().date_naive()
 }
 
+/// The local calendar day an epoch-seconds instant falls on (the same
+/// local-day convention as [`Period::bounds`]). Out-of-range instants give
+/// 1970-01-01.
+pub fn local_day(secs: i64) -> NaiveDate {
+    Local
+        .timestamp_opt(secs, 0)
+        .earliest()
+        .map(|dt| dt.date_naive())
+        .unwrap_or_default()
+}
+
 /// Parses `YYYY-MM-DD`.
 pub fn parse_day(s: &str) -> Result<NaiveDate, PeriodError> {
     NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").map_err(|_| PeriodError::BadDate(s.into()))
@@ -447,6 +458,20 @@ mod tests {
             r(None, Some("1717200000"), None),
             Err(PeriodError::BadDate(_))
         ));
+    }
+
+    #[test]
+    fn local_day_reads_an_instant_in_the_local_zone() {
+        let day = d(2026, 11, 8);
+        let start = Local
+            .from_local_datetime(&day.and_hms_opt(0, 0, 0).unwrap())
+            .earliest()
+            .unwrap()
+            .timestamp();
+        // First and last second of the local day, whatever the zone.
+        assert_eq!(local_day(start), day);
+        assert_eq!(local_day(start + 86_399), day);
+        assert_eq!(local_day(start - 1), d(2026, 11, 7));
     }
 
     #[test]

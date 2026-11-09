@@ -103,7 +103,7 @@ body {
   gap: 6px;
   min-height: 28px;
   padding: 0 11px;
-  border-radius: 7px;
+  border-radius: 8px;
   border: 1px solid transparent;
   color: var(--lg-faint);
   text-decoration: none;
@@ -1372,6 +1372,13 @@ button.fl-lane-figure {
   color: var(--lg-amber);
   font-weight: 600;
 }
+/* What the % compares with: quiet, under the note. */
+.fl-rc-base {
+  display: block;
+  color: var(--lg-dim);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
 .fl-rc-col-monthly {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -2365,8 +2372,14 @@ button.fl-lane-figure {
   cursor: pointer;
 }
 .st-chev {
+  display: inline-flex;
+  justify-content: center;
   width: 1em;
   color: var(--lg-faint);
+}
+/* An SVG chevron, not a glyph: points right, turns down when open. */
+.st-fold[aria-expanded="true"] .st-chev svg {
+  transform: rotate(90deg);
 }
 .st-fold:hover .st-chev {
   color: var(--lg-text);
@@ -2439,7 +2452,7 @@ button.fl-lane-figure {
   margin-left: 6px;
   min-width: 16px;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--lg-amber);
   color: var(--lg-bg);
   font-size: 0.6875rem;

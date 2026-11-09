@@ -930,9 +930,8 @@ fn cmd_perks(
                 (c, 0) => dollars(c),
                 (c, p) => format!("{} + {p} pts", dollars(c)),
             };
-            // Expiry is end-of-day local; step back to local noon so the UTC
-            // day label lands on the same calendar date.
-            let expires = date_label(f.offer.expires - 43_199);
+            // Expiry is 23:59:59 local on the last day: its local day.
+            let expires = date_label(f.offer.expires);
             let history = match (f.last_charge, f.typical_charge_cents) {
                 (Some(last), Some(typ)) => format!(
                     "{} charge{}, typical {}, last {}",
@@ -961,23 +960,10 @@ fn cmd_perks(
 }
 
 fn date_label(secs: i64) -> String {
-    // Coarse UTC day label; fine for a terminal listing.
-    let days = secs / 86_400;
-    let (y, m, d) = civil_from_days(days);
-    format!("{y}-{m:02}-{d:02}")
-}
-
-fn civil_from_days(z: i64) -> (i64, i64, i64) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (if m <= 2 { y + 1 } else { y }, m, d)
+    // The local day, like every other date in outflow.
+    outflow_core::period::local_day(secs)
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 fn truncate(s: &str, n: usize) -> String {

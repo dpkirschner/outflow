@@ -36,7 +36,16 @@ export function Section({
             onClick={() => setOpen((o) => !o)}
           >
             <span className="st-chev" aria-hidden="true">
-              {open ? "▾" : "▸"}
+              <svg width="12" height="12" viewBox="0 0 16 16" focusable="false">
+                <path
+                  d="M6 3l5 5-5 5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </span>
             {title}
           </button>

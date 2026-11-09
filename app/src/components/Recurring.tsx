@@ -79,6 +79,14 @@ function changeText(c: Change, pct: number | null): string {
   return "steady";
 }
 
+/** What an Up/Down % compares with, so it can't seem to contradict the
+ *  usual-per-month column: the months before the last one, or for a slower
+ *  merchant the charges before the latest. */
+function baseText(r: RecurringMerchant): string | null {
+  if ((r.change !== "Up" && r.change !== "Down") || r.change_base_cents === null) return null;
+  return `from ${unsignedCents(r.change_base_cents)} ${isSlow(r) ? "a charge" : "a month"}`;
+}
+
 function fmtDay(epoch: number): string {
   return new Date(epoch * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -282,6 +290,7 @@ export function RecurringSection({
                   const target: Pick = { lane: "out", direction: "out", merchant: r.merchant, name: r.name };
                   const on = pick?.merchant === r.merchant;
                   const change = changeText(r.change, r.change_pct);
+                  const base = baseText(r);
                   const year = yearText(r);
                   return (
                     <tr key={r.merchant} className={on ? "on" : undefined}>
@@ -289,7 +298,7 @@ export function RecurringSection({
                         <button
                           className={`fl-rc-pick${on ? " on" : ""}`}
                           aria-pressed={on}
-                          aria-label={`${r.name}, ${cadenceText(r)}, ${signedCents(-r.monthly_cents)} a month, ${change}${year ? `, ${year}` : ""}: show its charges, ${span}`}
+                          aria-label={`${r.name}, ${cadenceText(r)}, ${signedCents(-r.monthly_cents)} a month, ${change}${base ? ` ${base}` : ""}${year ? `, ${year}` : ""}: show its charges, ${span}`}
                           onClick={() => onPick(target)}
                         >
                           <span className="fl-rc-name">{r.name}</span>
@@ -306,6 +315,7 @@ export function RecurringSection({
                       <td className={`fl-rc-col-change fl-rc-change ${r.change.toLowerCase()}`}>
                         {/* Only a change gets a note; steady is said, not shown. */}
                         {r.change === "Steady" ? <span className="fl-sr">steady</span> : change}
+                        {base && <span className="fl-rc-base">{base}</span>}
                       </td>
                       <td className="num fl-rc-col-monthly">{signedCents(-r.monthly_cents)}</td>
                       <td className="fl-rc-col-last">{fmtDay(r.last_seen)}</td>

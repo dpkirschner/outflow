@@ -16,7 +16,7 @@ checking→card payments so spending isn't double-counted, and serves a web
 client + JSON API for outflow tracking. Analysis only — no budgets.
 
 Deeper reference lives in `docs/` (all tracked; read these for depth):
-ARCHITECTURE, DATA_MODEL, INVARIANTS, GOTCHAS, DEVELOPMENT, DEPLOYMENT. An
+ARCHITECTURE, DATA_MODEL, INVARIANTS, GOTCHAS, DEVELOPMENT, DEPLOYMENT, RELEASING. An
 untracked `agent.md` holds volatile session status/handoff — never `git add` it.
 
 ## Commands
@@ -152,6 +152,27 @@ fetch JSON in `net`, parse pure in `core`
 Analysis (`query`, `recurring`) loads all transactions and
 **aggregates in memory in Rust**, not SQL. The durable SQLite archive grows
 past the providers' pull windows — it's the permanent history.
+
+## Releases and branches (see docs/RELEASING.md)
+
+The user relies on Claude to drive releases and repo mechanics. Every deploy
+is a release, versioned `vYYYY.MM.N` (N from 0 each month); notes live in
+`CHANGELOG.md`.
+
+- Work on a feature branch; merge into `main` locally when the change is whole
+  (no PRs). Release from `main` only.
+- "Cut a release": `make release-draft`, tidy the section (a big release gets a
+  short summary paragraph), `make release` (make check + leak scan + commit +
+  tag). Then **show the user the notes and ask once**: that yes covers pushing,
+  `git push --atomic origin main V`, which publishes (the tag runs
+  `.github/workflows/release.yml`). Afterwards confirm the workflow went green.
+- Before any deploy, cut the release first and deploy that tag.
+- Never move or delete a pushed tag (a ruleset blocks it); fix forward with the
+  next N. `main` blocks force-push; only for a history rewrite the user has
+  approved does the ruleset get switched off, then back on.
+- Pre-push leak scan: a block means fix the commits; a dollar-figure warning
+  means show the user the figures and re-push with `LEAKSCAN_ACK=1` only after
+  they say so. False shape-rule hits go in `.leakscan-allow`.
 
 ## Agent access
 

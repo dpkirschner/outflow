@@ -28,6 +28,7 @@ mode), all over one shared domain core.
 | [INVARIANTS.md](INVARIANTS.md) | The non-negotiables tests and correctness depend on |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build/test/run commands, feature matrix, dev-vs-prod |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | mac-mini setup: Plaid dashboard, tailscale serve, launchd, secrets files |
+| [RELEASING.md](RELEASING.md) | Calendar-versioned releases, CHANGELOG, feature branches, the personal-data scan |
 | [DEVELOPMENT.md § CLI](DEVELOPMENT.md#cli) | Every `outflow` subcommand and the shared date flags — start here as an agent or script |
 | [API.md](API.md) | The HTTP `/api/*` surface: endpoints, methods, query params, auth tiers — for calling the server directly |
 | [GOTCHAS.md](GOTCHAS.md) | Hard-won lessons: OAuth redirects, headless secrets, encryption switching, data contamination |

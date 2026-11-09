@@ -104,7 +104,7 @@ All optional; a missing filter set means **everything** (pending included).
 | `q` | string | case-insensitive text over payee/description/category/normalized merchant |
 | `account` | string | filter by `account_id` |
 | `category` | string | filter by category name |
-| `source` | string | provenance (`plaid`) |
+| `source` | string | provenance (`plaid`; `simplefin` on rows from the retired integration) |
 | `flag` | enum | `Spending`\|`Transfer`\|`CardPayment`\|`Invest`\|`Save`\|`LoanPaydown` — filtering by a Moved flag auto-includes those rows |
 | `merchant` | string | normalized merchant key (`normalize_payee`), e.g. a `RecurringMerchant.merchant` |
 | `lane` | string | `in`\|`out`\|`card_payment`\|`invest`\|`save`\|`loan_paydown`\|`between` — exactly the rows behind that `/flow` figure (signed sum = the figure); reads Moved rows without `transfers`; a bad value is a `400` |

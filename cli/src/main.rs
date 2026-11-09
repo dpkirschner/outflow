@@ -15,7 +15,10 @@ use std::process::ExitCode;
 mod remote;
 
 #[derive(Parser)]
-#[command(name = "outflow", about = "Local spending analyzer")]
+#[command(
+    name = "outflow",
+    about = "Where your money is and where it's going: Stock, Flow, Check-in, from a local archive or a running outflow-server"
+)]
 struct Cli {
     #[arg(long, env = "OUTFLOW_DB", default_value = "outflow.db", global = true)]
     db: String,
@@ -188,29 +191,37 @@ pub(crate) enum Cmd {
     /// Ingest a Plaid fixture file offline (`--from-file`); live syncs run on
     /// the server (use `--server URL pull`).
     Pull {
+        /// A Plaid fixture envelope (see examples/plaid-fixture.json).
         #[arg(long)]
         from_file: Option<String>,
     },
+    /// Run the rule categorizer over uncategorized transactions.
     Categorize {
         /// After the rule pass, send the remaining uncategorized merchants to
         /// an LLM (needs --features net and ANTHROPIC_API_KEY).
         #[arg(long)]
         llm: bool,
     },
+    /// Spending by category or merchant, or the Flow lanes per month
+    /// (`--by monthly`: in / out / earned - spent / saved / Moved groups).
+    /// No period = all of history.
     Report {
         #[arg(long, value_enum, default_value_t = By::Category)]
         by: By,
+        /// Rows to show for --by category|merchant.
         #[arg(long, default_value_t = 15)]
         top: usize,
         #[command(flatten)]
         period: PeriodArgs,
+        /// Leave out pending transactions.
         #[arg(long)]
         posted_only: bool,
     },
     /// Recurring merchants over the 12 months ending with the period's last
     /// month (default: this month): cadence, usual monthly cost, change
-    /// (new / up / down >25% vs usual). --json prints the whole view,
-    /// ignored merchants included.
+    /// (new / late / up / down >25% vs usual; charge to charge for
+    /// every-few-months merchants), 12-month year on year. --json prints the
+    /// whole view, ignored merchants included.
     Recurring {
         #[command(flatten)]
         period: PeriodArgs,
@@ -218,9 +229,13 @@ pub(crate) enum Cmd {
         #[arg(long)]
         ignored: bool,
     },
+    /// Set a transaction's category by hand. Also points the merchant's rule
+    /// at it, so its uncategorized rows follow on the next `categorize`.
     Fix {
+        /// Transaction id (the `id` from `txns --json`).
         txn_id: String,
         category: String,
+        /// Fix this row only; don't learn a rule.
         #[arg(long)]
         no_learn: bool,
     },
@@ -237,6 +252,7 @@ pub(crate) enum Cmd {
     /// and investment accounts holding idle cash. `--history` prints the
     /// daily trend from per-sync snapshots instead.
     Balances {
+        /// The daily trend instead of current state.
         #[arg(long)]
         history: bool,
         /// With --history: the day range.
@@ -267,7 +283,7 @@ pub(crate) enum Cmd {
     /// archived from Plaid, newest first. Amount is the cash effect on the
     /// account: negative = cash out (a buy), positive = cash in.
     Activity(ActivityArgs),
-    /// Card-payment match review (list / accept / reject).
+    /// Card-payment match review (list / accept / reject / unaccept).
     Matches {
         #[command(subcommand)]
         action: MatchCmd,
@@ -290,6 +306,7 @@ pub(crate) enum Cmd {
     /// What needs you (connections, card payments to review, last sync),
     /// then recent sync runs. --json: {"upkeep": ..., "sync_log": [...]}.
     Status {
+        /// Sync runs to list.
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
@@ -300,15 +317,16 @@ pub(crate) struct TxnsArgs {
     /// Case-insensitive text over payee/description/category/merchant.
     #[arg(long)]
     pub search: Option<String>,
+    /// Category name (exact).
     #[arg(long)]
     pub category: Option<String>,
     /// Account id (see `accounts`).
     #[arg(long)]
     pub account: Option<String>,
-    /// Provenance: simplefin | plaid.
+    /// Provenance: plaid (simplefin on rows from the retired integration).
     #[arg(long)]
     pub source: Option<String>,
-    /// Keep only this flag (transfer/card-payment imply --show-excluded).
+    /// Keep only this flag (a Moved flag implies --show-excluded).
     #[arg(long, value_enum)]
     pub flag: Option<FlagArg>,
     /// Only the rows behind this Flow lane figure (`report --by monthly`).
@@ -325,9 +343,11 @@ pub(crate) struct TxnsArgs {
     pub direction: Option<DirectionArg>,
     #[command(flatten)]
     pub period: PeriodArgs,
+    /// Leave out pending transactions.
     #[arg(long)]
     pub posted_only: bool,
-    /// Include Transfer/CardPayment rows.
+    /// Include Moved rows (transfer, card-payment, invest, save,
+    /// loan-paydown), hidden by default.
     #[arg(long)]
     pub show_excluded: bool,
     #[arg(long, value_enum, default_value_t = SortArg::Date)]
@@ -335,29 +355,28 @@ pub(crate) struct TxnsArgs {
     /// Ascending sort (default is descending).
     #[arg(long)]
     pub asc: bool,
+    /// Page size (the server caps it at 1000).
     #[arg(long, default_value_t = 50)]
     pub limit: usize,
+    /// Rows to skip, for paging.
     #[arg(long, default_value_t = 0)]
     pub offset: usize,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum MatchCmd {
+    /// Card-payment pairs, with their ids.
     List {
         /// proposed | accepted | rejected (default: all)
         #[arg(long)]
         status: Option<String>,
     },
-    Accept {
-        id: i64,
-    },
-    Reject {
-        id: i64,
-    },
+    /// Accept a proposed pair: both legs become card payments.
+    Accept { id: i64 },
+    /// Reject a pair for good (an accepted one is undone first).
+    Reject { id: i64 },
     /// Put an accepted pair back in review; both legs count as before.
-    Unaccept {
-        id: i64,
-    },
+    Unaccept { id: i64 },
 }
 
 #[derive(ValueEnum, Clone, Copy)]

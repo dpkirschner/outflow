@@ -2983,7 +2983,8 @@ mod tests {
             kind_from_bank: None,
         };
         s.upsert_accounts(std::slice::from_ref(&a)).unwrap();
-        s.set_account_nickname("acct1", Some("Travel Card")).unwrap();
+        s.set_account_nickname("acct1", Some("Travel Card"))
+            .unwrap();
         // A re-pull carries no nickname (binds NULL) but must not wipe it.
         s.upsert_accounts(&[a]).unwrap();
         assert_eq!(

@@ -30,10 +30,14 @@ names).
   that serves a React SPA + JSON API, and a headless **CLI** (direct-DB or
   HTTP-client mode against the server). Both front-ends call the same core, so
   they run identical domain logic.
+- **Check-in** — the home screen and `outflow checkin`: one week, month or
+  quarter at a glance. Net worth change, earned − spent and saved, each
+  against what's usual for you, and what's unusual (new or changed recurring
+  charges, large one-off charges, connections and card payments to review).
 - **Flow** — money in, out and moved between your own accounts per month,
   each figure drilling into its rows, plus the **recurring list**: merchants
-  you pay on a cadence, their usual monthly cost and what changed (new, or up
-  or down more than 25%).
+  you pay on a cadence, their usual monthly cost and what changed (new, late,
+  or up or down more than 25%).
 - **Card-payment matching** — pairs a checking→card payment with the card's
   balance payment so the same money isn't counted as both an outflow and the
   card's underlying charges. High-confidence pairs auto-match; ambiguous ones
@@ -92,7 +96,12 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" categorize
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" report --by category
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" report --by merchant --top 10
 cargo run -p outflow-cli -- --db "$HOME/outflow.db" recurring
+cargo run -p outflow-cli -- --db "$HOME/outflow.db" balances
 ```
+
+Every subcommand lists its flags under `--help`; the full set is in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#cli). Add `--json` for
+machine-readable output.
 
 The database path also reads from `OUTFLOW_DB`.
 

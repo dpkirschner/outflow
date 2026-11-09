@@ -12,10 +12,10 @@ A single-user view of where one person's money is and where it's going
 (Stock, Flow, and Find money; see `adr/0001-product-direction.md` and the
 root `GLOSSARY.md`). A server
 (target: an always-on mac-mini on a tailnet) pulls transactions from **Plaid**
-(checking/savings/credit cards) into local SQLite,
+(checking, savings, credit cards, loans and investments) into local SQLite,
 categorizes them, auto-detects checking→card payments so nothing double-counts,
-and answers "where did my money go?", "how much at merchant X?", and "what
-subscriptions am I paying for?". Analysis only — no budgets or targets. Ships
+and answers "what changed this month?", "where did my money go?", "what is
+it worth and how did it do?", and "what am I paying for on repeat?". Analysis only — no budgets or targets. Ships
 as a web app served by the server plus a headless CLI (direct-DB or HTTP client
 mode), all over one shared domain core.
 
@@ -28,6 +28,7 @@ mode), all over one shared domain core.
 | [INVARIANTS.md](INVARIANTS.md) | The non-negotiables tests and correctness depend on |
 | [DEVELOPMENT.md](DEVELOPMENT.md) | Build/test/run commands, feature matrix, dev-vs-prod |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | mac-mini setup: Plaid dashboard, tailscale serve, launchd, secrets files |
+| [DEVELOPMENT.md § CLI](DEVELOPMENT.md#cli) | Every `outflow` subcommand and the shared date flags — start here as an agent or script |
 | [API.md](API.md) | The HTTP `/api/*` surface: endpoints, methods, query params, auth tiers — for calling the server directly |
 | [GOTCHAS.md](GOTCHAS.md) | Hard-won lessons: OAuth redirects, headless secrets, encryption switching, data contamination |
 

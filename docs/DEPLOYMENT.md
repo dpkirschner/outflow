@@ -240,13 +240,13 @@ Give an agent the **read-only** token, never the full one:
 ```
 export OUTFLOW_SERVER=https://MINI.TAILNET.ts.net
 export OUTFLOW_API_TOKEN=<the api-token-ro value>
-outflow txns --search starbucks --since 2026-06-01 --json
+outflow checkin --json
 ```
 
 The read-only token goes in the same `OUTFLOW_API_TOKEN` variable: the CLI just
 forwards whatever bearer it is given and the server decides the tier. Read
-subcommands work; mutating ones (`pull`, `fix`, `matches accept`) come back
-403 saying the token is read-only.
+subcommands work; mutating ones (`pull`, `categorize`, `fix`, `matches
+accept|reject|unaccept`) come back 403 saying the token is read-only.
 
 **From a container on the mini**, MagicDNS usually isn't configured inside the
 container, so the `ts.net` name won't resolve. Reach the server on the host's
@@ -261,12 +261,13 @@ export OUTFLOW_SERVER=http://host.docker.internal:8080
 That hop is plain HTTP but never leaves the machine. It still requires the
 token — being on the box is not authorization.
 
-(Build the CLI with `--features client`. `txns`, `report`, `recurring`, `accounts`,
-`balances`, `holdings`, `activity`, `perks`, `matches`, `status`,
-`categorize`, `pull`, `fix` all work in server mode and
-print the same JSON shapes as local `--json` — the reads need only the RO
-token; `categorize`, `pull`, `fix`, and `matches accept|reject` mutate and need
-the full token.)
+(Build the CLI with `--features client`. Every subcommand works in server
+mode and prints the same JSON shapes as local `--json`, except `pull
+--from-file`, which reads a local file. The reads (`checkin`, `change`,
+`txns`, `report`, `recurring`, `accounts`, `balances`, `holdings`,
+`activity`, `perks`, `matches list`, `status`) need only the RO token;
+`categorize`, `pull`, `fix` and `matches accept|reject|unaccept` mutate and
+need the full token.)
 
 To call the HTTP API directly instead of via the CLI, see
 [API.md](API.md) — every `/api/*` endpoint, its method, query params, and which

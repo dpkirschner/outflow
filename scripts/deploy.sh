@@ -131,7 +131,7 @@ cmd_build() {
   local feat=()
   [ -z "$FEATURES" ] || feat=(--features "$FEATURES")
   (cd "$src" && OUTFLOW_VERSION="$tag" CARGO_TARGET_DIR="$BUILD_DIR/target" \
-    cargo build --release --locked "${feat[@]}" -p outflow-server -p outflow-cli)
+    cargo build --release --locked ${feat[@]+"${feat[@]}"} -p outflow-server -p outflow-cli)
 
   step "build the UI"
   (cd "$src/app" && npm ci --no-audit --no-fund --loglevel=error && npm run build --silent)

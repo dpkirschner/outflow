@@ -1135,6 +1135,22 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
             println!("  behind it: {}", names.join(", "));
         }
     }
+    // Month check-ins: the finished months that fell outside their usual.
+    let marked: Vec<String> = c
+        .months
+        .iter()
+        .filter(|m| m.outside)
+        .map(|m| {
+            format!(
+                "{} ({})",
+                m.month,
+                if m.worse { "kept less" } else { "kept more" }
+            )
+        })
+        .collect();
+    if !marked.is_empty() {
+        println!("months outside usual: {}", marked.join(", "));
+    }
     println!();
     if c.unusual.is_empty() {
         println!("nothing unusual");

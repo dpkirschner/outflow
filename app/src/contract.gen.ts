@@ -268,6 +268,18 @@ export const checkIn: CheckIn = {
       "check": "large_charges",
       "reason": "short_history"
     }
+  ],
+  "months": [
+    {
+      "month": "2026-08",
+      "outside": true,
+      "worse": true
+    },
+    {
+      "month": "2026-09",
+      "outside": false,
+      "worse": false
+    }
   ]
 };
 

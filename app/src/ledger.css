@@ -620,6 +620,12 @@ body {
   font-weight: 600;
   white-space: nowrap;
 }
+/* A month that needs a look (Check-in: well below its usual). The caption
+   and the accessible name say it; the colour only repeats it. */
+.lg-month.warn .lg-mlabel {
+  text-decoration: underline 2px var(--lg-amber);
+  text-underline-offset: 3px;
+}
 .lg-mfig {
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
@@ -1261,8 +1267,8 @@ button.fl-lane-figure {
   text-align: right;
 }
 .fl-rc-table th.fl-rc-col-spark { width: 92px; }
-.fl-rc-table th.fl-rc-col-change { width: 92px; }
-.fl-rc-table th.fl-rc-col-monthly { width: 120px; }
+.fl-rc-table th.fl-rc-col-change { width: 140px; }
+.fl-rc-table th.fl-rc-col-monthly { width: 150px; }
 .fl-rc-table th.fl-rc-col-last { width: 84px; }
 .fl-rc-table th.fl-rc-col-act { width: 76px; }
 .fl-rc-table td {
@@ -1371,6 +1377,12 @@ button.fl-lane-figure {
 .fl-rc-change.up {
   color: var(--lg-amber);
   font-weight: 600;
+}
+/* 12 months against the 12 before, under the usual cost. */
+.fl-rc-year {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--lg-dim);
 }
 /* What the % compares with: quiet, under the note. */
 .fl-rc-base {
@@ -2829,6 +2841,11 @@ button.fl-lane-figure {
   text-align: right;
   white-space: nowrap;
 }
+/* What a late merchant usually costs a month, not a charge that happened. */
+.ci-amt-usual {
+  color: var(--lg-dim);
+  font-weight: 400;
+}
 .ci-dest {
   font-size: 0.75rem;
   color: var(--lg-faint);
@@ -2942,8 +2959,24 @@ button.fl-lane-figure {
     outline-offset: -2px;
   }
 }
-/* A slower merchant's spark: one bar per charge, spaced a little wider than
-   the month bars so the two read as different scales. */
+/* A slower merchant's spark: one dot per charge, lifted by its amount; no
+   bars and no baseline, so it can't read as months. */
 .fl-rc-spark-charges {
-  gap: 5px;
+  gap: 6px;
+}
+.fl-rc-spark-charges i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+/* Late: a hollow dot after a wider gap, where the next charge was due. */
+.fl-rc-spark-charges i.missed {
+  margin-left: 4px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--lg-faint);
+}
+.fl-rc-table tr:hover .fl-rc-spark-charges i.missed,
+.fl-rc-table tr.on .fl-rc-spark-charges i.missed {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--lg-dim);
 }

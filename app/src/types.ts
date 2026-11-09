@@ -430,6 +430,12 @@ export type CheckIn = {
    * Checks that didn't run for this period, and why.
    */
   not_checked: Array<NotChecked>,
+  /**
+   * Month check-ins only: every finished month with a usual, judged the
+   * way `versus` judges a month, so the month strip can mark the ones
+   * that need a look. Oldest first; empty for weeks and quarters.
+   */
+  months: Array<MonthMark>,
 };
 
 /**
@@ -541,6 +547,18 @@ export type Contributor = {
    * Its share, positive: the charge, or a cost's rise over its usual.
    */
   cents: number,
+};
+
+/**
+ * One month on the strip against its usual (the `versus` rule).
+ */
+export type MonthMark = {
+  /**
+   * `YYYY-MM`.
+   */
+  month: string,
+  outside: boolean,
+  worse: boolean,
 };
 
 export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late";

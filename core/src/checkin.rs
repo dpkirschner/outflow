@@ -37,6 +37,8 @@
 //!   `VERSUS_SPREAD_PCT`–(100 − it) percentile range of the earlier periods
 //!   (weekly spending swings a lot); when it's worse, the largest money items behind it are
 //!   named (`VERSUS_MAX_CONTRIBUTORS`).
+//! - **Month marks** (ho-bv6.31): a month check-in also judges every
+//!   finished month with a usual by the versus rule, for the month strip.
 //! - Order: attention, then other items by money (`impact_cents`), minor
 //!   last. One row per merchant: a merchant late and changed in the same
 //!   period shows once, as late, carrying the change.
@@ -101,6 +103,20 @@ pub struct CheckIn {
     pub unusual: Vec<Unusual>,
     /// Checks that didn't run for this period, and why.
     pub not_checked: Vec<NotChecked>,
+    /// Month check-ins only: every finished month with a usual, judged the
+    /// way `versus` judges a month, so the month strip can mark the ones
+    /// that need a look. Oldest first; empty for weeks and quarters.
+    pub months: Vec<MonthMark>,
+}
+
+/// One month on the strip against its usual (the `versus` rule).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct MonthMark {
+    /// `YYYY-MM`.
+    pub month: String,
+    pub outside: bool,
+    pub worse: bool,
 }
 
 /// The Holdings hero figures for the period (`/net-worth/change` has the
@@ -566,6 +582,11 @@ pub fn checkin(
         gap_cents: flow.gap_cents,
     };
     let versus = versus(period.kind, &flow, &usual, &flows, &unusual);
+    let months = if period.kind == PeriodKind::Month {
+        month_marks(&txns, &kind, first_day, today)
+    } else {
+        Vec::new()
+    };
     let change = nw(&period);
     Ok(CheckIn {
         label: period.to_string(),
@@ -577,7 +598,81 @@ pub fn checkin(
         versus,
         unusual,
         not_checked,
+        months,
     })
+}
+
+/// Every finished month since the first full one, judged against the
+/// months before it exactly as a month check-in's `versus` would be.
+fn month_marks(
+    txns: &[Transaction],
+    kind: &impl Fn(&str) -> crate::model::AccountKind,
+    first_day: Option<NaiveDate>,
+    today: NaiveDate,
+) -> Vec<MonthMark> {
+    let Some(first) = first_day else {
+        return Vec::new();
+    };
+    // Months that start on or after the first transaction (the usual's
+    // rule), up to the last finished one.
+    let mut start = first.with_day(1).expect("day 1");
+    if start < first {
+        start = start + Months::new(1);
+    }
+    let this_month = today.with_day(1).expect("day 1");
+    let mut all = Vec::new();
+    let mut m = start;
+    while m < this_month {
+        let p = Period::containing(PeriodKind::Month, m);
+        let (s, u) = p.bounds();
+        all.push((p, flow_over(txns, kind, s, u)));
+        m = m + Months::new(1);
+    }
+    let mut out = Vec::new();
+    for (i, (p, f)) in all.iter().enumerate() {
+        let earlier: Vec<_> = all[i.saturating_sub(USUAL_PERIODS)..i]
+            .iter()
+            .map(|(_, f)| f.clone())
+            .collect();
+        if earlier.len() < USUAL_MIN_PERIODS {
+            continue;
+        }
+        let usual_em = median(earlier.iter().map(|e| e.earned_minus_spent_cents).collect());
+        let spending = median(earlier.iter().map(|e| e.out_cents).collect());
+        let mut past: Vec<i64> = earlier.iter().map(|e| e.earned_minus_spent_cents).collect();
+        let (_, worse, outside) = judge(
+            false,
+            f.earned_minus_spent_cents,
+            usual_em,
+            spending,
+            &mut past,
+        );
+        out.push(MonthMark {
+            month: p.start.format("%Y-%m").to_string(),
+            outside,
+            worse,
+        });
+    }
+    out
+}
+
+/// The versus rule on one figure: (difference, worse, outside). `past` is
+/// the earlier periods' same figure; `spending` their usual spending.
+fn judge(
+    week: bool,
+    cents: i64,
+    usual_cents: i64,
+    spending: i64,
+    past: &mut [i64],
+) -> (i64, bool, bool) {
+    let low = percentile(past, VERSUS_SPREAD_PCT);
+    let high = percentile(past, 100 - VERSUS_SPREAD_PCT);
+    let diff = cents - usual_cents;
+    let worse = if week { diff > 0 } else { diff < 0 };
+    let outside = spending > 0
+        && diff.abs() * 100 >= VERSUS_BAND_PCT * spending
+        && (cents < low || cents > high);
+    (diff, worse, outside)
 }
 
 /// Marks small and frequent-merchant items minor (module docs).
@@ -621,13 +716,7 @@ fn versus(
             }
         })
         .collect();
-    let low = percentile(&mut past, VERSUS_SPREAD_PCT);
-    let high = percentile(&mut past, 100 - VERSUS_SPREAD_PCT);
-    let diff = cents - usual_cents;
-    let worse = if week { diff > 0 } else { diff < 0 };
-    let outside = spending > 0
-        && diff.abs() * 100 >= VERSUS_BAND_PCT * spending
-        && (cents < low || cents > high);
+    let (diff, worse, outside) = judge(week, cents, usual_cents, spending, &mut past);
     let mut contributors: Vec<Contributor> = if outside && worse {
         unusual
             .iter()
@@ -1210,6 +1299,23 @@ mod tests {
         assert_eq!(v.contributors[0].label, "Furniture Barn");
         assert_eq!(v.contributors[0].cents, 1200_00);
         assert!(v.contributors.len() <= VERSUS_MAX_CONTRIBUTORS);
+    }
+
+    #[test]
+    fn month_marks_match_each_months_own_versus() {
+        let s = seed();
+        let c = run(&s, "2026-10");
+        assert!(!c.months.is_empty());
+        for m in &c.months {
+            let own = run(&s, &m.month);
+            let v = own.versus.as_ref().expect("marked months have a usual");
+            assert_eq!((m.outside, m.worse), (v.outside, v.worse), "{}", m.month);
+        }
+        let oct = c.months.iter().find(|m| m.month == "2026-10").unwrap();
+        assert!(oct.outside && oct.worse);
+        // Weeks and quarters carry no marks.
+        assert!(run(&s, "2026-W42").months.is_empty());
+        assert!(run(&s, "2026-Q3").months.is_empty());
     }
 
     #[test]

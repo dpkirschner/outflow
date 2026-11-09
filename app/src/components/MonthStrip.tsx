@@ -19,6 +19,9 @@ export interface StripMonth {
   bar?: number;
   /** The month containing today. */
   sofar: boolean;
+  /** Needs a look (Check-in: well below its usual): an amber underline on
+   *  the label; `spoken` says it in words. */
+  warn?: boolean;
 }
 
 export function MonthStrip({
@@ -56,14 +59,18 @@ export function MonthStrip({
     e.preventDefault();
     const next = Math.min(keys.length - 1, Math.max(0, step[e.key]));
     onSelect(keys[next]);
-    scroller.current?.querySelectorAll<HTMLButtonElement>("button")[next]?.focus();
+    scroller.current
+      ?.querySelectorAll<HTMLButtonElement>("button")
+      [next]?.focus();
   };
   const hasBars = months.some((m) => m.bar !== undefined);
   return (
     <nav className="lg-strip" aria-label="Month">
       <p className="lg-strip-key" id="lg-strip-key">
         {caption}
-        <span className="lg-sr">. Left and right arrow keys change the month.</span>
+        <span className="lg-sr">
+          . Left and right arrow keys change the month.
+        </span>
       </p>
       <ol ref={scroller} aria-describedby="lg-strip-key" onKeyDown={onKeyDown}>
         {months.map((m, i) => {
@@ -72,7 +79,7 @@ export function MonthStrip({
           return (
             <li key={m.key}>
               <button
-                className={`lg-month${on ? " on" : ""}`}
+                className={`lg-month${on ? " on" : ""}${m.warn ? " warn" : ""}`}
                 aria-pressed={on}
                 tabIndex={i === current ? 0 : -1}
                 aria-label={`${m.label}${m.sofar ? " so far" : ""}: ${m.spoken}`}

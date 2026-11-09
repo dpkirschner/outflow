@@ -345,6 +345,18 @@ fn checkin() -> outflow_core::CheckIn {
             check: Check::LargeCharges,
             reason: NotCheckedReason::ShortHistory,
         }],
+        months: vec![
+            MonthMark {
+                month: "2026-08".into(),
+                outside: true,
+                worse: true,
+            },
+            MonthMark {
+                month: "2026-09".into(),
+                outside: false,
+                worse: false,
+            },
+        ],
     }
 }
 

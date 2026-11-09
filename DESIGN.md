@@ -337,17 +337,23 @@ those capsules.
   steady. Under an up or down note, a Text Dim line says what it compares
   with ("from $50.00 a month", or "from $85.00 a charge" for a slower
   merchant), since that base is the months just before the last one, not
-  the usual-per-month column.
+  the usual-per-month column. On a base under $20 the note says dollars,
+  not a %: "up $7" (a $16 subscription going to $23 isn't "up 44%" news).
 - A merchant charged every few months reads "every ~2 months" under its
-  name, and is compared charge to charge. Under that, a Text Dim year line
-  ("$489.00 over 12 months, up 10% on the year before") shows once the
-  archive covers two years: always for those slower merchants, otherwise
-  only when the year moved 10% or more.
+  name, and is compared charge to charge.
+- A Text Dim year line ("up 10% on last year", "same as last year") sits
+  right-aligned under the usual cost once the archive covers two years:
+  always for slower merchants, otherwise only when the year moved 10% or
+  more. The amount over 12 months is in the row's accessible name; the
+  header already names the window.
 - The spark's bars are Text Faint (Text Dim on hover or selection); the
   month still in progress is an outlined bar, so a partial month doesn't
-  read as a drop. A slower merchant's spark is its last six charges, one
-  bar each, spaced a little wider (its months are empty by design); its
-  accessible name lists the charges.
+  read as a drop. A slower merchant's spark is its last six charges as
+  dots, each lifted by its amount, with no bars and no baseline: its axis
+  is charges, not time, and its months are empty by design. A late slower
+  merchant gets a hollow dot after a wider gap, where the next charge was
+  due. Its accessible name and tooltip list the charges (and "none since,
+  late").
 - Ignore is the row action, waiting for hover or focus like the table's.
   It's a deliberate exception to "upkeep stays off analysis screens": it
   only changes what this list shows, and it's undone in place (Undo on the
@@ -394,7 +400,11 @@ those capsules.
   worth a glance), the name as a link with the dotted underline whose hit area
   covers the row, a Text Dim detail line saying what it's compared with,
   the signed amount when there is one, and the destination (Flow /
-  Settings) in Text Faint. Rows open the destination already filtered:
+  Settings) in Text Faint. A late row's amount is what the merchant usually
+  costs a month, in Text Dim at regular weight (spoken "usually … a
+  month"), so it weighs like the rest without reading as a charge. An up or
+  down note on a base under $20 says dollars ("up $7"), as on the Recurring
+  list. Rows open the destination already filtered:
   Flow drilled to the merchant (recurring window, or the charge's month
   for a large charge), Settings scrolled to the section. Back returns focus
   to the row (or figure) that was used.
@@ -417,7 +427,11 @@ those capsules.
   look about the same, because they did; the exact figure is on the button,
   so no cropped baseline to exaggerate small changes); Holdings shows net worth at month end with
   no bar (a level, not an amount to compare by height); Check-in shows
-  earned − spent, signed and with no bar (it crosses zero). The selected month
+  earned − spent, signed and with no bar (it crosses zero); a finished
+  month well below its usual (core's versus rule, the same one the answer
+  uses) gets a 2px Attention Amber underline on its label, the caption
+  adds "underlined: well below your usual", and its accessible name says
+  so. The selected month
   gets the Selected Fill, its edge and a Field Teal bar. The strip is one
   Tab stop (roving tabindex): arrow keys, Home and End move and select. The
   month is App state, so every screen follows the same one (Check-in

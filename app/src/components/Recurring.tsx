@@ -6,8 +6,14 @@
 // window, through the same Pick as the lanes. Ignore moves a merchant to the
 // ignored list (one mark, no other states), with Undo.
 import { useRef, useState } from "react";
-import type { Change, RecurringMerchant, RecurringView, StreamCadence } from "../types";
-import { everyFewMonths, monthLabel, signedCents, unsignedCents } from "../format";
+import type { RecurringMerchant, RecurringView, StreamCadence } from "../types";
+import {
+  everyFewMonths,
+  formatCentsShort,
+  monthLabel,
+  signedCents,
+  unsignedCents,
+} from "../format";
 import type { Pick } from "./Flow";
 
 const PREVIEW = 8;
@@ -29,22 +35,30 @@ function isSlow(r: RecurringMerchant): boolean {
 }
 
 function cadenceText(r: RecurringMerchant): string {
-  return r.cadence === "EveryFewMonths" ? everyFewMonths(r.gap_days) : CADENCE[r.cadence];
+  return r.cadence === "EveryFewMonths"
+    ? everyFewMonths(r.gap_days)
+    : CADENCE[r.cadence];
 }
 
-/** Spend over the last 12 months against the 12 before, in words; only
- *  when the archive reaches back that far, and only when it moved (or the
- *  merchant is slower than monthly, where it's the trend to watch). */
-function yearText(r: RecurringMerchant): string | null {
+/** Spend over the last 12 months against the 12 before; only when the
+ *  archive reaches back that far, and only when it moved (or the merchant is
+ *  slower than monthly, where it's the trend to watch). `short` sits under
+ *  the usual cost (the header names the window); `spoken` has the amount. */
+function yearText(
+  r: RecurringMerchant,
+): { short: string; spoken: string } | null {
   const prior = r.prior_year_cents;
   if (prior === null || prior <= 0) return null;
   const pct = Math.round(((r.year_cents - prior) / prior) * 100);
   if (Math.abs(pct) < 10 && !isSlow(r)) return null;
-  const move =
+  const short =
     Math.abs(pct) < 5
-      ? "about the same as the year before"
-      : `${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% on the year before`;
-  return `${unsignedCents(r.year_cents)} over 12 months, ${move}`;
+      ? "same as last year"
+      : `${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% on last year`;
+  return {
+    short,
+    spoken: `${unsignedCents(r.year_cents)} over the last 12 months, ${short}`,
+  };
 }
 
 type SortKey = "monthly" | "change" | "name" | "last";
@@ -57,7 +71,11 @@ function changeRank(r: RecurringMerchant): number {
   return Math.abs(r.change_pct ?? 0);
 }
 
-function compare(k: SortKey, a: RecurringMerchant, b: RecurringMerchant): number {
+function compare(
+  k: SortKey,
+  a: RecurringMerchant,
+  b: RecurringMerchant,
+): number {
   switch (k) {
     case "monthly":
       return a.monthly_cents - b.monthly_cents;
@@ -70,12 +88,21 @@ function compare(k: SortKey, a: RecurringMerchant, b: RecurringMerchant): number
   }
 }
 
+/** On a small base a % runs wild ("up 1440%"): say the dollars instead
+ *  (Check-in's rule). */
+const TINY_BASE_CENTS = 20_00;
+
 /** The change marker in words, never by colour alone. */
-function changeText(c: Change, pct: number | null): string {
+function changeText(r: RecurringMerchant): string {
+  const { change: c, change_pct: pct, change_base_cents: base } = r;
   if (c === "New") return "new";
   if (c === "Late") return "late";
-  if (c === "Up" && pct !== null) return `up ${Math.round(pct)}%`;
-  if (c === "Down" && pct !== null) return `down ${Math.round(-pct)}%`;
+  if ((c === "Up" || c === "Down") && pct !== null) {
+    const dir = c === "Up" ? "up" : "down";
+    if (base !== null && base < TINY_BASE_CENTS)
+      return `${dir} ${formatCentsShort(Math.round((base * Math.abs(pct)) / 100))}`;
+    return `${dir} ${Math.round(Math.abs(pct))}%`;
+  }
   return "steady";
 }
 
@@ -83,12 +110,19 @@ function changeText(c: Change, pct: number | null): string {
  *  usual-per-month column: the months before the last one, or for a slower
  *  merchant the charges before the latest. */
 function baseText(r: RecurringMerchant): string | null {
-  if ((r.change !== "Up" && r.change !== "Down") || r.change_base_cents === null) return null;
+  if (
+    (r.change !== "Up" && r.change !== "Down") ||
+    r.change_base_cents === null
+  )
+    return null;
   return `from ${unsignedCents(r.change_base_cents)} ${isSlow(r) ? "a charge" : "a month"}`;
 }
 
 function fmtDay(epoch: number): string {
-  return new Date(epoch * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(epoch * 1000).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 /** `YYYY-MM` minus `back` months, as (year, month). */
@@ -100,26 +134,53 @@ function monthBack(ym: string, back: number): [number, number] {
 
 /** "Dec 2025 – Nov 2026", from the view's inclusive bounds. */
 export function windowLabel(v: RecurringView): string {
-  const at = (d: string) => monthLabel(Number(d.slice(0, 4)), Number(d.slice(5, 7)));
+  const at = (d: string) =>
+    monthLabel(Number(d.slice(0, 4)), Number(d.slice(5, 7)));
   return `${at(v.since)} – ${at(v.until)}`;
 }
 
-/** A slower merchant's last charges, one bar each, so a dearer visit shows
- *  instead of months that are empty by design. */
+/** A slower merchant's last charges, one dot each at its amount, so a
+ *  dearer visit shows instead of months that are empty by design. Dots, not
+ *  bars, and no baseline: the axis is charges, not time. A late merchant
+ *  gets a hollow dot after a gap, where the next charge should have been. */
 function ChargeSpark({ r }: { r: RecurringMerchant }) {
   const max = Math.max(1, ...r.recent_charges.map((c) => c.cents));
   const n = r.recent_charges.length;
-  const spoken = r.recent_charges.map((c) => `${fmtDay(c.at)} ${unsignedCents(c.cents)}`).join(", ");
+  const late = r.change === "Late";
+  const lift = (cents: number) => Math.round((cents / max) * 17);
+  const last = r.recent_charges[n - 1];
+  const spoken = `Last ${n} charges: ${r.recent_charges
+    .map((c) => `${fmtDay(c.at)} ${unsignedCents(c.cents)}`)
+    .join(", ")}${late ? "; none since, late" : ""}`;
   return (
-    <span className="fl-rc-spark fl-rc-spark-charges" role="img" aria-label={`Last ${n} charges: ${spoken}`}>
+    <span
+      className="fl-rc-spark fl-rc-spark-charges"
+      role="img"
+      aria-label={spoken}
+      title={spoken}
+    >
       {r.recent_charges.map((c) => (
-        <i key={c.at} style={{ height: `${Math.max(3, Math.round((c.cents / max) * 22))}px` }} />
+        <i key={c.at} style={{ marginBottom: `${lift(c.cents)}px` }} />
       ))}
+      {late && last && (
+        <i
+          className="missed"
+          style={{ marginBottom: `${lift(last.cents)}px` }}
+        />
+      )}
     </span>
   );
 }
 
-function Spark({ r, month, inProgress }: { r: RecurringMerchant; month: string; inProgress: boolean }) {
+function Spark({
+  r,
+  month,
+  inProgress,
+}: {
+  r: RecurringMerchant;
+  month: string;
+  inProgress: boolean;
+}) {
   if (isSlow(r) && r.recent_charges.length > 0) return <ChargeSpark r={r} />;
   const max = Math.max(1, ...r.spark_cents);
   const n = r.spark_cents.length;
@@ -140,7 +201,9 @@ function Spark({ r, month, inProgress }: { r: RecurringMerchant; month: string; 
         <i
           key={i}
           className={inProgress && i === n - 1 ? "sofar" : undefined}
-          style={{ height: `${c === 0 ? (inProgress && i === n - 1 ? 6 : 2) : Math.max(3, Math.round((c / max) * 22))}px` }}
+          style={{
+            height: `${c === 0 ? (inProgress && i === n - 1 ? 6 : 2) : Math.max(3, Math.round((c / max) * 22))}px`,
+          }}
         />
       ))}
     </span>
@@ -154,7 +217,10 @@ export function RecurringSection({
   onPick,
   onIgnore,
 }: {
-  load: { state: "loading" } | { state: "error"; error: string } | { state: "ok"; data: RecurringView };
+  load:
+    | { state: "loading" }
+    | { state: "error"; error: string }
+    | { state: "ok"; data: RecurringView };
   onRetry: () => void;
   pick: Pick | null;
   onPick: (p: Pick) => void;
@@ -175,7 +241,11 @@ export function RecurringSection({
 
   if (load.state !== "ok") {
     return (
-      <section className="fl-rc" aria-labelledby="fl-rc-title" aria-busy={load.state === "loading"}>
+      <section
+        className="fl-rc"
+        aria-labelledby="fl-rc-title"
+        aria-busy={load.state === "loading"}
+      >
         {title}
         {load.state === "loading" ? (
           <p className="fl-lane-note">Loading recurring merchants…</p>
@@ -210,7 +280,9 @@ export function RecurringSection({
     <th
       scope="col"
       className={cls}
-      aria-sort={sort === k ? (dir === "asc" ? "ascending" : "descending") : "none"}
+      aria-sort={
+        sort === k ? (dir === "asc" ? "ascending" : "descending") : "none"
+      }
     >
       <button className="fl-sort" onClick={() => onSort(k)}>
         {label}
@@ -239,7 +311,10 @@ export function RecurringSection({
   };
   const restore = async (r: RecurringMerchant, index: number) => {
     if (await onIgnore(r, false)) {
-      refocus([".fl-rc-ignored .fl-mini", ".fl-rc-ignored-toggle", ".fl-rc-pick"], index);
+      refocus(
+        [".fl-rc-ignored .fl-mini", ".fl-rc-ignored-toggle", ".fl-rc-pick"],
+        index,
+      );
     }
   };
 
@@ -254,16 +329,16 @@ export function RecurringSection({
             <span className="fl-nowrap">
               Usual cost <b>{signedCents(-v.monthly_total_cents)}</b> a month.
             </span>{" "}
-            Marked: new, late, and moves over {CHANGE_PCT}% (charge to charge, and bars per
-            charge, for merchants slower than monthly).
+            Marked: new, late, and moves over {CHANGE_PCT}% (charge to charge,
+            and bars per charge, for merchants slower than monthly).
           </>
         )}
       </p>
 
       {v.items.length === 0 ? (
         <p className="fl-rc-empty">
-          Nothing recurring in these 12 months yet. A merchant shows up here after three charges on
-          a regular cadence.
+          Nothing recurring in these 12 months yet. A merchant shows up here
+          after three charges on a regular cadence.
         </p>
       ) : (
         <>
@@ -275,7 +350,9 @@ export function RecurringSection({
                   {head("name", "Merchant", "fl-rc-col-name")}
                   <th scope="col" className="fl-rc-col-spark">
                     Recent
-                    <span className="fl-sr">: last 6 months, or last charges for slower merchants</span>
+                    <span className="fl-sr">
+                      : last 6 months, or last charges for slower merchants
+                    </span>
                   </th>
                   {head("change", "Change", "fl-rc-col-change")}
                   {head("monthly", "Usual per month", "num fl-rc-col-monthly")}
@@ -287,9 +364,14 @@ export function RecurringSection({
               </thead>
               <tbody>
                 {shown.map((r, i) => {
-                  const target: Pick = { lane: "out", direction: "out", merchant: r.merchant, name: r.name };
+                  const target: Pick = {
+                    lane: "out",
+                    direction: "out",
+                    merchant: r.merchant,
+                    name: r.name,
+                  };
                   const on = pick?.merchant === r.merchant;
-                  const change = changeText(r.change, r.change_pct);
+                  const change = changeText(r);
                   const base = baseText(r);
                   const year = yearText(r);
                   return (
@@ -298,7 +380,7 @@ export function RecurringSection({
                         <button
                           className={`fl-rc-pick${on ? " on" : ""}`}
                           aria-pressed={on}
-                          aria-label={`${r.name}, ${cadenceText(r)}, ${signedCents(-r.monthly_cents)} a month, ${change}${base ? ` ${base}` : ""}${year ? `, ${year}` : ""}: show its charges, ${span}`}
+                          aria-label={`${r.name}, ${cadenceText(r)}, ${signedCents(-r.monthly_cents)} a month, ${change}${base ? ` ${base}` : ""}${year ? `, ${year.spoken}` : ""}: show its charges, ${span}`}
                           onClick={() => onPick(target)}
                         >
                           <span className="fl-rc-name">{r.name}</span>
@@ -306,18 +388,32 @@ export function RecurringSection({
                             {cadenceText(r)}
                             {r.category && ` · ${r.category}`}
                           </span>
-                          {year && <span className="fl-rc-meta fl-rc-year">{year}</span>}
                         </button>
                       </td>
                       <td className="fl-rc-col-spark">
-                        <Spark r={r} month={v.month} inProgress={v.in_progress} />
+                        <Spark
+                          r={r}
+                          month={v.month}
+                          inProgress={v.in_progress}
+                        />
                       </td>
-                      <td className={`fl-rc-col-change fl-rc-change ${r.change.toLowerCase()}`}>
+                      <td
+                        className={`fl-rc-col-change fl-rc-change ${r.change.toLowerCase()}`}
+                      >
                         {/* Only a change gets a note; steady is said, not shown. */}
-                        {r.change === "Steady" ? <span className="fl-sr">steady</span> : change}
+                        {r.change === "Steady" ? (
+                          <span className="fl-sr">steady</span>
+                        ) : (
+                          change
+                        )}
                         {base && <span className="fl-rc-base">{base}</span>}
                       </td>
-                      <td className="num fl-rc-col-monthly">{signedCents(-r.monthly_cents)}</td>
+                      <td className="num fl-rc-col-monthly">
+                        {signedCents(-r.monthly_cents)}
+                        {year && (
+                          <span className="fl-rc-year">{year.short}</span>
+                        )}
+                      </td>
                       <td className="fl-rc-col-last">{fmtDay(r.last_seen)}</td>
                       <td className="fl-rc-col-act">
                         <button
@@ -340,7 +436,11 @@ export function RecurringSection({
       {(sorted.length > PREVIEW || v.ignored.length > 0) && (
         <div className="fl-rc-foot">
           {sorted.length > PREVIEW && (
-            <button className="fl-more" aria-expanded={all} onClick={() => setAll((a) => !a)}>
+            <button
+              className="fl-more"
+              aria-expanded={all}
+              onClick={() => setAll((a) => !a)}
+            >
               {all ? "Show fewer" : `Show all ${sorted.length} merchants`}
             </button>
           )}
@@ -358,7 +458,11 @@ export function RecurringSection({
       )}
 
       {v.ignored.length > 0 && showIgnored && (
-        <ul id="fl-rc-ignored-list" className="fl-rows fl-rc-ignored" aria-label="Ignored merchants">
+        <ul
+          id="fl-rc-ignored-list"
+          className="fl-rows fl-rc-ignored"
+          aria-label="Ignored merchants"
+        >
           {v.ignored.map((r, i) => (
             <li key={r.merchant} className="fl-row">
               <span className="fl-row-label">
@@ -369,7 +473,9 @@ export function RecurringSection({
                 </span>
               </span>
               <span className="fl-rc-restore">
-                <span className="fl-row-value">{signedCents(-r.monthly_cents)} a month</span>
+                <span className="fl-row-value">
+                  {signedCents(-r.monthly_cents)} a month
+                </span>
                 <button
                   className="fl-mini fl-mini-shown"
                   onClick={() => void restore(r, i)}

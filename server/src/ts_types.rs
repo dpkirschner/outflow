@@ -107,6 +107,7 @@ fn render() -> String {
                 VersusFigure,
                 Versus,
                 Contributor,
+                MonthMark,
                 UnusualKind,
                 Unusual,
                 Check,

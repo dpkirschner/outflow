@@ -8,6 +8,7 @@
 
 # The scanner's own tests spell out what a leak looks like.
 *      scripts/test_leakscan.py
+*      scripts/test_release.py
 
 # SimpleFIN's public demo login, quoted in an old GOTCHAS entry.
 email  commit:5f5037e660

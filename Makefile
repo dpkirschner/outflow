@@ -8,7 +8,7 @@ APP_DIR := app
 DB ?= $(HOME)/outflow-dev.db
 
 .DEFAULT_GOAL := help
-.PHONY: help dev web server run serve prod deps test check types fmt lint leakscan pull clean
+.PHONY: help dev web server run serve prod deps test check types fmt lint leakscan release-draft release pull clean
 
 help: ## List available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' \
@@ -60,6 +60,12 @@ lint: ## Clippy across the workspace, warnings as errors
 leakscan: ## Scan all history for personal data (shape rules, plus a denylist from LEAKSCAN_DENYLIST_FILE)
 	python3 -I -m unittest discover -s scripts -p 'test_*.py'
 	python3 -I scripts/leakscan.py --all
+
+release-draft: ## Draft the next release's notes at the top of CHANGELOG.md (git-cliff); edit them, then make release
+	python3 -I scripts/release.py draft
+
+release: check ## Gate, scan the drafted notes, commit them and tag the release (pushes nothing)
+	python3 -I scripts/release.py cut
 
 pull: ## Ingest the offline Plaid fixture into $(DB)
 	cargo run -p outflow-cli -- --db "$(DB)" pull --from-file examples/plaid-fixture.json

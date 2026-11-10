@@ -33,7 +33,7 @@ merchant X?") mostly go to the agent.
 2. **Flow**: when money enters and leaves, including repeat purchases
    and how they change over time.
 3. **Find money**: card offers, card choice, unused subscriptions.
-   Deferred to its own design session. Nothing is built until then.
+   Designed in its own session; see the 2026-11-09 amendment.
 
 **No budgets.** No limits or targets. Norms the app derives itself
 (usual monthly cost, unusual charges, idle cash) are fine.
@@ -45,7 +45,7 @@ merchant X?") mostly go to the agent.
 | Check-in (home) | Period summary: month by default, week or quarter. Net worth change, earned − spent alongside saved, and what's unusual |
 | Holdings | Stock: accounts by form, gain net of contributions, unrealized gain per position, net worth change over a range |
 | Flow | In / Out / Moved lanes, the transaction table, and the recurring list |
-| Find money | Placeholder until that session |
+| Find money | Every open Finding, ranked by estimated dollars per year (2026-11-09 amendment) |
 | Settings | Connections, match review, categorize, reset |
 
 **Flow lanes.** Transfers are no longer hidden. They form a **Moved**
@@ -116,6 +116,56 @@ screen. Steps 4–6 therefore wait on a short platform step (beads
 Deferred, not blocking: loading the archive once per request when
 Check-in calls several aggregators, and typed domain errors instead of
 every failure being a 500.
+
+## Amendment 2026-11-09: Find money
+
+A design session (bead `ho-2mj.6`) settled the third pillar. Before
+it, card offers existed only as `perks`: an offers file kept by hand,
+matched against spending, reachable through `/perks` and the CLI, and
+not configured on the live server.
+
+- **One Finding type.** A new `core` module, `find`, owns `Finding`:
+  a kind, an estimate in dollars per year (annualized from the last 12
+  months, with points kept alongside), the transactions behind it, one
+  suggested action, and a stable key. `perks` becomes one source of
+  Findings among several. Estimates under $25 a year are dropped (a
+  constant in `core`).
+- **Three kinds, built in this order:** card offers (add an offer,
+  wrong card, expiring), then card choice, then subscriptions.
+- **Card choice** comes from an earn table in each card's offers file,
+  keyed on Plaid's category (`pfc_detailed` overrides `pfc_primary`,
+  plus a `default`), with a cents-per-point value and optional yearly
+  caps. Rotating quarterly categories are modelled only if a card you
+  hold has them. For each category, the gap is the last 12 months of Out
+  on each card times the best held card's rate minus the rate earned.
+  Cards without an earn table are left out, and the app says so. Annual
+  fees and sign-up bonuses are out of scope: they are about which card
+  to hold, not where to put a charge.
+- **Subscriptions.** outflow sees charges, not usage, so it never claims
+  a subscription is unused. It lists **steady** recurring merchants
+  (monthly or yearly cadence, recent charges within 5% of their median)
+  for review, sorted by yearly cost, and flags price rises. A new mark,
+  **Reviewed**, hides a merchant for 12 months or until it goes Up. This
+  is new, not the deleted Kept mark coming back.
+- **Dismissed** is the one mark on a Finding, keyed by kind, merchant or
+  category, and card. It moves the Finding to a list you can restore
+  from, and the Finding comes back on its own only if its estimate more
+  than doubles.
+- **Check-in** shows a Finding as one more kind of unusual item when it
+  is new this period: it has a qualifying charge in the period (a
+  wrong-card charge, a price rise), its offer started in the period, or
+  its offer expires within `expiring_days`. This is derived from the
+  evidence; nothing records when a Finding was first seen. The Find
+  money screen holds the full list.
+- **API and CLI.** `GET /find` and `outflow find` return every kind and
+  take the standard `Period` plus `expiring_days`. `/perks` and the
+  `perks` command are deleted, not deprecated.
+- **Offers are kept by hand** in a folder of per-card TOML files in the
+  data directory, named by `OUTFLOW_PERKS`. outflow gets no write
+  endpoint for offers, so the read-only token stays read-only. Having an
+  agent draft the files is an idea for later.
+- A **Subscriptions** filter on the Flow screen's Recurring list reuses
+  the steady test for a plain "show my subscriptions" view.
 
 ## Consequences
 

@@ -27,8 +27,9 @@ Show where the money is and where it's going. Three pillars (see
   contributions, unrealized gain per position, net worth change).
 - **Flow**: money in, out and moved between own accounts, plus the
   merchants bought from on a cadence.
-- **Find money**: card offers, card choice, unused subscriptions. Not
-  designed yet.
+- **Find money**: card offers, card choice, and subscriptions worth
+  reviewing, each a Finding with an estimate per year (ADR 0001,
+  2026-11-09 amendment). Not built yet.
 
 Success: a check-in answers "what changed, and is anything unusual?"
 in a few minutes, and every number on screen can also be asked of the
@@ -65,9 +66,8 @@ hidden and never counted as spending or income.
 - Frontend: React + Vite + TypeScript in `app/`, plain CSS in
   `app/src/theme.css` and `app/src/ledger.css`. No CSS framework.
 - Vocabulary is fixed by `GLOSSARY.md` (In / Out / Moved, Recurring
-  merchant, Ignored, Unusual, Gain net of contributions, Idle cash).
+  merchant, Ignored, Unusual, Gain net of contributions, Idle cash, Finding).
   Name things the way it does.
-- Open: the Find money pillar has no design yet.
 
 ## Brand Commitments
 

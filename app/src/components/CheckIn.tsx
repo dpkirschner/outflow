@@ -11,7 +11,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type {
   CheckIn as CheckInData,
-  FindingKind,
   FlowMonth,
   MonthMark,
   NotChecked,
@@ -29,6 +28,7 @@ import {
 } from "../format";
 import { onLinkClick, pathOf, navigate } from "../route";
 import { MonthStrip, type StripMonth } from "./MonthStrip";
+import { FINDING_NOTE } from "./FindMoney";
 import { monthKey, type Pick } from "./Flow";
 
 export type CheckinView = "week" | "month" | "quarter";
@@ -190,6 +190,7 @@ export function CheckIn({
   nav,
   onNav,
   onDrill,
+  onFinding,
 }: {
   /** Selected month, `YYYY-MM`, shared with Flow and Holdings. */
   month: string | null;
@@ -198,6 +199,8 @@ export function CheckIn({
   onNav: (n: CheckinNav) => void;
   /** Open Flow on `month` with `pick` already applied. */
   onDrill: (pick: Pick, month: string) => void;
+  /** Open Find money on the Finding with this key. */
+  onFinding: (key: string) => void;
 }) {
   // The month strip, and where history starts.
   const [flow, setFlow] = useState<Load<FlowMonth[]>>({ state: "loading" });
@@ -440,6 +443,7 @@ export function CheckIn({
             phrase={d.phrase}
             fallbackMonth={month}
             onDrill={onDrill}
+            onFinding={onFinding}
           />
         </div>
       )}
@@ -919,9 +923,8 @@ interface Row {
   cents: number | null;
   /** The amount is what it usually costs, not what was charged: Text Dim. */
   usual?: boolean;
-  /** None: the row has nowhere to open yet (a Finding, until the Find
-   *  money screen lands), so its name is plain text. */
-  dest: "Flow" | "Settings" | null;
+  /** None: the row has nowhere to open, so its name is plain text. */
+  dest: "Flow" | "Settings" | "Find money" | null;
   href: string;
   go?: () => void;
 }
@@ -957,8 +960,9 @@ function rowOf(
   firstLarge: boolean,
   fallbackMonth: string | null,
   onDrill: (p: Pick, m: string) => void,
+  onFinding: (key: string) => void,
 ): Row {
-  const r = rowBody(u, firstLarge, fallbackMonth, onDrill);
+  const r = rowBody(u, firstLarge, fallbackMonth, onDrill, onFinding);
   return { ...r, key: `row-${i}`, minor: u.minor };
 }
 
@@ -967,6 +971,7 @@ function rowBody(
   firstLarge: boolean,
   fallbackMonth: string | null,
   onDrill: (p: Pick, m: string) => void,
+  onFinding: (key: string) => void,
 ): Omit<Row, "key" | "minor"> {
   const day = u.day ? parseDay(u.day) : null;
   const flowGo = (pick: Pick, m: string | null) =>
@@ -1047,6 +1052,9 @@ function rowBody(
     case "recurring_down": {
       const note = changeNote(u);
       const m = u.month ?? fallbackMonth;
+      // An up row that stands in for a price rise Finding opens it in Find
+      // money, where it can be reviewed or dismissed.
+      const priceRise = u.finding_key ? findingDest(u.finding_key, onFinding) : {};
       if (u.per_charge)
         return {
           note,
@@ -1059,6 +1067,7 @@ function rowBody(
           dest: "Flow",
           href: flowHref,
           go: flowGo(merchantPick(false), m),
+          ...priceRise,
         };
       return {
         note,
@@ -1073,6 +1082,7 @@ function rowBody(
         dest: "Flow",
         href: flowHref,
         go: flowGo(merchantPick(false), m),
+        ...priceRise,
       };
     }
     case "large_charge":
@@ -1091,46 +1101,49 @@ function rowBody(
         href: flowHref,
         go: flowGo(merchantPick(true), u.day?.slice(0, 7) ?? fallbackMonth),
       };
-    case "finding":
+    case "finding": {
+      const action = u.action ?? "";
       return {
         note: FINDING_NOTE[u.finding_kind ?? "subscription"],
         warn: false,
         name: u.label,
-        detail: `${u.action ?? ""}${
-          u.cents !== null ? `; about ${unsignedCents(u.cents)} a year` : ""
-        }.`,
+        detail: `${/[.?!]$/.test(action) ? action : `${action}.`}${
+          u.cents !== null ? ` About ${unsignedCents(u.cents)} a year.` : ""
+        }`,
         // An estimate per year, not spend in the period: said in words.
         cents: null,
-        dest: null,
-        href: "",
+        ...findingDest(u.finding_key, onFinding),
       };
+    }
   }
 }
 
-/** The note column for a Finding row, by its kind. */
-const FINDING_NOTE: Record<FindingKind, string> = {
-  add_offer: "offer",
-  wrong_card: "card",
-  expiring: "expiring",
-  card_choice: "card",
-  subscription: "review",
-  price_rise: "price up",
-};
+/** A row that stands for a Finding opens Find money on it. */
+function findingDest(
+  key: string | null,
+  onFinding: (key: string) => void,
+): { dest: Row["dest"]; href: string; go?: () => void } {
+  return key
+    ? { dest: "Find money", href: pathOf("find"), go: () => onFinding(key) }
+    : { dest: null, href: "" };
+}
 
 function UnusualList({
   c,
   phrase,
   fallbackMonth,
   onDrill,
+  onFinding,
 }: {
   c: CheckInData;
   phrase: string;
   fallbackMonth: string | null;
   onDrill: (p: Pick, m: string) => void;
+  onFinding: (key: string) => void;
 }) {
   const firstLarge = c.unusual.findIndex((u) => u.kind === "large_charge");
   const all = c.unusual.map((u, i) =>
-    rowOf(u, i, i === firstLarge, fallbackMonth, onDrill),
+    rowOf(u, i, i === firstLarge, fallbackMonth, onDrill, onFinding),
   );
   const rows = all.filter((r) => !r.minor);
   const minor = all.filter((r) => r.minor);

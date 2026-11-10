@@ -162,7 +162,8 @@ product direction behind these terms is in
   categorized.
 - **Holdings**: the Stock screen.
 - **Find money**: every open Finding, ranked by estimated dollars per
-  year, with a dismissed list.
+  year, with its evidence and the charges behind it, plus a dismissed
+  list and a reviewed list.
 - **Flow**: the In / Out / Moved screen, with the transaction table and
   the recurring list.
 - **Settings**: upkeep. Bank connections, card-payment match review,

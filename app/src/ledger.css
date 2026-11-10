@@ -1,5 +1,5 @@
 /* The design tokens (--lg-*) and every screen's styles. Classes are
-   namespaced by feature (lg- shell, ci- Check-in, fl- Flow, hd- Holdings, cx- Connections,
+   namespaced by feature (lg- shell, ci- Check-in, fl- Flow, hd- Holdings, fm- Find money, cx- Connections,
    st- Settings, mr- match review). Type sizes are rem (1rem = 16px at the
    browser default) so text follows the browser's font-size setting. */
 :root {
@@ -2806,7 +2806,7 @@ button.fl-lane-figure {
   position: relative;
   display: grid;
   /* rem, so the note and destination columns grow with the text size */
-  grid-template-columns: 5.25rem minmax(0, 1fr) auto 4rem;
+  grid-template-columns: 5.25rem minmax(0, 1fr) auto 5.25rem;
   align-items: baseline;
   column-gap: 14px;
   padding: 12px 16px;
@@ -2886,6 +2886,7 @@ button.fl-lane-figure {
   font-size: 0.75rem;
   color: var(--lg-faint);
   text-align: right;
+  white-space: nowrap;
 }
 /* an amount never breaks between its sign and its digits */
 .ci-nowrap {
@@ -3015,4 +3016,511 @@ button.fl-lane-figure {
 .fl-rc-table tr.on .fl-rc-spark-charges i.missed {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--lg-dim);
+}
+
+/* ── Find money screen (fm-*) ────────────────────────────────────────── */
+.fm-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.fm-titlebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 4px;
+}
+.fm-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.fm-window {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 0.8125rem;
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.fm-step {
+  margin-left: auto;
+}
+.fm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.fm-busy {
+  opacity: 0.55;
+  transition: opacity 120ms ease-out 150ms;
+}
+/* the answer in words, at Flow's headline-answer size */
+.fm-lead {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  max-width: 62ch;
+  text-wrap: pretty;
+}
+.fm-lead b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.fm-findings,
+.fm-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fm-h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}
+.fm-count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.fm-h2-key {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--lg-faint);
+}
+.fm-none {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--lg-dim);
+}
+
+/* one card of Findings: note | what and why | estimate */
+.fm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--lg-panel);
+  border: 1px solid var(--lg-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.fm-row {
+  display: grid;
+  /* a fixed estimate column, so every row's controls line up */
+  grid-template-columns: 5.75rem minmax(0, 1fr) 7rem;
+  align-items: baseline;
+  column-gap: 14px;
+  padding: 14px 16px;
+}
+.fm-row + .fm-row {
+  border-top: 1px solid var(--lg-divider);
+}
+/* arrived at from a Check-in row */
+.fm-row.on,
+.fm-marked-row.on {
+  background: var(--lg-selected);
+  box-shadow: inset 0 0 0 2px var(--lg-teal);
+}
+.fm-note {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--lg-dim);
+  white-space: nowrap;
+}
+.fm-note.fm-warn {
+  color: var(--lg-amber);
+}
+.fm-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.fm-name {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  border-radius: 4px;
+}
+.fm-name:focus-visible,
+.fm-marked-name:focus-visible {
+  outline-offset: 3px;
+}
+.fm-action {
+  margin: 0 0 2px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--lg-text);
+  max-width: 64ch;
+}
+.fm-ev {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+  max-width: 72ch;
+}
+.fm-nowrap {
+  white-space: nowrap;
+}
+.fm-est {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.fm-est-val {
+  font-size: 1rem;
+  font-weight: 650;
+}
+.fm-est-per,
+.fm-est-pts {
+  font-size: 0.75rem;
+  color: var(--lg-dim);
+}
+
+/* the row's controls: open the charges on the left, the marks on the right */
+.fm-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 8px;
+  /* ends where the evidence tables do */
+  max-width: 34rem;
+}
+.fm-drill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 6px 0 2px;
+  margin-left: -2px;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.fm-drill:hover {
+  color: var(--lg-text);
+}
+.fm-marks {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.fm-act {
+  min-height: 28px;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--lg-faint);
+  border-radius: 6px;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fm-act:hover:not([aria-disabled="true"]) {
+  color: var(--lg-text);
+  border-color: var(--lg-dim);
+  background: var(--lg-hover);
+}
+.fm-act[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* card choice: each card's rate and spend, best first */
+.fm-earn {
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+  max-width: 34rem;
+}
+.fm-earn th,
+.fm-earn td {
+  padding: 5px 0;
+  text-align: left;
+  vertical-align: baseline;
+  border-top: 1px solid var(--lg-divider);
+}
+.fm-earn thead th {
+  border-top: 0;
+  padding-top: 0;
+  font-weight: 400;
+  color: var(--lg-faint);
+}
+.fm-earn .num {
+  text-align: right;
+  padding-left: 16px;
+}
+.fm-earn tbody th {
+  font-weight: 400;
+}
+.fm-earn b {
+  font-weight: 600;
+  color: var(--lg-text);
+}
+.fm-earn-best tbody th,
+.fm-earn-best th {
+  color: var(--lg-text);
+}
+.fm-earn-tag {
+  margin-left: 6px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--lg-teal);
+}
+.fm-earn-sub {
+  display: block;
+  color: var(--lg-faint);
+  font-size: 0.6875rem;
+}
+
+/* the charges behind a Finding, opened in place */
+.fm-charges {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fm-txns {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px;
+  background: var(--lg-panel2);
+  border: 1px solid var(--lg-line);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  max-width: 34rem;
+}
+.fm-txn {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: 12px;
+  padding: 7px 0;
+}
+.fm-txn + .fm-txn {
+  border-top: 1px solid var(--lg-divider);
+}
+.fm-txn-day {
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.fm-txn-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fm-txn-name .lg-src {
+  font-size: 0.6875rem;
+}
+.fm-txn-amt {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fm-txns-sum {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--lg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* reviewed and dismissed: quiet text toggles under the card */
+.fm-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 18px;
+}
+.fm-toggle {
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  color: var(--lg-dim);
+  font: inherit;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  text-decoration-color: var(--lg-faint);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.fm-toggle:hover {
+  color: var(--lg-text);
+  text-decoration-color: var(--lg-dim);
+}
+.fm-marked-title {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--lg-dim);
+}
+.fm-marked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--lg-line);
+}
+.fm-marked-row {
+  display: grid;
+  grid-template-columns: 5.75rem minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 14px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--lg-divider);
+}
+.fm-marked-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.fm-marked-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--lg-dim);
+  border-radius: 4px;
+}
+.fm-marked-est {
+  font-size: 0.75rem;
+  color: var(--lg-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* cards from the offers files, and what couldn't run */
+.fm-sources .fm-h2 {
+  font-size: 0.8125rem;
+  color: var(--lg-dim);
+}
+.fm-cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--lg-faint);
+  max-width: 80ch;
+}
+.fm-warn-line::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--lg-amber);
+  vertical-align: 1px;
+}
+.fm-unset {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--lg-dim);
+  max-width: 64ch;
+}
+.fm-unset code {
+  font-size: 0.75rem;
+  color: var(--lg-text);
+}
+
+/* Narrow: note and estimate on one line, then everything else full width.
+     review ............................ $648.00 a year
+     Ironclad Gym
+     action, evidence, controls */
+@media (max-width: 720px) {
+  .fm-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 4px;
+    padding: 12px 14px;
+  }
+  .fm-note {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .fm-est {
+    grid-column: 2;
+    grid-row: 1;
+    flex-flow: row wrap;
+    justify-content: flex-end;
+    align-items: baseline;
+    column-gap: 5px;
+  }
+  .fm-est-pts {
+    flex-basis: 100%;
+  }
+  .fm-main {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .fm-marked-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 2px;
+    padding: 10px 14px;
+  }
+  .fm-marked-row .fm-note {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .fm-marked-main {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .fm-marked-est {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+  }
+  .fm-marked-row .fm-act {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .fm-h2-key {
+    margin-left: 0;
+    flex-basis: 100%;
+  }
+}
+@media (max-width: 480px) {
+  .fm-act,
+  .fm-drill {
+    min-height: 40px;
+  }
+  .fm-step {
+    margin-left: 0;
+  }
+  .fm-txn {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 1px;
+  }
+  .fm-txn-day {
+    grid-column: 1 / -1;
+  }
+  .fm-earn .num {
+    padding-left: 10px;
+  }
 }

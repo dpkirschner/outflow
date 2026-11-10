@@ -5,6 +5,7 @@ import { Toast, toastPersists, type ToastMsg } from "./components/Toast";
 import { Flow, type Pick } from "./components/Flow";
 import { CheckIn, type CheckinNav } from "./components/CheckIn";
 import { Settings } from "./components/Settings";
+import { FindMoney } from "./components/FindMoney";
 import { SCREENS, navigate, onLinkClick, pathOf, useScreen } from "./route";
 import { errMessage } from "./format";
 
@@ -64,6 +65,13 @@ export default function App() {
   useEffect(() => {
     if (tab !== "flow") setFlowPick(null);
   }, [tab]);
+  // A Check-in Finding row opens Find money on that Finding: read once.
+  const [findKey, setFindKey] = useState<string | null>(null);
+  const openFinding = useCallback((key: string) => {
+    setFindKey(key);
+    navigate(pathOf("find"));
+  }, []);
+  const findFocused = useCallback(() => setFindKey(null), []);
   // Bumped when a sync on open brings new rows, so Flow reloads its figures.
   const [dataVersion, setDataVersion] = useState(0);
   const [toast, setToast] = useState<ToastMsg | null>(null);
@@ -180,6 +188,17 @@ export default function App() {
           nav={checkin}
           onNav={setCheckin}
           onDrill={drill}
+          onFinding={openFinding}
+        />
+      ) : tab === "find" ? (
+        <FindMoney
+          key={dataVersion}
+          month={month}
+          onMonth={setMonth}
+          accounts={accounts}
+          notify={notify}
+          focusKey={findKey}
+          onFocused={findFocused}
         />
       ) : tab === "settings" ? (
         <Settings notify={notify} onChanged={() => void reload()} />

@@ -404,7 +404,8 @@ those capsules.
   worth a glance), the name as a link with the dotted underline whose hit area
   covers the row, a Text Dim detail line saying what it's compared with,
   the signed amount when there is one, and the destination (Flow /
-  Settings) in Text Faint. A late row's amount is what the merchant usually
+  Settings / Find money) in Text Faint. A Finding row, and a recurring up
+  row that stands in for a price rise, open Find money on that Finding. A late row's amount is what the merchant usually
   costs a month, in Text Dim at regular weight (spoken "usually … a
   month"), so it weighs like the rest without reading as a charge. An up or
   down note on a base under $20 says dollars ("up $7"), as on the Recurring
@@ -423,6 +424,45 @@ those capsules.
   ("Recurring cost changes wait for a finished month.").
 - Below 720px each row is note and destination, then name and detail with
   the amount at the right.
+
+### Finding list (Find money)
+- A title bar like Check-in's: the title, the 12 months the estimates
+  read in Text Dim ("Dec 2025 – Nov 2026", with the "so far" capsule),
+  and previous / next month steppers (the shared month; `aria-disabled`
+  at either end). Under it, one sentence at Flow's answer size (15px,
+  money in 600): how many Findings and the largest.
+- One card of rows in the server's order, highest estimate first. Each
+  row: the kind as a margin note in words ("add offer", "wrong card",
+  "card choice", "review"; "expiring" and "price up" in Attention Amber,
+  since a date or a rise is on them), the subject as a Row name (an
+  `h3`), core's action in Text, then the evidence in Text Dim lines:
+  offer terms and days left, the charges behind it, the bank's spellings
+  only when they differ from the offer's name; a subscription's charge,
+  or its old and new price. Card choice shows a small table instead,
+  best card first (a Field Teal "best"): return in Text and 600, the
+  rate and point value under it in Text Faint, the 12 months' spend and
+  what it earned. The estimate sits in a fixed right column (16px, 650,
+  tabular) over "a year"; points sit under it beside the cash they're
+  valued at, never converted silently.
+- Controls on the row's last line: "Show the 12 charges" (a chevron
+  disclosure, `aria-expanded`) on the left; Reviewed (subscriptions and
+  price rises) and Dismiss as small outline buttons on the right, always
+  shown (they are the screen's purpose, unlike the Recurring list's
+  Ignore). The controls end where the evidence tables do, so every row's
+  buttons line up. The charges open in place as a Recessed Panel list:
+  date, merchant and account chip, signed amount, and a Text Faint total.
+- Dismiss and Reviewed take the row out of the list, put focus on the
+  row now in its place, and raise a toast with Undo. Under the card,
+  quiet text toggles ("1 reviewed", "2 dismissed") open each folded
+  list, titled, with Unreview / Restore and why the Finding is there.
+- Under everything, a Cards note in Text Faint: each card from the
+  offers files in words (offers added, no earn table, a card not tied to
+  an account marked with a small Attention Amber dot), or that no offers
+  are set up. Arriving from Check-in, the Finding's row gets the Selected
+  Fill and a 2px Field Teal inset ring and takes focus.
+- Below 720px each row is note and estimate on one line ("$648.00 a
+  year"), then everything else full width; below 480px the controls are
+  40px tall and a charge's date takes its own line.
 
 ### Month strip (Flow, Holdings, Check-in)
 - One shared component (`MonthStrip.tsx`, `lg-strip`): one button per

@@ -3,7 +3,7 @@ use crate::store::Store;
 use crate::subscriptions::{display_merchant, normalize_payee};
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub struct TxnFilter {
     pub since: Option<i64>,
@@ -100,6 +100,8 @@ pub struct TxnQuery {
     /// Keep only this normalized merchant (`normalize_payee`), e.g. a
     /// recurring merchant's key.
     pub merchant: Option<String>,
+    /// Keep only these transaction ids, e.g. a Finding's `txn_ids`.
+    pub ids: Option<HashSet<String>>,
     /// Keep only rows with no category.
     pub uncategorized: bool,
     /// Keep only money out (negative) or money in (positive).
@@ -123,6 +125,7 @@ impl Default for TxnQuery {
             flag: None,
             lane: None,
             merchant: None,
+            ids: None,
             uncategorized: false,
             direction: None,
             min_cents: None,
@@ -190,6 +193,7 @@ fn matching(store: &Store, q: &TxnQuery) -> rusqlite::Result<Vec<Transaction>> {
                 .as_deref()
                 .is_none_or(|m| normalize_payee(t.merchant()) == m)
         })
+        .filter(|t| q.ids.as_ref().is_none_or(|ids| ids.contains(&t.id)))
         .filter(|t| !q.uncategorized || t.category.is_none())
         .filter(|t| q.direction.is_none_or(|d| d.matches(t.amount.cents())))
         .filter(|t| q.account_id.as_deref().is_none_or(|a| t.account_id == a))
@@ -881,6 +885,18 @@ mod tests {
         let mut q = TxnQuery::default();
         q.filter.include_pending = false;
         assert_eq!(search_transactions(&s, &q).unwrap().total, 5);
+    }
+
+    #[test]
+    fn search_by_ids_keeps_only_those_rows() {
+        let s = seed();
+        let q = TxnQuery {
+            ids: Some(["1".to_string(), "missing".to_string()].into()),
+            ..TxnQuery::default()
+        };
+        let page = search_transactions(&s, &q).unwrap();
+        assert_eq!(page.total, 1);
+        assert_eq!(page.items[0].txn.id, "1");
     }
 
     #[test]

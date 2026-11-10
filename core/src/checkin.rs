@@ -306,7 +306,8 @@ pub struct Unusual {
     /// `cents` is then its estimated value per year, and `day` the charge
     /// that made it new (wrong card, card choice), the first charge at the
     /// new price (price rise), or the offer's expiry day (add offer,
-    /// expiring).
+    /// expiring). A recurring up row also carries `finding_key` when its
+    /// merchant has an open price rise Finding (that row stands in for it).
     pub finding_kind: Option<FindingKind>,
     pub finding_key: Option<String>,
     pub action: Option<String>,
@@ -634,6 +635,26 @@ pub fn checkin(
         opts.expiring_days,
         &has_row,
     ));
+    // An up row whose merchant has an open price rise stands in for that
+    // Finding (new_findings skips it): point the row at it.
+    let rises: HashMap<&str, &str> = report
+        .findings
+        .iter()
+        .filter_map(|f| match (&f.kind, &f.evidence) {
+            (FindingKind::PriceRise, Evidence::Subscription(e)) => {
+                Some((e.merchant.as_str(), f.key.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    for u in unusual
+        .iter_mut()
+        .filter(|u| u.kind == UnusualKind::RecurringUp)
+    {
+        if let Some(key) = u.merchant.as_deref().and_then(|m| rises.get(m)) {
+            u.finding_key = Some((*key).to_string());
+        }
+    }
 
     for u in &mut unusual {
         mark_minor(u);
@@ -2009,6 +2030,25 @@ mod tests {
             .collect();
         s.upsert_transactions(&t).unwrap();
         s
+    }
+
+    #[test]
+    fn up_row_carries_its_price_rise_finding_key() {
+        // Jan-Oct 2026 synthetic: $20 a month rising to $30 in October is
+        // both a recurring up and a price rise; the up row stands in.
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[chk()]).unwrap();
+        let t: Vec<Transaction> = (1..=10u32)
+            .map(|m| {
+                let c = if m == 10 { -30_00 } else { -20_00 };
+                txn(&format!("m{m}"), noon(2026, m, 5), c, "Sample Music")
+            })
+            .collect();
+        s.upsert_transactions(&t).unwrap();
+        let c = run(&s, "2026-10");
+        let up = find(&c, UnusualKind::RecurringUp, "sample music").expect("up row");
+        assert_eq!(up.finding_key.as_deref(), Some("price_rise::sample-music"));
+        assert!(!kinds(&c).contains(&UnusualKind::Finding));
     }
 
     #[test]

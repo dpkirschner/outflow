@@ -341,6 +341,9 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             if let Some(l) = &a.lane {
                 push("lane", l.to_lane().as_str().into());
             }
+            if !a.ids.is_empty() {
+                push("ids", enc(&a.ids.join(",")));
+            }
             if let Some(m) = &a.merchant {
                 push("merchant", enc(m));
             }

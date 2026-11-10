@@ -371,6 +371,9 @@ pub(crate) struct TxnsArgs {
     /// Only this normalized merchant (the `merchant` key from `recurring`).
     #[arg(long)]
     pub merchant: Option<String>,
+    /// Only these transaction ids, comma-separated (a Finding's `txn_ids`).
+    #[arg(long, value_delimiter = ',')]
+    pub ids: Vec<String>,
     /// Only rows with no category.
     #[arg(long)]
     pub uncategorized: bool,
@@ -907,6 +910,7 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
         flag: a.flag.map(FlagArg::to_flag),
         lane: a.lane.map(LaneArg::to_lane),
         merchant: a.merchant.clone(),
+        ids: (!a.ids.is_empty()).then(|| a.ids.iter().cloned().collect()),
         uncategorized: a.uncategorized,
         direction: a.direction.map(DirectionArg::to_direction),
         min_cents: None,

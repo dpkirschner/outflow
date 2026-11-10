@@ -33,6 +33,7 @@ import type {
   GroupEdit,
   GroupUndo,
   AccountKind,
+  FindReport,
 } from "./types";
 
 // Request-side shapes. types.ts is generated from the Rust response DTOs;
@@ -81,6 +82,7 @@ export interface TxnSearch {
   period?: string; // e.g. "2026-11"; resolved in server-local days
   lane?: Lane; // exactly the rows behind that Flow figure
   merchant?: string; // normalized merchant key, e.g. a recurring merchant's
+  ids?: string[]; // only these transaction ids, e.g. a Finding's txn_ids
   uncategorized?: boolean;
   direction?: Direction; // card payment: out = bank side, in = card side
   minCents?: number;
@@ -194,6 +196,7 @@ function txnQuery(s?: TxnSearch): string {
   set("period", s?.period);
   set("lane", s?.lane);
   set("merchant", s?.merchant);
+  set("ids", s?.ids?.join(","));
   set("uncategorized", s?.uncategorized || undefined);
   set("direction", s?.direction);
   set("min_cents", s?.minCents);
@@ -287,6 +290,23 @@ export const api = {
   checkin: (period: string) => get<CheckIn>(`/checkin?period=${encodeURIComponent(period)}`),
   checkinCategories: (period: string) =>
     get<CategoriesVsUsual>(`/checkin/categories?period=${encodeURIComponent(period)}`),
+
+  // Find money: every Finding, estimated over the 12 months ending with
+  // `period`'s last month (`YYYY-MM`; omitted = this month).
+  find: (period?: string) =>
+    get<FindReport>(`/find${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+  // Dismiss a Finding by key, or restore it; returns the report after.
+  setFindingDismissed: (period: string | undefined, key: string, dismissed: boolean) =>
+    post<FindReport>(
+      `/find/dismissed${period ? `?period=${encodeURIComponent(period)}` : ""}`,
+      { key, dismissed },
+    ),
+  // Mark a subscription's merchant Reviewed, or clear it; returns the report.
+  setMerchantReviewed: (period: string | undefined, merchant: string, reviewed: boolean) =>
+    post<FindReport>(
+      `/find/reviewed${period ? `?period=${encodeURIComponent(period)}` : ""}`,
+      { merchant, reviewed },
+    ),
 
   // Sync all linked Plaid items.
   pull: () => post<SyncReport>("/pull"),

@@ -29,7 +29,7 @@ Show where the money is and where it's going. Three pillars (see
   merchants bought from on a cadence.
 - **Find money**: card offers, card choice, and subscriptions worth
   reviewing, each a Finding with an estimate per year (ADR 0001,
-  2026-11-09 amendment). Not built yet.
+  2026-11-09 amendment).
 
 Success: a check-in answers "what changed, and is anything unusual?"
 in a few minutes, and every number on screen can also be asked of the
@@ -49,10 +49,24 @@ hidden and never counted as spending or income.
 - Served by an always-on home server over a private network, opened in
   a browser. Data arrives from Plaid on a background sync (every few
   hours) or a manual pull.
-- Screens (per ADR 0001): Check-in (home), Holdings, Flow, Find money
-  (placeholder), Settings. The UI is mid-reshape: Flow has replaced
+- Screens (per ADR 0001): Check-in (home), Holdings, Flow, Find money,
+  Settings. The UI is mid-reshape: Flow has replaced
   Outflows and the Ledger (Recurring now sits on the Flow screen), and
   Holdings has replaced Balances.
+- Find money lists every open Finding, highest estimate a year first,
+  over the 12 months ending with the selected month (stepped like
+  Check-in's weeks). Each row has its kind, the estimate (points beside
+  the cash value they're counted at), core's one suggested action, the
+  evidence in words (offer terms and days left, each card's rate and
+  spend for card choice, a subscription's charge or price rise), and
+  the charges behind it, opened in place. Dismiss moves a Finding to a
+  folded dismissed list with Restore; a subscription or price rise can
+  also be marked Reviewed, into a folded reviewed list with Unreview.
+  Both marks have Undo on the toast. Under the list, each card from the
+  offers files is said in words (offers added, no earn table, not tied
+  to an account), or that no offers are set up. A Check-in row for a
+  Finding (or a recurring up row that stands in for a price rise) opens
+  Find money on that Finding.
 - Upkeep (bank connections, card-payment match review, categorize,
   reset) lives in Settings, away from the analysis screens.
 

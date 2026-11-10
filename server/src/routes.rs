@@ -418,6 +418,8 @@ struct TxnQueryParams {
     lane: Option<String>,
     /// Normalized merchant, e.g. a recurring merchant's key.
     merchant: Option<String>,
+    /// Comma-separated transaction ids, e.g. a Finding's `txn_ids`.
+    ids: Option<String>,
     /// true = only rows with no category.
     uncategorized: Option<bool>,
     /// "out" | "in": the amount's sign.
@@ -481,6 +483,13 @@ impl TxnQueryParams {
             flag: p.flag,
             lane,
             merchant: p.merchant.filter(|s| !s.trim().is_empty()),
+            ids: p.ids.as_deref().map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(String::from)
+                    .collect()
+            }),
             uncategorized: p.uncategorized.unwrap_or(false),
             direction,
             min_cents: p.min_cents,

@@ -375,14 +375,16 @@ export function Flow({
   }, [loadSources]);
 
   const [recurring, setRecurring] = useState<Load<RecurringView>>({ state: "loading" });
+  // The Subscriptions filter: core narrows the list and its total.
+  const [subscriptions, setSubscriptions] = useState(false);
   const loadRecurring = useCallback(async () => {
     if (!month) return;
     try {
-      setRecurring({ state: "ok", data: await api.recurring(month) });
+      setRecurring({ state: "ok", data: await api.recurring(month, subscriptions) });
     } catch (err) {
       setRecurring({ state: "error", error: errMessage(err) });
     }
-  }, [month]);
+  }, [month, subscriptions]);
 
   useEffect(() => {
     void loadRecurring();
@@ -575,6 +577,8 @@ export function Flow({
       <RecurringSection
         load={recurring}
         onRetry={() => void loadRecurring()}
+        subscriptions={subscriptions}
+        onSubscriptions={setSubscriptions}
         pick={pick}
         onPick={onPick}
         onIgnore={setIgnored}

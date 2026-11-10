@@ -235,12 +235,25 @@ pub struct RecurringView {
     pub until: NaiveDate,
     /// Whether the chosen month is still in progress.
     pub in_progress: bool,
-    /// Sum of `monthly_cents` over `items`.
+    /// Sum of `monthly_cents` over `items` (so, filtered, over the
+    /// subscriptions only).
     pub monthly_total_cents: i64,
     /// Not ignored, by monthly cost (largest first).
     pub items: Vec<RecurringMerchant>,
     /// Ignored merchants that are still detected, same order.
     pub ignored: Vec<RecurringMerchant>,
+}
+
+impl RecurringView {
+    /// The Subscriptions filter: only steady merchants
+    /// ([`RecurringMerchant::is_steady`]) stay in `items`, and
+    /// `monthly_total_cents` becomes their sum. `ignored` is left whole, so
+    /// every ignored merchant can still be restored.
+    pub fn subscriptions(mut self) -> Self {
+        self.items.retain(RecurringMerchant::is_steady);
+        self.monthly_total_cents = self.items.iter().map(|r| r.monthly_cents).sum();
+        self
+    }
 }
 
 fn month_of(idx: i64) -> NaiveDate {
@@ -817,6 +830,33 @@ mod tests {
         assert!(v.items.is_empty());
         assert_eq!(v.ignored.len(), 1);
         assert_eq!(v.monthly_total_cents, 0);
+    }
+
+    #[test]
+    fn subscriptions_keeps_steady_merchants_and_their_total() {
+        let mut txns = monthly(
+            "Streamflix",
+            &[(2026, 8, 1599), (2026, 9, 1599), (2026, 10, 1599)],
+        );
+        // Monthly but the bill moves: recurring, not steady.
+        txns.extend(monthly(
+            "City Power",
+            &[(2026, 8, 4000), (2026, 9, 6500), (2026, 10, 9000)],
+        ));
+        // Ignored steady merchant: the ignored list stays as it was.
+        txns.extend(monthly(
+            "Demo Gym",
+            &[(2026, 8, 4000), (2026, 9, 4000), (2026, 10, 4000)],
+        ));
+        let ignored: HashSet<String> = ["demo gym".to_string()].into();
+        let v = build(&txns, &ignored, day(2026, 10, 31), at(2026, 11, 7));
+        assert_eq!(v.items.len(), 2);
+        let s = v.clone().subscriptions();
+        let names: Vec<&str> = s.items.iter().map(|r| r.merchant.as_str()).collect();
+        assert_eq!(names, ["streamflix"]);
+        assert_eq!(s.monthly_total_cents, 1599);
+        assert_eq!(s.ignored, v.ignored);
+        assert_eq!((s.month, s.since, s.until), (v.month, v.since, v.until));
     }
 
     #[test]

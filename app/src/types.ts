@@ -1009,7 +1009,8 @@ export type RecurringView = {
    */
   in_progress: boolean,
   /**
-   * Sum of `monthly_cents` over `items`.
+   * Sum of `monthly_cents` over `items` (so, filtered, over the
+   * subscriptions only).
    */
   monthly_total_cents: number,
   /**

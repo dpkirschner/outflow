@@ -305,9 +305,16 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             };
             with_query(path, &[p.to_query()])
         }
-        Cmd::Recurring { period, .. } => {
+        Cmd::Recurring {
+            period,
+            subscriptions,
+            ..
+        } => {
             let mut q = Vec::new();
             period_q(period.resolve_at(today)?, &mut q);
+            if *subscriptions {
+                q.push("subscriptions=true".into());
+            }
             with_query("/recurring", &q)
         }
         // The server reads its own OUTFLOW_PERKS; --file is local-only.
@@ -404,6 +411,10 @@ mod tests {
         assert_eq!(
             ok(&["recurring", "--period", "last-month"]),
             "/recurring?period=2026-10"
+        );
+        assert_eq!(
+            ok(&["recurring", "--period", "2026-10", "--subscriptions"]),
+            "/recurring?period=2026-10&subscriptions=true"
         );
         assert!(ok(&["txns", "--merchant", "streamflix com"]).contains("merchant=streamflix%20com"));
     }

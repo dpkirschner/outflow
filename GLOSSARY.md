@@ -120,9 +120,11 @@ product direction behind these terms is in
   card without one counts a point as one cent.
 - **Steady**: a recurring merchant on a monthly or yearly cadence whose
   recent charges (the last three) are within 5% of their median. A steady
-  merchant is what the Subscriptions filter shows. Its price rises when
-  its latest charges sit more than 5% above a steady run before them; that
-  lasts until three charges are at the new price.
+  merchant is what the Subscriptions filter on the Recurring list shows
+  (its total is then the steady merchants' usual cost; ignored merchants
+  stay listed as ignored). Its price rises when its latest charges sit
+  more than 5% above a steady run before them; that lasts until three
+  charges are at the new price.
 - **Reviewed**: a mark on a steady merchant. It hides the subscription
   Finding for 12 months, or until the merchant goes Up: its charge is
   more than 5% above the one reviewed. A price rise after a review always

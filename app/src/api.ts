@@ -250,8 +250,11 @@ export const api = {
     ),
   flow: (filter?: Filter) => get<FlowMonth[]>(`/flow${filterQuery(filter)}`),
   // The recurring list over the 12 months ending at `month` (YYYY-MM).
-  recurring: (month: string) =>
-    get<RecurringView>(`/recurring?period=${encodeURIComponent(month)}`),
+  // `subscriptions` keeps only steady merchants, totalled (GLOSSARY: Steady).
+  recurring: (month: string, subscriptions = false) =>
+    get<RecurringView>(
+      `/recurring?period=${encodeURIComponent(month)}${subscriptions ? "&subscriptions=true" : ""}`,
+    ),
   setRecurringIgnored: (merchant: string, ignored: boolean) =>
     post<void>("/recurring/ignored", { merchant, ignored }),
   categories: () => get<string[]>("/categories"),

@@ -358,6 +358,10 @@ those capsules.
   It's a deliberate exception to "upkeep stays off analysis screens": it
   only changes what this list shows, and it's undone in place (Undo on the
   toast, which covers several Ignores in a row, or Restore).
+- An All / Subscriptions segmented control sits right of the "Recurring"
+  title (the Holdings lens control's shape). Subscriptions shows only
+  Steady merchants; the note names the rule and its total ("Together
+  $X a month") is theirs. The "N ignored" list is never filtered.
 - Top eight first. Under the table, "Show all" on the left and a quieter
   "N ignored" text control on the right, which lists the ignored merchants
   with Restore, aligned with the table's cells.

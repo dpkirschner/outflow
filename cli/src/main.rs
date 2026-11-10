@@ -237,6 +237,10 @@ pub(crate) enum Cmd {
         /// List the ignored merchants instead.
         #[arg(long)]
         ignored: bool,
+        /// Only steady merchants (monthly or yearly, last 3 charges within
+        /// 5% of their median); the total is theirs. Ignored stays whole.
+        #[arg(long)]
+        subscriptions: bool,
     },
     /// Set a transaction's category by hand. Also points the merchant's rule
     /// at it, so its uncategorized rows follow on the next `categorize`.
@@ -795,17 +799,26 @@ fn cmd_recurring(
     store: &Store,
     period: &PeriodArgs,
     ignored: bool,
+    subscriptions: bool,
     json: bool,
 ) -> Result<(), String> {
     let through = period.resolve()?.map_or_else(today_local, |p| p.last_day());
     let now = now_secs();
-    let v = recurring(store, through, now).map_err(|e| format!("{e}"))?;
+    let mut v = recurring(store, through, now).map_err(|e| format!("{e}"))?;
+    if subscriptions {
+        v = v.subscriptions();
+    }
     if json {
         return json_out(&v);
     }
     let rows = if ignored { &v.ignored } else { &v.items };
     println!(
-        "recurring {} to {}{}",
+        "{} {} to {}{}",
+        if subscriptions {
+            "subscriptions"
+        } else {
+            "recurring"
+        },
         v.since,
         v.until,
         if v.in_progress {
@@ -819,6 +832,8 @@ fn cmd_recurring(
             "{}",
             if ignored {
                 "nothing ignored"
+            } else if subscriptions {
+                "no steady subscriptions detected"
             } else {
                 "no recurring merchants detected"
             }
@@ -2011,7 +2026,11 @@ fn run() -> Result<(), String> {
             }
             cmd_report(&store, by, top, &f)
         }
-        Cmd::Recurring { period, ignored } => cmd_recurring(&store, &period, ignored, cli.json),
+        Cmd::Recurring {
+            period,
+            ignored,
+            subscriptions,
+        } => cmd_recurring(&store, &period, ignored, subscriptions, cli.json),
         Cmd::Fix {
             txn_id,
             category,

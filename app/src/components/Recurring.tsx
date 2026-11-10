@@ -4,7 +4,9 @@
 //
 // A row drills the transaction table into that merchant's charges over the
 // window, through the same Pick as the lanes. Ignore moves a merchant to the
-// ignored list (one mark, no other states), with Undo.
+// ignored list (one mark, no other states), with Undo. The Subscriptions
+// switch asks core for steady merchants only (GLOSSARY: Steady); the total
+// follows, the ignored list doesn't.
 import { useRef, useState } from "react";
 import type { RecurringMerchant, RecurringView, StreamCadence } from "../types";
 import {
@@ -19,6 +21,8 @@ import type { Pick } from "./Flow";
 const PREVIEW = 8;
 /** Mirrors core `recurring::CHANGE_PCT`, for the note's wording only. */
 const CHANGE_PCT = 25;
+/** Mirrors core `recurring::STEADY_PCT`, for the note's wording only. */
+const STEADY_PCT = 5;
 
 const CADENCE: Record<Exclude<StreamCadence, "EveryFewMonths">, string> = {
   Daily: "about daily",
@@ -213,6 +217,8 @@ function Spark({
 export function RecurringSection({
   load,
   onRetry,
+  subscriptions,
+  onSubscriptions,
   pick,
   onPick,
   onIgnore,
@@ -222,6 +228,9 @@ export function RecurringSection({
     | { state: "error"; error: string }
     | { state: "ok"; data: RecurringView };
   onRetry: () => void;
+  /** Steady merchants only (the list and its total come from core). */
+  subscriptions: boolean;
+  onSubscriptions: (on: boolean) => void;
   pick: Pick | null;
   onPick: (p: Pick) => void;
   /** Resolves true when the mark was saved. */
@@ -234,9 +243,27 @@ export function RecurringSection({
   const [showIgnored, setShowIgnored] = useState(false);
 
   const title = (
-    <h2 id="fl-rc-title" className="fl-section-title" tabIndex={-1}>
-      Recurring
-    </h2>
+    <div className="fl-rc-head">
+      <h2 id="fl-rc-title" className="fl-section-title" tabIndex={-1}>
+        Recurring
+      </h2>
+      <div className="lg-win" role="group" aria-label="Show">
+        <button
+          className={subscriptions ? "" : "on"}
+          aria-pressed={!subscriptions}
+          onClick={() => onSubscriptions(false)}
+        >
+          All
+        </button>
+        <button
+          className={subscriptions ? "on" : ""}
+          aria-pressed={subscriptions}
+          onClick={() => onSubscriptions(true)}
+        >
+          Subscriptions
+        </button>
+      </div>
+    </div>
   );
 
   if (load.state !== "ok") {
@@ -322,12 +349,15 @@ export function RecurringSection({
     <section className="fl-rc" aria-labelledby="fl-rc-title" ref={root}>
       {title}
       <p className="fl-rc-note">
-        Merchants you pay on a regular cadence, {span}.
+        {subscriptions
+          ? `Subscriptions: monthly or yearly merchants whose last three charges are within ${STEADY_PCT}% of each other, ${span}.`
+          : `Merchants you pay on a regular cadence, ${span}.`}
         {v.items.length > 0 && (
           <>
             {" "}
             <span className="fl-nowrap">
-              Usual cost <b>{signedCents(-v.monthly_total_cents)}</b> a month.
+              {subscriptions ? "Together" : "Usual cost"}{" "}
+              <b>{signedCents(-v.monthly_total_cents)}</b> a month.
             </span>{" "}
             Marked: new, late, and moves over {CHANGE_PCT}% (charge to charge,
             and bars per charge, for merchants slower than monthly).
@@ -337,14 +367,18 @@ export function RecurringSection({
 
       {v.items.length === 0 ? (
         <p className="fl-rc-empty">
-          Nothing recurring in these 12 months yet. A merchant shows up here
-          after three charges on a regular cadence.
+          {subscriptions
+            ? `No steady subscriptions in these 12 months. A monthly or yearly merchant shows up here once its last three charges are within ${STEADY_PCT}% of each other.`
+            : "Nothing recurring in these 12 months yet. A merchant shows up here after three charges on a regular cadence."}
         </p>
       ) : (
         <>
           <div className="fl-table-wrap">
             <table className="fl-rc-table">
-              <caption className="fl-sr">Recurring merchants, {span}</caption>
+              <caption className="fl-sr">
+                {subscriptions ? "Subscriptions" : "Recurring merchants"},{" "}
+                {span}
+              </caption>
               <thead>
                 <tr>
                   {head("name", "Merchant", "fl-rc-col-name")}

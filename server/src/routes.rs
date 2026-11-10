@@ -616,10 +616,13 @@ struct RecurringParams {
     period: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    /// The Subscriptions filter: only steady merchants (GLOSSARY: Steady).
+    subscriptions: Option<bool>,
 }
 
 /// The recurring list over the 12 months ending with the period's last month
-/// (default: this month). `period=2026-10` is the usual spelling.
+/// (default: this month). `period=2026-10` is the usual spelling;
+/// `subscriptions=true` keeps only steady merchants and totals those.
 async fn recurring(
     State(state): State<AppState>,
     Query(p): Query<RecurringParams>,
@@ -634,8 +637,10 @@ async fn recurring(
     .map_err(ApiError::bad_request)?
     .map_or(today, |period| period.last_day());
     let now = now_secs();
+    let subs = p.subscriptions.unwrap_or(false);
     with_store(&state, move |s| {
-        outflow_core::recurring(s, through, now).map_err(|e| e.to_string())
+        let v = outflow_core::recurring(s, through, now).map_err(|e| e.to_string())?;
+        Ok(if subs { v.subscriptions() } else { v })
     })
     .await
     .map(Json)
@@ -1873,6 +1878,43 @@ mod tests {
 
         let (status, _) = get_json(app, "/recurring?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// subscriptions=true keeps only steady merchants and totals them.
+    #[tokio::test]
+    async fn recurring_subscriptions_keeps_steady_merchants() {
+        use chrono::{Local, TimeZone};
+        let at = |m: u32| {
+            Local
+                .with_ymd_and_hms(2026, m, 10, 12, 0, 0)
+                .single()
+                .unwrap()
+                .timestamp()
+        };
+        let mut txns = Vec::new();
+        for (m, power) in [(8, -4000), (9, -6500), (10, -9000)] {
+            for (id, cents, desc) in [
+                ("sf", -1599, "STREAMFLIX.COM 1234"),
+                ("pw", power, "CITY POWER"),
+            ] {
+                let mut t = txn(&format!("{id}{m}"), cents, desc);
+                t.posted = at(m);
+                t.transacted_at = Some(at(m));
+                txns.push(t);
+            }
+        }
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_transactions(&txns).unwrap();
+        let app = app_with_store(store);
+
+        let (_, all) = get_json(app.clone(), "/recurring?period=2026-10").await;
+        assert_eq!(all["items"].as_array().unwrap().len(), 2);
+        let (status, body) = get_json(app, "/recurring?period=2026-10&subscriptions=true").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let items = body["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["merchant"], "streamflix com");
+        assert_eq!(body["monthly_total_cents"], 1599);
     }
 
     // The /merchants handler flattens FilterParams too — same fix, same guard.

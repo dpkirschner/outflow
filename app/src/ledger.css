@@ -1263,6 +1263,19 @@ button.fl-lane-figure {
   gap: 10px;
   margin-top: 8px;
 }
+.fl-rc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fl-rc-head .lg-win {
+  margin-left: 0;
+}
+.fl-rc-head .lg-win button {
+  min-width: 44px;
+}
 .fl-rc-note,
 .fl-rc-empty {
   margin: 0;

@@ -24,6 +24,7 @@ import type {
   TxnFlag,
   Lane,
   Direction,
+  SeriesMonth,
   TxnPage,
   Upkeep,
   ResetPreview,
@@ -175,6 +176,36 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 const get = <T>(path: string) => req<T>("GET", path);
 const post = <T>(path: string, body?: unknown) => req<T>("POST", path, body);
 
+// The /transactions query string; /flow/series reads the same one.
+function txnQuery(s?: TxnSearch): string {
+  const q = new URLSearchParams();
+  const set = (k: string, v: unknown) => {
+    if (v !== undefined && v !== "" && v !== null) q.set(k, String(v));
+  };
+  set("since", s?.since);
+  set("until", s?.until);
+  set("pending", s?.includePending);
+  set("transfers", s?.includeNonSpending);
+  set("q", s?.q);
+  set("account", s?.account);
+  set("category", s?.category);
+  set("source", s?.source);
+  set("flag", s?.flag);
+  set("period", s?.period);
+  set("lane", s?.lane);
+  set("merchant", s?.merchant);
+  set("uncategorized", s?.uncategorized || undefined);
+  set("direction", s?.direction);
+  set("min_cents", s?.minCents);
+  set("max_cents", s?.maxCents);
+  set("sort", s?.sort);
+  set("dir", s?.dir);
+  set("offset", s?.offset);
+  set("limit", s?.limit);
+  const qs = q.toString();
+  return qs ? `?${qs}` : "";
+}
+
 // Filter → query params. Server defaults mirror the old to_filter guard:
 // missing params mean "everything" (pending included, transfers excluded).
 function filterQuery(filter?: Filter, extra?: Record<string, string>): string {
@@ -203,34 +234,9 @@ export const api = {
   holdingsChange: (r: StockRange, by: "account" | "position") =>
     get<PositionChange[]>(`/holdings/change${rangeQuery(r, { by })}`),
   // Search/sort/filter over the whole archive; returns one page + totals.
-  transactions: (s?: TxnSearch) => {
-    const q = new URLSearchParams();
-    const set = (k: string, v: unknown) => {
-      if (v !== undefined && v !== "" && v !== null) q.set(k, String(v));
-    };
-    set("since", s?.since);
-    set("until", s?.until);
-    set("pending", s?.includePending);
-    set("transfers", s?.includeNonSpending);
-    set("q", s?.q);
-    set("account", s?.account);
-    set("category", s?.category);
-    set("source", s?.source);
-    set("flag", s?.flag);
-    set("period", s?.period);
-    set("lane", s?.lane);
-    set("merchant", s?.merchant);
-    set("uncategorized", s?.uncategorized || undefined);
-    set("direction", s?.direction);
-    set("min_cents", s?.minCents);
-    set("max_cents", s?.maxCents);
-    set("sort", s?.sort);
-    set("dir", s?.dir);
-    set("offset", s?.offset);
-    set("limit", s?.limit);
-    const qs = q.toString();
-    return get<TxnPage>(`/transactions${qs ? `?${qs}` : ""}`);
-  },
+  transactions: (s?: TxnSearch) => get<TxnPage>(`/transactions${txnQuery(s)}`),
+  // The rows `transactions` would list for the same search, summed per month.
+  flowSeries: (s?: TxnSearch) => get<SeriesMonth[]>(`/flow/series${txnQuery(s)}`),
   categorize: () => post<CategorizeResult>("/categorize"),
   inSources: (filter?: Filter) => get<InSource[]>(`/flow/in-sources${filterQuery(filter)}`),
   spendCategories: (filter?: Filter) =>

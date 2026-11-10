@@ -29,6 +29,7 @@ import type {
   PositionRow,
   RecurringView,
   ResetPreview,
+  SeriesMonth,
   SyncEntry,
   SyncReport,
   Transaction,
@@ -163,6 +164,12 @@ export const inSource: InSource = {
   "total_cents": 310000,
   "count": 2,
   "uncategorized_cents": 0
+};
+
+export const seriesMonth: SeriesMonth = {
+  "year": 2026,
+  "month": 10,
+  "cents": -48250
 };
 
 export const checkIn: CheckIn = {

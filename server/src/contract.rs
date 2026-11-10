@@ -155,6 +155,14 @@ fn in_source() -> outflow_core::InSource {
     }
 }
 
+fn series_month() -> outflow_core::SeriesMonth {
+    outflow_core::SeriesMonth {
+        year: 2026,
+        month: 10,
+        cents: -48_250,
+    }
+}
+
 fn flow_month() -> FlowMonth {
     FlowMonth {
         year: 2026,
@@ -919,6 +927,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
         ("InSource", j(in_source())),
+        ("SeriesMonth", j(series_month())),
         ("CheckIn", j(checkin())),
         ("CategoriesVsUsual", j(categories_vs_usual())),
         ("RecurringView", j(recurring_view())),

@@ -341,6 +341,18 @@ export type InSource = {
 };
 
 /**
+ * One month of a picked figure (`pick_series`).
+ */
+export type SeriesMonth = {
+  year: number,
+  month: number,
+  /**
+   * Signed sum of the month's matching rows (outflows negative).
+   */
+  cents: number,
+};
+
+/**
  * The Flow lane (or Moved group) a transaction is counted in.
  */
 export type Lane = "in" | "out" | "card_payment" | "invest" | "save" | "loan_paydown" | "between";

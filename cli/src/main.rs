@@ -377,6 +377,10 @@ pub(crate) struct TxnsArgs {
     /// Rows to skip, for paging.
     #[arg(long, default_value_t = 0)]
     pub offset: usize,
+    /// The matching rows' sum per month instead of the rows (Flow's month
+    /// strip with a pick); sort and paging are ignored.
+    #[arg(long)]
+    pub by_month: bool,
 }
 
 #[derive(Subcommand)]
@@ -892,6 +896,16 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
         offset: a.offset,
         limit: a.limit,
     };
+    if a.by_month {
+        let series = outflow_core::pick_series(store, &q).map_err(|e| format!("{e}"))?;
+        if json {
+            return json_out(&series);
+        }
+        for m in &series {
+            println!("{}-{:02}  {:>12}", m.year, m.month, dollars(m.cents));
+        }
+        return Ok(());
+    }
     let page = search_transactions(store, &q).map_err(|e| format!("{e}"))?;
     if json {
         return json_out(&page);

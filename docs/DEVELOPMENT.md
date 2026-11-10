@@ -55,7 +55,7 @@ Subcommands (`outflow <cmd> --help` is the authoritative list of flags):
 | `balances [--history]` | current state led by cash + invested − credit − loans = net worth; `--history` = daily trend |
 | `holdings [--account A --ticker T] [--history \| --by account\|position]` | current positions; with a period or `--by`, gain over the period (default this month); `--history` = per-sync snapshots |
 | `activity [--account A --ticker T --type T]` | investment transactions; amount = cash effect |
-| `txns [--search --category --account --merchant --flag --lane --direction --uncategorized --posted-only --show-excluded --sort --asc --limit --offset]` | the transaction list; `--lane` = exactly the rows behind a `report --by monthly` figure |
+| `txns [--search --category --account --merchant --flag --lane --direction --uncategorized --posted-only --show-excluded --sort --asc --limit --offset --by-month]` | the transaction list; `--lane` = exactly the rows behind a `report --by monthly` figure; `--by-month` = their sum per month instead (`/flow/series`) |
 | `accounts [--all]` | one row per account (`--all` includes hidden) |
 | `matches list\|accept\|reject\|unaccept` | card-payment match review |
 | `perks [--file F --lookback 3mo\|6mo\|12mo\|all --expiring-days N]` | card offers vs spending |

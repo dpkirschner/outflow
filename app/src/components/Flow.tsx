@@ -21,6 +21,7 @@ import type {
   MovedFlow,
   RecurringMerchant,
   RecurringView,
+  SeriesMonth,
   TxnRow,
   CategoryUndo,
   GroupEdit,
@@ -38,18 +39,107 @@ const PAGE = 50;
 const CATEGORY_PREVIEW = 6;
 const SOURCE_PREVIEW = 6;
 
-// The strip shows Out per month, scaled to the largest month.
-function stripMonths(months: FlowMonth[]): StripMonth[] {
-  const maxOut = Math.max(1, ...months.map((m) => m.out_cents));
-  return months.map((m) => ({
-    key: monthKey(m.year, m.month),
-    label: monthLabel(m.year, m.month),
-    short: monthLabelShort(m.year, m.month),
-    figure: formatCentsShort(-m.out_cents).replace("-", "\u2212"),
-    spoken: `${signedCents(-m.out_cents)} out`,
-    bar: Math.max(0, m.out_cents) / maxOut,
-    sofar: isCurrentMonth(m),
-  }));
+/** What the strip plots for a pick: a caption and each month's signed
+ *  figure (outflows negative). With no pick, Out. */
+interface StripPlot {
+  caption: string;
+  /** Signed cents per month; undefined = still loading (strip shows Out). */
+  value: (m: FlowMonth) => number | undefined;
+  /** +1 when the figure is money in, −1 when money out: bars grow that way. */
+  sign: 1 | -1;
+}
+
+const OUT_PLOT: StripPlot = {
+  caption: "Out per month",
+  value: (m) => -m.out_cents,
+  sign: -1,
+};
+
+/** A pick FlowMonth can't answer (a category, a merchant, Out's
+ *  uncategorized): the strip reads `/flow/series` for it. */
+function needsSeries(p: Pick): boolean {
+  return !!p.category || !!p.merchant || (!!p.uncategorized && p.lane !== "in");
+}
+
+/** The series request's identity: the pick's filter fields, nothing else. */
+function seriesKey(p: Pick): string {
+  return JSON.stringify([p.lane, p.direction, p.category, p.merchant, !!p.uncategorized]);
+}
+
+/** Which way a pick's money goes, for the strip's bars. */
+function pickSign(p: Pick): 1 | -1 {
+  if (p.direction) return p.direction === "in" ? 1 : -1;
+  return p.lane === "in" ? 1 : -1;
+}
+
+/** The pick's figure for one month, read from FlowMonth (lane picks). */
+function laneFigure(p: Pick, m: FlowMonth): number {
+  const mv = m.moved;
+  switch (p.lane) {
+    case "in":
+      return p.uncategorized ? m.in_uncategorized_cents : m.in_cents;
+    case "out":
+      return -m.out_cents;
+    case "card_payment":
+      if (p.direction === "out") return -mv.card_payment_bank_cents;
+      if (p.direction === "in") return mv.card_payment_card_cents;
+      return -mv.card_payment_cents;
+    default: {
+      const f = mv[p.lane];
+      if (p.direction === "out") return -f.out_cents;
+      if (p.direction === "in") return f.in_cents;
+      return f.in_cents - f.out_cents;
+    }
+  }
+}
+
+/** "Groceries per month", "Save (out) per month". */
+function plotCaption(p: Pick): string {
+  let what: string;
+  if (p.merchant) what = p.name ?? p.merchant;
+  else if (p.category) what = p.category;
+  else if (p.uncategorized) what = `${LANE_PATH[p.lane][0]} not yet categorized`;
+  else if (p.lane === "card_payment" && p.direction)
+    what = p.direction === "out" ? "Card payment from checking" : "Card payment into cards";
+  else {
+    what = LANE_PATH[p.lane][LANE_PATH[p.lane].length - 1];
+    if (p.direction && p.lane !== "in" && p.lane !== "out") {
+      what += p.direction === "out" ? " (out)" : " (back)";
+    }
+  }
+  return `${what} per month`;
+}
+
+function stripPlot(p: Pick | null, series: { key: string; data: SeriesMonth[] } | null): StripPlot {
+  if (!p) return OUT_PLOT;
+  const caption = plotCaption(p);
+  const sign = pickSign(p);
+  if (!needsSeries(p)) return { caption, sign, value: (m) => laneFigure(p, m) };
+  if (series?.key !== seriesKey(p)) return { ...OUT_PLOT, value: () => undefined };
+  const by = new Map(series.data.map((x) => [monthKey(x.year, x.month), x.cents]));
+  return { caption, sign, value: (m) => by.get(monthKey(m.year, m.month)) ?? 0 };
+}
+
+// One button per month, bars scaled to the plot's largest month. A month
+// against the plot's direction (refunds over spending) shows no bar.
+function stripMonths(months: FlowMonth[], plot: StripPlot): StripMonth[] {
+  const ready = months.every((m) => plot.value(m) !== undefined);
+  const p = ready ? plot : OUT_PLOT;
+  const figs = months.map((m) => (p.value(m) ?? 0) * p.sign);
+  const max = Math.max(1, ...figs);
+  const noun = p.caption.replace(/ per month$/, "");
+  return months.map((m, i) => {
+    const cents = p.value(m) ?? 0;
+    return {
+      key: monthKey(m.year, m.month),
+      label: monthLabel(m.year, m.month),
+      short: monthLabelShort(m.year, m.month),
+      figure: formatCentsShort(cents).replace("-", "\u2212"),
+      spoken: p === OUT_PLOT ? `${signedCents(cents)} out` : `${noun} ${signedCents(cents)}`,
+      bar: Math.max(0, figs[i]) / max,
+      sofar: isCurrentMonth(m),
+    };
+  });
 }
 
 export function monthKey(year: number, month: number): string {
@@ -359,6 +449,33 @@ export function Flow({
     window.requestAnimationFrame(() => bringTableIntoView());
   }, [flow.state, month]);
 
+  // With a pick, the strip plots that figure per month. Lane picks read
+  // FlowMonth; the rest fetch their series once per pick (and again when the
+  // figures reload), not per month.
+  const [series, setSeries] = useState<{ key: string; data: SeriesMonth[] } | null>(null);
+  const wantSeries = pick && needsSeries(pick) ? pick : null;
+  const wantKey = wantSeries ? seriesKey(wantSeries) : null;
+  useEffect(() => {
+    if (!wantSeries || !wantKey || flow.state !== "ok") return;
+    let live = true;
+    api
+      .flowSeries({
+        includeNonSpending: true,
+        lane: wantSeries.lane,
+        direction: wantSeries.direction,
+        uncategorized: wantSeries.uncategorized,
+        category: wantSeries.category,
+        merchant: wantSeries.merchant,
+      })
+      .then((data) => live && setSeries({ key: wantKey, data }))
+      .catch((err) => live && notify({ kind: "err", text: `Couldn't load the month strip: ${errMessage(err)}` }));
+    return () => {
+      live = false;
+    };
+    // wantSeries is read through wantKey: same key, same request.
+  }, [wantKey, flow, notify]);
+  const strip = stripPlot(pick, series);
+
   // A merchant pick reads the recurring window, not the month.
   const range =
     pick?.merchant && !pick.inMonth && recurring.state === "ok"
@@ -413,8 +530,8 @@ export function Flow({
       }}
     >
       <MonthStrip
-        caption="Out per month"
-        months={stripMonths(months)}
+        caption={strip.caption}
+        months={stripMonths(months, strip)}
         selected={month}
         onSelect={onMonth}
       />

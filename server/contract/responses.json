@@ -121,6 +121,11 @@
     "count": 2,
     "uncategorized_cents": 0
   },
+  "SeriesMonth": {
+    "year": 2026,
+    "month": 10,
+    "cents": -48250
+  },
   "CheckIn": {
     "period": {
       "kind": "Month",

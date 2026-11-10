@@ -166,7 +166,10 @@ impl From<Transaction> for TxnRow {
     }
 }
 
-pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnPage> {
+/// Every row `q` selects, unsorted and unpaged: the filter half of
+/// `search_transactions`, shared with `pick_series` so a strip series and the
+/// table under it always select the same rows.
+fn matching(store: &Store, q: &TxnQuery) -> rusqlite::Result<Vec<Transaction>> {
     let needle = q.text.as_deref().map(|s| s.to_lowercase());
     let kind = account_kinds(store)?;
     // A lane names its own flags, so non-Spending rows must reach it.
@@ -174,7 +177,7 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
         include_non_spending: q.filter.include_non_spending || q.lane.is_some(),
         ..q.filter
     };
-    let mut matched: Vec<Transaction> = store
+    Ok(store
         .all_transactions()?
         .into_iter()
         .filter(|t| passes(t, &filter))
@@ -210,7 +213,36 @@ pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnP
                     .contains(n)
                 || normalize_payee(t.merchant()).contains(n)
         })
-        .collect();
+        .collect())
+}
+
+/// One month of a picked figure (`pick_series`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct SeriesMonth {
+    pub year: i64,
+    pub month: u32,
+    /// Signed sum of the month's matching rows (outflows negative).
+    pub cents: i64,
+}
+
+/// A picked figure per month (Flow's strip with a pick active): the rows
+/// `search_transactions` would list for `q`, summed by local month of
+/// `effective_date`, oldest first. Months with no rows are left out; sort and
+/// paging fields are ignored.
+pub fn pick_series(store: &Store, q: &TxnQuery) -> rusqlite::Result<Vec<SeriesMonth>> {
+    let mut by: std::collections::BTreeMap<(i64, u32), i64> = Default::default();
+    for t in matching(store, q)? {
+        *by.entry(ym_local(t.effective_date())).or_default() += t.amount.cents();
+    }
+    Ok(by
+        .into_iter()
+        .map(|((year, month), cents)| SeriesMonth { year, month, cents })
+        .collect())
+}
+
+pub fn search_transactions(store: &Store, q: &TxnQuery) -> rusqlite::Result<TxnPage> {
+    let mut matched = matching(store, q)?;
 
     // Stable ordering: primary key, then date (newest first), then id — so
     // pagination never shuffles under equal keys.
@@ -952,6 +984,40 @@ mod tests {
         assert_eq!(src[0].count, 2);
         assert_eq!(src[0].uncategorized_cents, 300000);
         assert_eq!(src.len(), 2);
+    }
+
+    #[test]
+    fn pick_series_sums_the_listed_rows_by_month() {
+        use crate::model::AccountKind::Checking;
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("chk", Checking)]).unwrap();
+        let on = |id: &str, at: i64, cents: i64, cat: Option<&str>| {
+            let mut x = t(id, at, cents, "Grocer", cat, false);
+            x.account_id = "chk".into();
+            x.pfc_primary = Some("FOOD_AND_DRINK".into());
+            x
+        };
+        s.upsert_transactions(&[
+            on("a", JAN15, -5000, Some("Groceries")),
+            on("b", JAN15, 1000, Some("Groceries")), // a refund nets in
+            on("c", FEB15, -2500, Some("Groceries")),
+            on("d", FEB15, -9900, Some("Dining")),
+        ])
+        .unwrap();
+        let q = TxnQuery {
+            lane: Some(Lane::Out),
+            category: Some("Groceries".into()),
+            ..TxnQuery::default()
+        };
+        let series = pick_series(&s, &q).unwrap();
+        let got: Vec<_> = series.iter().map(|m| (m.year, m.month, m.cents)).collect();
+        assert_eq!(got, vec![(2021, 1, -4000), (2021, 2, -2500)]);
+        // Same rows as the table: each month's sum matches the listed total.
+        let feb = TxnQuery {
+            filter: TxnFilter::range(FEB15 - 86400, FEB15 + 86400),
+            ..q
+        };
+        assert_eq!(search_transactions(&s, &feb).unwrap().total_cents, -2500);
     }
 
     #[test]

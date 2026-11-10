@@ -310,7 +310,12 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             push("limit", a.limit.to_string());
             push("offset", a.offset.to_string());
             period_q(a.period.resolve_at(today)?, &mut q);
-            with_query("/transactions", &q)
+            let path = if a.by_month {
+                "/flow/series"
+            } else {
+                "/transactions"
+            };
+            with_query(path, &q)
         }
         _ => return Ok(None),
     };
@@ -460,6 +465,21 @@ mod tests {
             ]),
             "/transactions?lane=card_payment&uncategorized=true&direction=out\
              &sort=date&dir=desc&limit=50&offset=0&period=2026-11"
+        );
+    }
+
+    #[test]
+    fn txns_by_month_reads_the_series() {
+        assert_eq!(
+            ok(&[
+                "txns",
+                "--lane",
+                "out",
+                "--category",
+                "Groceries",
+                "--by-month"
+            ]),
+            "/flow/series?category=Groceries&lane=out&sort=date&dir=desc&limit=50&offset=0"
         );
     }
 

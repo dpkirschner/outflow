@@ -112,7 +112,10 @@ fn render() -> String {
                 Unusual,
                 Check,
                 NotCheckedReason,
-                NotChecked
+                NotChecked,
+                CategoryChange,
+                CategoryVsUsual,
+                CategoriesVsUsual
             ]
         );
     }

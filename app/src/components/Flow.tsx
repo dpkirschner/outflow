@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type MovedGroup, type SortKey } from "../api";
 import type {
   Account,
-  CategorySpend,
+  CategoryVsUsual,
   Direction,
   FlowMonth,
   Lane,
@@ -204,7 +204,7 @@ export function Flow({
   initialPick?: Pick | null;
 }) {
   const [flow, setFlow] = useState<Load<FlowMonth[]>>({ state: "loading" });
-  const [cats, setCats] = useState<CategorySpend[] | null>(null);
+  const [cats, setCats] = useState<CategoryVsUsual[] | null>(null);
   const [allCats, setAllCats] = useState(false);
   // Survives a month change (Flow stays mounted); resets on leaving Flow.
   const [pick, setPick] = useState<Pick | null>(initialPick ?? null);
@@ -253,7 +253,7 @@ export function Flow({
   const loadCats = useCallback(async () => {
     if (!month) return;
     try {
-      setCats(await api.spendCategories({ period: month }));
+      setCats((await api.checkinCategories(month)).items);
     } catch (err) {
       setCats(null);
       notify({ kind: "err", text: `Couldn't load categories: ${errMessage(err)}` });
@@ -636,7 +636,7 @@ function OutLane({
   onPick,
 }: {
   m: FlowMonth;
-  cats: CategorySpend[] | null;
+  cats: CategoryVsUsual[] | null;
   all: boolean;
   onToggleAll: () => void;
 } & PickProps) {
@@ -672,8 +672,8 @@ function OutLane({
             {shown.map((c) => (
               <Row
                 key={c.category ?? "\u0000"}
-                label={c.category ?? "Not yet categorized"}
-                name={c.category ?? "Not yet categorized"}
+                label={<CategoryLabel c={c} />}
+                name={categorySpoken(c)}
                 value={signedCents(-c.total_cents)}
                 cents={c.total_cents}
                 target={
@@ -694,6 +694,45 @@ function OutLane({
         </>
       )}
     </Lane>
+  );
+}
+
+/** "about 7× usual" / "down 69%": a category far from its usual, in words
+ *  (Up in attention amber, Down quiet); null when it isn't. */
+function categoryNote(c: CategoryVsUsual): string | null {
+  const u = c.usual_cents;
+  if (c.change === null || u === null) return null;
+  if (c.change === "up") {
+    if (u <= 0) return "usually none";
+    const r = c.total_cents / u;
+    const x = r < 5 ? Math.round(r * 2) / 2 : Math.round(r);
+    return `about ${x}× usual`;
+  }
+  return `down ${Math.round(((u - c.total_cents) / u) * 100)}%`;
+}
+
+function categorySpoken(c: CategoryVsUsual): string {
+  const name = c.category ?? "Not yet categorized";
+  const note = categoryNote(c);
+  if (!note) return name;
+  const base = c.usual_cents! > 0 ? `, usually ${unsignedCents(c.usual_cents!)}` : "";
+  return `${name}, ${note}${base}`;
+}
+
+function CategoryLabel({ c }: { c: CategoryVsUsual }) {
+  const note = categoryNote(c);
+  return (
+    <>
+      {c.category ?? "Not yet categorized"}
+      {note && (
+        <span className={`fl-cat-note ${c.change}`}>
+          {note}
+          {c.usual_cents! > 0 && (
+            <span className="fl-cat-base"> · usually {unsignedCents(c.usual_cents!)}</span>
+          )}
+        </span>
+      )}
+    </>
   );
 }
 

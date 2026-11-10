@@ -9,6 +9,7 @@ import type {
   ActivityRow,
   BalancesView,
   BuildInfo,
+  CategoriesVsUsual,
   CategorizeResult,
   CategoryEdit,
   CategorySpend,
@@ -281,6 +282,47 @@ export const checkIn: CheckIn = {
       "month": "2026-09",
       "outside": false,
       "worse": false
+    }
+  ]
+};
+
+export const categoriesVsUsual: CategoriesVsUsual = {
+  "period": {
+    "kind": "Month",
+    "start": "2026-10-01",
+    "end": "2026-11-01"
+  },
+  "label": "2026-10",
+  "periods": 12,
+  "to_date": null,
+  "items": [
+    {
+      "category": "Home Demo",
+      "total_cents": 42000,
+      "count": 3,
+      "usual_cents": 6000,
+      "change": "up"
+    },
+    {
+      "category": "Dining Demo",
+      "total_cents": 6000,
+      "count": 4,
+      "usual_cents": 19200,
+      "change": "down"
+    },
+    {
+      "category": "Groceries Demo",
+      "total_cents": 38200,
+      "count": 4,
+      "usual_cents": 38200,
+      "change": null
+    },
+    {
+      "category": null,
+      "total_cents": 1500,
+      "count": 1,
+      "usual_cents": null,
+      "change": null
     }
   ]
 };

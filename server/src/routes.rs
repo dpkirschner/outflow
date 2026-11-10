@@ -634,6 +634,24 @@ async fn checkin(
     .map(Json)
 }
 
+/// Out per category for one period, each against its usual, for the Flow
+/// lane's margin notes (core::categories_vs_usual).
+async fn checkin_categories(
+    State(state): State<AppState>,
+    Query(p): Query<CheckinParams>,
+) -> ApiResult<outflow_core::CategoriesVsUsual> {
+    let today = today_local();
+    let period = match blank(p.period.as_deref()) {
+        Some(s) => Period::parse(s, today).map_err(ApiError::bad_request)?,
+        None => Period::current(outflow_core::PeriodKind::Month, today),
+    };
+    with_store(&state, move |s| {
+        outflow_core::categories_vs_usual(s, period, today).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
 #[derive(Deserialize)]
 struct IgnoredBody {
     /// Normalized merchant, as `RecurringMerchant::merchant`.
@@ -975,6 +993,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/merchants", get(merchants))
         .route("/flow", get(flow))
         .route("/checkin", get(checkin))
+        .route("/checkin/categories", get(checkin_categories))
         .route("/recurring", get(recurring))
         .route("/recurring/ignored", post(set_recurring_ignored))
         .route("/categories", get(categories))
@@ -1546,6 +1565,12 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(ci["period"]["kind"], "Week");
         let (status, _) = get_json(app.clone(), "/checkin?period=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, cc) = get_json(app.clone(), "/checkin/categories?period=last-month").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cc["period"]["kind"], "Month");
+        assert!(cc["items"].is_array());
+        let (status, _) = get_json(app.clone(), "/checkin/categories?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // /holdings/change: one holdings snapshot (the second sync kept the

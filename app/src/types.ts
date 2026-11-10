@@ -650,6 +650,67 @@ export type NotChecked = {
 };
 
 /**
+ * Which way a category is far from its usual.
+ */
+export type CategoryChange = "up" | "down";
+
+/**
+ * A category's spend against its usual, for the Flow Out lane's margin
+ * notes (GLOSSARY: Usual, Category change).
+ */
+export type CategoryVsUsual = {
+  /**
+   * `None` = uncategorized.
+   */
+  category: string | null,
+  /**
+   * Spend net of refunds this period, positive = money spent.
+   */
+  total_cents: number,
+  /**
+   * Number of purchases (refunds not counted).
+   */
+  count: number,
+  /**
+   * Median of the earlier periods' spend in this category, a period with
+   * none counting as $0. None without `USUAL_MIN_PERIODS` periods.
+   */
+  usual_cents: number | null,
+  /**
+   * Set when the spend is far from the usual (`CATEGORY_FAR_RATIO` and
+   * `CATEGORY_FAR_CENTS`) in a finished period. Never set while the period
+   * is in progress (one early trip reads as double a usual-to-date), nor
+   * on uncategorized spend, which swings with how much is categorized,
+   * not with what was bought.
+   */
+  change: CategoryChange | null,
+};
+
+/**
+ * Spend per category for one period, each against its usual.
+ */
+export type CategoriesVsUsual = {
+  period: Period,
+  /**
+   * The period's spelling (`2026-11`, `2026-W45`, `2026-Q4`).
+   */
+  label: string,
+  /**
+   * How many earlier periods the usual is taken over.
+   */
+  periods: number,
+  /**
+   * While the period is in progress: the last day each earlier period
+   * was cut to, `YYYY-MM-DD` (usual to date).
+   */
+  to_date: string | null,
+  /**
+   * Largest spend first, like `/spend/categories`.
+   */
+  items: Array<CategoryVsUsual>,
+};
+
+/**
  * Which build is answering (`GET /api/version`, `outflow status`).
  */
 export type BuildInfo = {

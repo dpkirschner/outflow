@@ -29,8 +29,9 @@ pub use balances::{
 pub use build::{build_info, BuildInfo};
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
 pub use checkin::{
-    checkin, Check, CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual,
-    UnusualKind, Usual,
+    categories_vs_usual, checkin, CategoriesVsUsual, CategoryChange, CategoryVsUsual, Check,
+    CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual, UnusualKind,
+    Usual,
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{

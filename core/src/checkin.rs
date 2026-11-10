@@ -48,7 +48,7 @@
 
 use crate::model::Transaction;
 use crate::period::{Period, PeriodKind};
-use crate::query::{account_kinds, flow_over, lane_of, Lane};
+use crate::query::{account_kinds, category_spend, flow_over, lane_of, Lane, TxnFilter};
 use crate::recurring::{self, Change, RecurringView};
 use crate::stock::{net_worth_change, ChangeReason, NetWorthChange};
 use crate::store::Store;
@@ -56,7 +56,7 @@ use crate::subscriptions::{display_merchant, normalize_payee};
 use crate::upkeep;
 use chrono::{Datelike, Days, Local, Months, NaiveDate, TimeZone};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// How many earlier periods the usual is taken over.
 pub const USUAL_PERIODS: usize = 12;
@@ -397,16 +397,9 @@ pub fn checkin(
         p = p.previous();
         earlier.push(p);
     }
-    let covered: Vec<&Period> = earlier
-        .iter()
-        .filter(|p| first_day.is_some_and(|d| p.start >= d))
-        .collect();
-    let flows: Vec<_> = covered
-        .iter()
-        .map(|p| {
-            let (s, u) = cut(p);
-            flow_over(&txns, &kind, s, u)
-        })
+    let flows: Vec<_> = usual_windows(&period, today, first_day)
+        .into_iter()
+        .map(|(s, u)| flow_over(&txns, &kind, s, u))
         .collect();
     let nw_changes: Vec<i64> = earlier
         .iter()
@@ -897,6 +890,160 @@ fn late(view: &RecurringView, since: i64, until: i64) -> Vec<Unusual> {
 }
 
 /// First day of each month the period touches.
+/// The windows a usual is taken over: up to `USUAL_PERIODS` periods of the
+/// same kind before `period` that start on or after `first_day`, each cut to
+/// the days elapsed so far while `period` is in progress (usual to date).
+fn usual_windows(
+    period: &Period,
+    today: NaiveDate,
+    first_day: Option<NaiveDate>,
+) -> Vec<(i64, i64)> {
+    let elapsed = (period.end > today).then(|| {
+        Days::new(((today - period.start).num_days() + 1).clamp(1, period.days() as i64) as u64)
+    });
+    let mut out = Vec::new();
+    let mut p = *period;
+    for _ in 0..USUAL_PERIODS {
+        p = p.previous();
+        if !first_day.is_some_and(|d| p.start >= d) {
+            continue;
+        }
+        out.push(match elapsed {
+            Some(n) => (day_start(p.start), day_start((p.start + n).min(p.end))),
+            None => p.bounds(),
+        });
+    }
+    out
+}
+
+/// A category's spend against its usual, for the Flow Out lane's margin
+/// notes (GLOSSARY: Usual, Category change).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CategoryVsUsual {
+    /// `None` = uncategorized.
+    pub category: Option<String>,
+    /// Spend net of refunds this period, positive = money spent.
+    pub total_cents: i64,
+    /// Number of purchases (refunds not counted).
+    pub count: usize,
+    /// Median of the earlier periods' spend in this category, a period with
+    /// none counting as $0. None without `USUAL_MIN_PERIODS` periods.
+    pub usual_cents: Option<i64>,
+    /// Set when the spend is far from the usual (`CATEGORY_FAR_RATIO` and
+    /// `CATEGORY_FAR_CENTS`) in a finished period. Never set while the period
+    /// is in progress (one early trip reads as double a usual-to-date), nor
+    /// on uncategorized spend, which swings with how much is categorized,
+    /// not with what was bought.
+    pub change: Option<CategoryChange>,
+}
+
+/// Which way a category is far from its usual.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "snake_case")]
+pub enum CategoryChange {
+    /// At least `CATEGORY_FAR_RATIO` times the usual.
+    Up,
+    /// At most 1 / `CATEGORY_FAR_RATIO` of the usual.
+    Down,
+}
+
+/// Spend per category for one period, each against its usual.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CategoriesVsUsual {
+    pub period: Period,
+    /// The period's spelling (`2026-11`, `2026-W45`, `2026-Q4`).
+    pub label: String,
+    /// How many earlier periods the usual is taken over.
+    pub periods: usize,
+    /// While the period is in progress: the last day each earlier period
+    /// was cut to, `YYYY-MM-DD` (usual to date).
+    pub to_date: Option<String>,
+    /// Largest spend first, like `/spend/categories`.
+    pub items: Vec<CategoryVsUsual>,
+}
+
+/// A category is far from its usual at this many times it (or under one
+/// over it)...
+pub const CATEGORY_FAR_RATIO: i64 = 2;
+/// ...and at least this far in dollars, so small categories stay quiet.
+pub const CATEGORY_FAR_CENTS: i64 = 50_00;
+
+/// Spend per category for `period` against each category's usual (the
+/// median of the same earlier periods the check-in's usual reads). Pending
+/// rows count, as on Flow; transfers and card payments don't.
+pub fn categories_vs_usual(
+    store: &Store,
+    period: Period,
+    today: NaiveDate,
+) -> rusqlite::Result<CategoriesVsUsual> {
+    let txns = store.all_transactions()?;
+    let kind = account_kinds(store)?;
+    let first_day = txns
+        .iter()
+        .map(|t| t.effective_date())
+        .min()
+        .and_then(local_day);
+    let (since, until) = period.bounds();
+    let now = category_spend(&txns, &kind, &TxnFilter::range(since, until));
+    let windows = usual_windows(&period, today, first_day);
+    let in_progress = period.end > today;
+    let earlier: Vec<HashMap<Option<String>, i64>> = windows
+        .iter()
+        .map(|&(s, u)| {
+            category_spend(&txns, &kind, &TxnFilter::range(s, u))
+                .into_iter()
+                .map(|c| (c.category, c.total_cents))
+                .collect()
+        })
+        .collect();
+    let items = now
+        .into_iter()
+        .map(|c| {
+            let usual_cents = (earlier.len() >= USUAL_MIN_PERIODS).then(|| {
+                median(
+                    earlier
+                        .iter()
+                        .map(|m| m.get(&c.category).copied().unwrap_or(0))
+                        .collect(),
+                )
+            });
+            let change = match (usual_cents, &c.category) {
+                (Some(u), Some(_)) if !in_progress => category_change(c.total_cents, u),
+                _ => None,
+            };
+            CategoryVsUsual {
+                category: c.category,
+                total_cents: c.total_cents,
+                count: c.count,
+                usual_cents,
+                change,
+            }
+        })
+        .collect();
+    Ok(CategoriesVsUsual {
+        period,
+        label: period.to_string(),
+        periods: windows.len(),
+        to_date: in_progress.then(|| today.min(period.last_day()).to_string()),
+        items,
+    })
+}
+
+fn category_change(cents: i64, usual: i64) -> Option<CategoryChange> {
+    if (cents - usual).abs() < CATEGORY_FAR_CENTS {
+        None
+    } else if cents >= usual * CATEGORY_FAR_RATIO {
+        Some(CategoryChange::Up)
+    } else if cents * CATEGORY_FAR_RATIO <= usual {
+        Some(CategoryChange::Down)
+    } else {
+        None
+    }
+}
+
 fn months_of(p: &Period) -> Vec<NaiveDate> {
     let mut m = p.start.with_day(1).expect("day 1");
     let mut out = Vec::new();
@@ -1056,6 +1203,110 @@ mod tests {
             noon(2026, 11, 7),
         )
         .unwrap()
+    }
+
+    /// Apr–Sep 2026 steady (synthetic), then an October with one category
+    /// up, one down, one new and large, one new and small.
+    fn seed_categories() -> Store {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[chk()]).unwrap();
+        let mut t = Vec::new();
+        let mut add = |m: u32, cents: i64, cat: Option<&str>| {
+            let mut x = txn(&format!("t{}", t.len()), noon(2026, m, 1), cents, "Shop");
+            x.category = cat.map(Into::into);
+            t.push(x);
+        };
+        for m in 4..=9 {
+            add(m, -300_00, Some("Groceries"));
+            add(m, -100_00, Some("Home"));
+            add(m, -200_00, Some("Dining"));
+        }
+        add(10, -310_00, Some("Groceries"));
+        add(10, -250_00, Some("Home"));
+        add(10, -60_00, Some("Dining"));
+        add(10, -500_00, Some("Travel"));
+        add(10, -40_00, Some("Gifts"));
+        add(10, -400_00, None);
+        s.upsert_transactions(&t).unwrap();
+        s
+    }
+
+    #[test]
+    fn categories_read_against_their_usual() {
+        let s = seed_categories();
+        let p = Period::parse("2026-10", today()).unwrap();
+        let c = categories_vs_usual(&s, p, today()).unwrap();
+        assert_eq!(c.periods, 6, "only months on or after the first row");
+        assert_eq!(c.to_date, None);
+        let get = |cat: Option<&str>| {
+            c.items
+                .iter()
+                .find(|i| i.category.as_deref() == cat)
+                .unwrap()
+        };
+        let row = |cat: &str| get(Some(cat));
+        assert_eq!(row("Groceries").usual_cents, Some(300_00));
+        assert_eq!(row("Groceries").change, None);
+        assert_eq!(row("Home").change, Some(CategoryChange::Up));
+        assert_eq!(row("Dining").change, Some(CategoryChange::Down));
+        assert_eq!(row("Travel").usual_cents, Some(0));
+        assert_eq!(row("Travel").change, Some(CategoryChange::Up));
+        assert_eq!(row("Gifts").change, None, "under the dollar floor");
+        assert_eq!(get(None).change, None, "uncategorized is never judged");
+        assert_eq!(c.items[0].category.as_deref(), Some("Travel"));
+        // Totals agree with /spend/categories.
+        let (since, until) = p.bounds();
+        let flat = crate::query::spend_by_category(&s, &TxnFilter::range(since, until)).unwrap();
+        let sum = |v: Vec<i64>| v.into_iter().sum::<i64>();
+        assert_eq!(
+            sum(c.items.iter().map(|i| i.total_cents).collect()),
+            sum(flat.iter().map(|i| i.total_cents).collect())
+        );
+    }
+
+    #[test]
+    fn categories_in_progress_get_a_usual_to_date_but_no_change() {
+        let s = seed_categories();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        let p = Period::parse("2026-10", today).unwrap();
+        let c = categories_vs_usual(&s, p, today).unwrap();
+        assert_eq!(c.to_date.as_deref(), Some("2026-10-05"));
+        let home = c
+            .items
+            .iter()
+            .find(|i| i.category.as_deref() == Some("Home"))
+            .unwrap();
+        assert_eq!(
+            home.usual_cents,
+            Some(100_00),
+            "rows on the 1st fall inside the cut"
+        );
+        assert!(c.items.iter().all(|i| i.change.is_none()));
+    }
+
+    #[test]
+    fn categories_without_enough_history_have_no_usual() {
+        let s = seed_categories();
+        let p = Period::parse("2026-06", today()).unwrap();
+        let c = categories_vs_usual(&s, p, today()).unwrap();
+        assert_eq!(c.periods, 2);
+        assert!(c
+            .items
+            .iter()
+            .all(|i| i.usual_cents.is_none() && i.change.is_none()));
+    }
+
+    #[test]
+    fn category_change_needs_ratio_and_dollars() {
+        use CategoryChange::{Down, Up};
+        assert_eq!(category_change(200_00, 100_00), Some(Up));
+        assert_eq!(category_change(199_99, 100_00), None);
+        assert_eq!(category_change(79_99, 30_00), None, "2.7x but under $50");
+        assert_eq!(category_change(80_00, 30_00), Some(Up));
+        assert_eq!(category_change(50_00, 100_00), Some(Down));
+        assert_eq!(category_change(50_01, 100_00), None);
+        assert_eq!(category_change(10_00, 40_00), None, "down 75% but only $30");
+        assert_eq!(category_change(0, 0), None);
     }
 
     #[test]

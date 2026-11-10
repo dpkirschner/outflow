@@ -254,9 +254,14 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             let p = crate::change_period(period, today)?;
             with_query("/net-worth/change", &[p.to_query()])
         }
-        Cmd::Checkin { period } => {
+        Cmd::Checkin { period, categories } => {
             let p = crate::checkin_period(period.as_deref(), today)?;
-            with_query("/checkin", &[p.to_query()])
+            let path = if *categories {
+                "/checkin/categories"
+            } else {
+                "/checkin"
+            };
+            with_query(path, &[p.to_query()])
         }
         Cmd::Recurring { period, .. } => {
             let mut q = Vec::new();
@@ -363,6 +368,18 @@ mod tests {
             "/merchants?period=2026-Q3&limit=5"
         );
         assert_eq!(ok(&["report"]), "/spend/categories");
+    }
+
+    #[test]
+    fn checkin_categories_reads_its_own_path() {
+        assert_eq!(
+            ok(&["checkin", "--categories", "--period", "last-month"]),
+            "/checkin/categories?period=2026-10"
+        );
+        assert_eq!(
+            ok(&["checkin", "--period", "2026-10"]),
+            "/checkin?period=2026-10"
+        );
     }
 
     #[test]

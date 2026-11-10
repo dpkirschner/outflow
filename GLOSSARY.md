@@ -112,6 +112,11 @@ product direction behind these terms is in
   periods swing (a rent week) is said, but not called unusual. A month check-in also judges every finished
   month the same way, so the month strip can mark the ones well below
   their usual.
+- **Category change**: a category's Out in a finished period at least
+  twice its usual or at most half of it, and at least $50 away. Flow says
+  it under the category ("about 3× usual · usually $60", "down 70%").
+  Uncategorized spend is never judged; it swings with how much is
+  categorized.
 - **Holdings**: the Stock screen.
 - **Flow**: the In / Out / Moved screen, with the transaction table and
   the recurring list.

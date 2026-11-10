@@ -4,6 +4,7 @@
 // directly (snake_case): there is no camelCase translation layer anymore.
 import type {
   Account,
+  CategoriesVsUsual,
   CheckIn,
   BalancesView,
   DayTotals,
@@ -276,6 +277,8 @@ export const api = {
   // One week, month or quarter (`2026-W45`, `2026-11`, `2026-Q4`,
   // `last-month`...): net worth change, earned − spent, saved, usuals, unusual.
   checkin: (period: string) => get<CheckIn>(`/checkin?period=${encodeURIComponent(period)}`),
+  checkinCategories: (period: string) =>
+    get<CategoriesVsUsual>(`/checkin/categories?period=${encodeURIComponent(period)}`),
 
   // Sync all linked Plaid items.
   pull: () => post<SyncReport>("/pull"),

@@ -245,6 +245,45 @@ fn recurring_view() -> RecurringView {
     }
 }
 
+fn categories_vs_usual() -> outflow_core::CategoriesVsUsual {
+    use outflow_core::checkin::*;
+    use outflow_core::{Period, PeriodKind};
+    let row = |category: Option<&str>, total_cents, count, usual_cents, change| CategoryVsUsual {
+        category: category.map(Into::into),
+        total_cents,
+        count,
+        usual_cents,
+        change,
+    };
+    CategoriesVsUsual {
+        period: Period::containing(
+            PeriodKind::Month,
+            NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+        ),
+        label: "2026-10".into(),
+        periods: 12,
+        to_date: None,
+        items: vec![
+            row(
+                Some("Home Demo"),
+                42_000,
+                3,
+                Some(6_000),
+                Some(CategoryChange::Up),
+            ),
+            row(
+                Some("Dining Demo"),
+                6_000,
+                4,
+                Some(19_200),
+                Some(CategoryChange::Down),
+            ),
+            row(Some("Groceries Demo"), 38_200, 4, Some(38_200), None),
+            row(None, 1_500, 1, None, None),
+        ],
+    }
+}
+
 fn checkin() -> outflow_core::CheckIn {
     use outflow_core::checkin::*;
     let mut up = Unusual {
@@ -870,6 +909,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
         ("CheckIn", j(checkin())),
+        ("CategoriesVsUsual", j(categories_vs_usual())),
         ("RecurringView", j(recurring_view())),
         ("BalancesView", j(balances_view())),
         ("DayTotals", j(day_totals())),

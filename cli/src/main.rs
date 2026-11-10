@@ -276,6 +276,10 @@ pub(crate) enum Cmd {
         /// 2026-11, 2026-W45, 2026-Q4, or this-/last- week|month|quarter.
         #[arg(long, value_name = "P")]
         period: Option<String>,
+        /// Out per category against each one's usual instead, marking those
+        /// at 2x or half their usual and $50 or more away.
+        #[arg(long)]
+        categories: bool,
     },
     /// Net worth change over a period (default this month), split into
     /// Markets (gain net of contributions on measurable investment accounts)
@@ -1106,6 +1110,40 @@ pub(crate) fn checkin_period(p: Option<&str>, today: NaiveDate) -> Result<Period
     Period::parse(p.unwrap_or("this-month"), today).map_err(|e| e.to_string())
 }
 
+fn cmd_checkin_categories(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
+    use outflow_core::CategoryChange;
+    let today = today_local();
+    let p = checkin_period(period, today)?;
+    let c = outflow_core::categories_vs_usual(store, p, today).map_err(|e| format!("{e}"))?;
+    if json {
+        return json_out(&c);
+    }
+    let by = c
+        .to_date
+        .as_deref()
+        .map(|d| format!(" by {d}"))
+        .unwrap_or_default();
+    println!(
+        "{}  out by category, usual{by} = median of {} earlier",
+        c.label, c.periods
+    );
+    for i in &c.items {
+        let usual = i.usual_cents.map(dollars).unwrap_or_else(|| "-".into());
+        let mark = match i.change {
+            Some(CategoryChange::Up) => "  UP",
+            Some(CategoryChange::Down) => "  down",
+            None => "",
+        };
+        println!(
+            "  {:<28} {:>12}   usual {:>12}{mark}",
+            i.category.as_deref().unwrap_or("(uncategorized)"),
+            dollars(i.total_cents),
+            usual
+        );
+    }
+    Ok(())
+}
+
 fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
     use outflow_core::{Check, NotCheckedReason, UnusualKind};
     let today = today_local();
@@ -1825,7 +1863,11 @@ fn run() -> Result<(), String> {
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),
         Cmd::Change { period } => cmd_change(&store, &period, cli.json),
-        Cmd::Checkin { period } => cmd_checkin(&store, period.as_deref(), cli.json),
+        Cmd::Checkin {
+            period,
+            categories: true,
+        } => cmd_checkin_categories(&store, period.as_deref(), cli.json),
+        Cmd::Checkin { period, .. } => cmd_checkin(&store, period.as_deref(), cli.json),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),

@@ -288,8 +288,17 @@ pub struct MerchantSpend {
 pub fn spend_by_category(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<CategorySpend>> {
     let txns = store.all_transactions()?;
     let kind = account_kinds(store)?;
+    Ok(category_spend(&txns, &kind, f))
+}
+
+/// `spend_by_category` over transactions already loaded.
+pub(crate) fn category_spend(
+    txns: &[Transaction],
+    kind: &impl Fn(&str) -> AccountKind,
+    f: &TxnFilter,
+) -> Vec<CategorySpend> {
     let mut map: HashMap<Option<String>, (i64, usize)> = HashMap::new();
-    for t in &txns {
+    for t in txns {
         if !passes(t, f) {
             continue;
         }
@@ -312,7 +321,7 @@ pub fn spend_by_category(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<C
         })
         .collect();
     out.sort_by_key(|x| std::cmp::Reverse(x.total_cents));
-    Ok(out)
+    out
 }
 
 pub fn top_merchants(

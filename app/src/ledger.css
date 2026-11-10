@@ -860,6 +860,23 @@ button.fl-lane-figure {
   font-size: 0.6875rem;
   color: var(--lg-dim);
 }
+/* A category far from its usual (finished months only): the margin note
+   in words under its name. Up is attention amber, like the recurring list's
+   "up"; down stays quiet. */
+.fl-cat-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--lg-dim);
+}
+.fl-cat-note.up {
+  color: var(--lg-amber);
+  font-weight: 600;
+}
+.fl-cat-base {
+  color: var(--lg-dim);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
 .fl-more {
   align-self: flex-start;
   background: transparent;

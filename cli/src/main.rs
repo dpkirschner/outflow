@@ -301,9 +301,10 @@ pub(crate) enum Cmd {
         #[command(subcommand)]
         action: MatchCmd,
     },
-    /// Find money: every Finding (card offers today), ranked by estimated
-    /// dollars per year over the 12 months ending with the period's last
-    /// month (default: this month). Card offers come from the offers TOML
+    /// Find money: every Finding (card offers, card choice, subscriptions to
+    /// review and price rises), ranked by estimated dollars per year over
+    /// the 12 months ending with the period's last month (default: this
+    /// month). Card offers come from the offers TOML
     /// file or folder (see examples/amex-offers-4242.toml); a bad file is an
     /// error, so this also checks the files.
     Find {
@@ -318,11 +319,18 @@ pub(crate) enum Cmd {
         expiring_days: i64,
         /// Dismiss the Finding with this key (shown under each one). It
         /// comes back only if its estimate more than doubles.
-        #[arg(long, value_name = "KEY", conflicts_with = "restore")]
+        #[arg(long, value_name = "KEY", group = "find_mark")]
         dismiss: Option<String>,
         /// Restore a dismissed Finding by its key.
-        #[arg(long, value_name = "KEY")]
+        #[arg(long, value_name = "KEY", group = "find_mark")]
         restore: Option<String>,
+        /// Mark a subscription's merchant Reviewed (shown under each one):
+        /// hidden for a year, or until its price rises.
+        #[arg(long, value_name = "MERCHANT", group = "find_mark")]
+        review: Option<String>,
+        /// Clear a merchant's Reviewed mark.
+        #[arg(long, value_name = "MERCHANT", group = "find_mark")]
+        unreview: Option<String>,
     },
     /// What needs you (connections, card payments to review, last sync),
     /// then recent sync runs. --json: {"version": ..., "upkeep": ...,
@@ -964,12 +972,38 @@ fn reward_label(o: &Offer) -> String {
     s
 }
 
+/// A mark `outflow find` sets or clears before listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FindMark<'a> {
+    /// Dismiss (true) or restore a Finding by key.
+    Dismissed(&'a str, bool),
+    /// Mark (true) or clear a merchant's Reviewed mark.
+    Reviewed(&'a str, bool),
+}
+
+impl<'a> FindMark<'a> {
+    fn from_args(
+        dismiss: &'a Option<String>,
+        restore: &'a Option<String>,
+        review: &'a Option<String>,
+        unreview: &'a Option<String>,
+    ) -> Option<Self> {
+        match (dismiss, restore, review, unreview) {
+            (Some(k), ..) => Some(FindMark::Dismissed(k, true)),
+            (_, Some(k), ..) => Some(FindMark::Dismissed(k, false)),
+            (_, _, Some(m), _) => Some(FindMark::Reviewed(m, true)),
+            (.., Some(m)) => Some(FindMark::Reviewed(m, false)),
+            _ => None,
+        }
+    }
+}
+
 fn cmd_find(
     store: &Store,
     file: Option<String>,
     period: &PeriodArgs,
     expiring_days: i64,
-    mark: Option<(&str, bool)>,
+    mark: Option<FindMark>,
     json: bool,
 ) -> Result<(), String> {
     let through = period.resolve()?.map_or(today_local(), |p| p.last_day());
@@ -977,11 +1011,15 @@ fn cmd_find(
         expiring_days: expiring_days.max(0),
     };
     let path = file.map(std::path::PathBuf::from);
+    let (p, now) = (path.as_deref(), now_secs());
     let report = match mark {
-        Some((key, on)) => {
-            outflow_core::set_dismissed(store, path.as_deref(), through, now_secs(), &opts, key, on)
+        Some(FindMark::Dismissed(key, on)) => {
+            outflow_core::set_dismissed(store, p, through, now, &opts, key, on)
         }
-        None => find(store, path.as_deref(), through, now_secs(), &opts),
+        Some(FindMark::Reviewed(m, on)) => {
+            outflow_core::set_reviewed(store, p, through, now, &opts, m, on)
+        }
+        None => find(store, p, through, now, &opts),
     }
     .map_err(|e| e.to_string())?;
     if json {
@@ -1022,6 +1060,13 @@ fn cmd_find(
         println!("\nDISMISSED ({}; --restore KEY)", report.dismissed.len());
         print_findings(&report.dismissed);
     }
+    if !report.reviewed.is_empty() {
+        println!(
+            "\nREVIEWED ({}; --unreview MERCHANT)",
+            report.reviewed.len()
+        );
+        print_findings(&report.reviewed);
+    }
     Ok(())
 }
 
@@ -1032,9 +1077,33 @@ fn print_findings(findings: &[outflow_core::Finding]) {
             (0, p) => format!("{p} pts/yr"),
             (c, p) => format!("{} + {p} pts/yr", dollars(c)),
         };
-        println!("  {value:>14}  {:<11}  {}", f.kind.as_str(), f.action);
+        println!("  {value:>14}  {:<12}  {}", f.kind.as_str(), f.action);
         let o = match &f.evidence {
             Evidence::Offer(o) => o,
+            Evidence::Subscription(s) => {
+                let mut detail = format!(
+                    "{} {}, last {}",
+                    dollars(s.charge_cents),
+                    if s.per_year == 1 { "yearly" } else { "monthly" },
+                    date_label(s.last_charge)
+                );
+                if let Some(p) = &s.price_rise {
+                    detail.push_str(&format!(
+                        " · was {}, up since {}",
+                        dollars(p.from_cents),
+                        date_label(p.since)
+                    ));
+                }
+                if let Some(m) = &f.card_mask {
+                    detail.push_str(&format!(" · card {m}"));
+                }
+                if let Some(at) = s.reviewed_at {
+                    detail.push_str(&format!(" · reviewed {}", date_label(at)));
+                }
+                println!("  {:>14}  {detail}", "");
+                println!("  {:>14}  merchant {:?} · key {}", "", s.merchant, f.key);
+                continue;
+            }
             Evidence::Earn(e) => {
                 let cards: Vec<String> = e
                     .cards
@@ -1943,12 +2012,10 @@ fn run() -> Result<(), String> {
             expiring_days,
             dismiss,
             restore,
+            review,
+            unreview,
         } => {
-            let mark = match (&dismiss, &restore) {
-                (Some(k), _) => Some((k.as_str(), true)),
-                (None, Some(k)) => Some((k.as_str(), false)),
-                (None, None) => None,
-            };
+            let mark = FindMark::from_args(&dismiss, &restore, &review, &unreview);
             cmd_find(&store, file, &period, expiring_days, mark, cli.json)
         }
     }

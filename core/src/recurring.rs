@@ -3,8 +3,12 @@
 //! monthly cost, a six-month spark and a change marker. Detection is
 //! `subscriptions::detect_rhythms`; the one per-merchant mark is
 //! Ignored, which moves a merchant to a separate list.
+//!
+//! [`steady_charge`] and [`price_rise`] read a merchant's charges for the
+//! subscription Findings ([`findings`]) and the Flow Subscriptions filter.
 
-use crate::model::Transaction;
+use crate::find::{self, Evidence, Finding, FindingKind};
+use crate::model::{mask_suffix, Account, Transaction};
 use crate::query::month_index;
 use crate::store::Store;
 use crate::subscriptions::{
@@ -39,6 +43,14 @@ pub const LATE_MIN_DAYS: i64 = 31;
 /// Charges in a slower merchant's spark.
 pub const CHARGE_SPARK: usize = 6;
 
+/// Steady: charges within this % of their median (GLOSSARY: Steady). Also
+/// the size of move that makes a price rise.
+pub const STEADY_PCT: f64 = 5.0;
+/// How many of the latest charges the steady test reads (it needs at least
+/// two). A price rise lasts until this many charges are at the new price,
+/// when the merchant is steady again.
+pub const STEADY_CHARGES: usize = 3;
+
 const DAY: i64 = 86_400;
 
 /// How a recurring merchant's cost moved.
@@ -66,6 +78,81 @@ pub struct Charge {
     pub at: i64,
     /// Positive = spent.
     pub cents: i64,
+}
+
+/// A steady subscription's price went up (GLOSSARY: Steady): the charges
+/// before were steady at `from_cents` and the latest ones are more than
+/// `STEADY_PCT` above it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PriceRise {
+    /// The steady charge before the rise (median of up to `STEADY_CHARGES`).
+    pub from_cents: i64,
+    /// The charge now (median of the charges at the new price).
+    pub to_cents: i64,
+    /// The first charge at the new price, epoch seconds.
+    pub since: i64,
+}
+
+/// Monthly or yearly: the cadences a subscription has.
+pub fn is_subscription_cadence(cadence: StreamCadence) -> bool {
+    matches!(cadence, StreamCadence::Monthly | StreamCadence::Yearly)
+}
+
+fn within(cents: i64, base: i64) -> bool {
+    ((cents - base).abs() as f64) <= base as f64 * STEADY_PCT / 100.0
+}
+
+/// The median of `charges` when there are at least two and every one is
+/// within `STEADY_PCT` of it.
+fn steady_median(charges: &[Charge]) -> Option<i64> {
+    if charges.len() < 2 {
+        return None;
+    }
+    let mut v: Vec<i64> = charges.iter().map(|c| c.cents).collect();
+    v.sort_unstable();
+    let m = median(&v);
+    (m > 0 && v.iter().all(|c| within(*c, m))).then_some(m)
+}
+
+/// GLOSSARY: Steady. The usual charge of a merchant on a monthly or yearly
+/// cadence whose last `STEADY_CHARGES` charges (at least two) are within
+/// `STEADY_PCT` of their median; None otherwise. `charges` are one per day,
+/// oldest first, as on [`RecurringMerchant`].
+pub fn steady_charge(cadence: StreamCadence, charges: &[Charge]) -> Option<i64> {
+    if !is_subscription_cadence(cadence) {
+        return None;
+    }
+    steady_median(&charges[charges.len().saturating_sub(STEADY_CHARGES)..])
+}
+
+/// A monthly or yearly merchant whose latest charges (fewer than
+/// `STEADY_CHARGES` of them, each within `STEADY_PCT` of the latest) sit
+/// more than `STEADY_PCT` above a steady run before them. Once
+/// `STEADY_CHARGES` charges are at the new price it is steady instead.
+pub fn price_rise(cadence: StreamCadence, charges: &[Charge]) -> Option<PriceRise> {
+    if !is_subscription_cadence(cadence) {
+        return None;
+    }
+    let latest = charges.last()?;
+    let run = charges
+        .iter()
+        .rev()
+        .take_while(|c| within(c.cents, latest.cents))
+        .count();
+    if run >= STEADY_CHARGES {
+        return None;
+    }
+    let (before, now) = charges.split_at(charges.len() - run);
+    let from = steady_median(&before[before.len().saturating_sub(STEADY_CHARGES)..])?;
+    let mut new: Vec<i64> = now.iter().map(|c| c.cents).collect();
+    new.sort_unstable();
+    let to = median(&new);
+    ((to as f64) > from as f64 * (1.0 + STEADY_PCT / 100.0)).then_some(PriceRise {
+        from_cents: from,
+        to_cents: to,
+        since: now[0].at,
+    })
 }
 
 /// One recurring merchant.
@@ -120,6 +207,18 @@ pub struct RecurringMerchant {
     pub category: Option<String>,
     /// The account most charges land on.
     pub account_id: String,
+    /// GLOSSARY: Steady. The usual charge when steady ([`steady_charge`]),
+    /// else None. The Subscriptions filter is `steady_cents != null`.
+    pub steady_cents: Option<i64>,
+    /// Set while a steady price has just gone up ([`price_rise`]).
+    pub price_rise: Option<PriceRise>,
+}
+
+impl RecurringMerchant {
+    /// GLOSSARY: Steady.
+    pub fn is_steady(&self) -> bool {
+        self.steady_cents.is_some()
+    }
 }
 
 /// The recurring list as of one month.
@@ -420,7 +519,108 @@ fn merchant_row(
         account_id: most_common(items.iter().map(|t| t.account_id.as_str()))
             .unwrap_or_default()
             .to_string(),
+        steady_cents: steady_charge(cadence, &seen),
+        price_rise: price_rise(cadence, &seen),
     }
+}
+
+/// Charges a year at a subscription cadence.
+fn per_year(cadence: StreamCadence) -> i64 {
+    if cadence == StreamCadence::Yearly {
+        1
+    } else {
+        12
+    }
+}
+
+/// The subscription Findings (GLOSSARY: Finding): a price rise for each
+/// merchant whose price just went up, else a subscription to review for
+/// each steady one, valued at a year of the charge (the rise, for a price
+/// rise). outflow can't see usage, so the action never says unused. Late
+/// merchants (stopped, as far as the archive shows) and Ignored ones (not in
+/// `view.items`) give none. `txns` is the archive the view was built from;
+/// `window` (epoch seconds, end exclusive) bounds the `txn_ids`.
+pub(crate) fn findings(
+    view: &RecurringView,
+    accounts: &[Account],
+    txns: &[Transaction],
+    window: (i64, i64),
+) -> Vec<Finding> {
+    let (from, to) = window;
+    let mut out = Vec::new();
+    for r in view.items.iter().filter(|r| r.change != Change::Late) {
+        let (kind, charge_cents, est) = match (r.price_rise, r.steady_cents) {
+            (Some(p), _) => (
+                FindingKind::PriceRise,
+                p.to_cents,
+                (p.to_cents - p.from_cents) * per_year(r.cadence),
+            ),
+            (None, Some(c)) => (FindingKind::Subscription, c, c * per_year(r.cadence)),
+            (None, None) => continue,
+        };
+        let since = match r.price_rise {
+            Some(p) => p.since,
+            None => from,
+        };
+        let txn_ids = txns
+            .iter()
+            .filter(|t| {
+                t.amount.is_outflow()
+                    && t.flag == crate::model::TxnFlag::Spending
+                    && t.effective_date() >= since
+                    && t.effective_date() < to
+                    && normalize_payee(t.merchant()) == r.merchant
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        let each = if r.cadence == StreamCadence::Yearly {
+            "a year"
+        } else {
+            "a month"
+        };
+        let money = |c: i64| format!("${}", crate::money::Money::from_cents(c).to_display());
+        let action = match r.price_rise {
+            Some(p) => format!(
+                "{} went up from {} to {} {each}: check the plan is still worth it",
+                r.name,
+                money(p.from_cents),
+                money(p.to_cents)
+            ),
+            None => format!(
+                "Review {} at {} {each}: still worth it?",
+                r.name,
+                money(charge_cents)
+            ),
+        };
+        let card_mask = accounts
+            .iter()
+            .find(|a| a.id == r.account_id)
+            .and_then(|a| mask_suffix(&a.name))
+            .map(|m| m.trim_matches(['(', ')']).to_string());
+        out.push(Finding {
+            kind,
+            key: find::key(kind, "", &r.merchant),
+            subject: r.name.clone(),
+            card_mask,
+            est_cents_per_year: est,
+            est_points_per_year: 0,
+            est_value_cents_per_year: est,
+            txn_ids,
+            action,
+            evidence: Evidence::Subscription(find::SubscriptionEvidence {
+                merchant: r.merchant.clone(),
+                name: r.name.clone(),
+                cadence: r.cadence,
+                charge_cents,
+                per_year: per_year(r.cadence),
+                price_rise: r.price_rise,
+                last_charge: r.last_seen,
+                account_id: r.account_id.clone(),
+                reviewed_at: None,
+            }),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -790,5 +990,164 @@ mod tests {
         let short = monthly("Streamflix", &months[14..]);
         let v = build(&short, &HashSet::new(), day(2026, 10, 31), at(2026, 11, 7));
         assert_eq!(v.items[0].prior_year_cents, None);
+    }
+
+    // ── steady and price rise (ho-2mj.17) ───────────────────────────────
+
+    fn charges(cents: &[i64]) -> Vec<Charge> {
+        cents
+            .iter()
+            .enumerate()
+            .map(|(i, c)| Charge {
+                at: i as i64 * 30 * DAY,
+                cents: *c,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn steady_is_monthly_or_yearly_with_recent_charges_within_5_percent() {
+        let m = StreamCadence::Monthly;
+        assert_eq!(steady_charge(m, &charges(&[999, 999, 999])), Some(999));
+        // Only the last three count: an old odd charge doesn't matter.
+        assert_eq!(
+            steady_charge(m, &charges(&[4000, 1000, 1040, 1000])),
+            Some(1000)
+        );
+        // 1060 is 6% off the median 1000.
+        assert_eq!(steady_charge(m, &charges(&[1000, 1000, 1060])), None);
+        assert_eq!(steady_charge(m, &charges(&[1000])), None);
+        assert_eq!(
+            steady_charge(StreamCadence::Yearly, &charges(&[9900, 9900])),
+            Some(9900)
+        );
+        // A groomer or a coffee habit is never a subscription.
+        assert_eq!(
+            steady_charge(StreamCadence::EveryFewMonths, &charges(&[8000; 4])),
+            None
+        );
+        assert_eq!(
+            steady_charge(StreamCadence::Weekly, &charges(&[500; 4])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_price_rise_lasts_until_the_new_price_is_steady() {
+        let m = StreamCadence::Monthly;
+        let rise = price_rise(m, &charges(&[1549, 1549, 1549, 1799])).unwrap();
+        assert_eq!((rise.from_cents, rise.to_cents), (1549, 1799));
+        assert_eq!(rise.since, 3 * 30 * DAY);
+        let rise = price_rise(m, &charges(&[1549, 1549, 1549, 1799, 1799])).unwrap();
+        assert_eq!(rise.since, 3 * 30 * DAY);
+        // Three charges at the new price: steady again, no longer a rise.
+        let three = charges(&[1549, 1549, 1549, 1799, 1799, 1799]);
+        assert_eq!(price_rise(m, &three), None);
+        assert_eq!(steady_charge(m, &three), Some(1799));
+        // Under 5% is noise; a drop isn't a rise; unsteady before isn't one.
+        assert_eq!(price_rise(m, &charges(&[1000, 1000, 1000, 1040])), None);
+        assert_eq!(price_rise(m, &charges(&[1000, 1000, 1000, 800])), None);
+        assert_eq!(price_rise(m, &charges(&[700, 1000, 1300, 2000])), None);
+        assert_eq!(
+            price_rise(StreamCadence::EveryFewMonths, &charges(&[8000, 8000, 9000])),
+            None
+        );
+    }
+
+    #[test]
+    fn rows_carry_steady_and_price_rise() {
+        let mut txns = monthly(
+            "Streamflix",
+            &[
+                (2026, 7, 1549),
+                (2026, 8, 1549),
+                (2026, 9, 1549),
+                (2026, 10, 1799),
+            ],
+        );
+        txns.extend(monthly(
+            "Demo Power",
+            &[
+                (2026, 7, 6000),
+                (2026, 8, 9000),
+                (2026, 9, 7000),
+                (2026, 10, 8000),
+            ],
+        ));
+        let v = build(&txns, &HashSet::new(), day(2026, 10, 31), at(2026, 11, 7));
+        let row = |k: &str| v.items.iter().find(|r| r.merchant == k).unwrap();
+        assert!(!row("streamflix").is_steady());
+        assert_eq!(row("streamflix").price_rise.unwrap().to_cents, 1799);
+        // A utility bill that moves around is recurring, not steady.
+        assert!(!row("demo power").is_steady());
+        assert_eq!(row("demo power").price_rise, None);
+    }
+
+    fn findings_of(txns: &[Transaction], ignored: &HashSet<String>) -> Vec<Finding> {
+        let through = day(2026, 10, 31);
+        let v = build(txns, ignored, through, at(2026, 11, 7));
+        findings(&v, &[], txns, find::window(through).bounds())
+    }
+
+    #[test]
+    fn steady_merchants_are_review_findings_and_rises_are_their_own() {
+        let mut txns = monthly(
+            "Streamflix",
+            &[
+                (2026, 7, 1599),
+                (2026, 8, 1599),
+                (2026, 9, 1599),
+                (2026, 10, 1599),
+            ],
+        );
+        txns.extend(monthly(
+            "Sample Music",
+            &[
+                (2026, 7, 1099),
+                (2026, 8, 1099),
+                (2026, 9, 1099),
+                (2026, 10, 1299),
+            ],
+        ));
+        let f = findings_of(&txns, &HashSet::new());
+        let by = |k: &str| f.iter().find(|f| f.key == k).unwrap();
+        let sub = by("subscription::streamflix");
+        assert_eq!(sub.kind, FindingKind::Subscription);
+        assert_eq!(sub.est_cents_per_year, 12 * 1599);
+        assert_eq!(sub.est_value_cents_per_year, 12 * 1599);
+        assert_eq!(sub.txn_ids.len(), 4);
+        assert!(!sub.action.contains("unused"), "{}", sub.action);
+        let rise = by("price_rise::sample-music");
+        assert_eq!(rise.kind, FindingKind::PriceRise);
+        assert_eq!(rise.est_cents_per_year, 12 * 200);
+        // Only the charge at the new price is behind the rise.
+        assert_eq!(rise.txn_ids, vec!["Sample Music3".to_string()]);
+        assert_eq!(f.len(), 2, "a rise is not also a review");
+    }
+
+    #[test]
+    fn ignored_and_late_merchants_give_no_findings() {
+        let txns = monthly(
+            "Streamflix",
+            &[
+                (2026, 7, 1599),
+                (2026, 8, 1599),
+                (2026, 9, 1599),
+                (2026, 10, 1599),
+            ],
+        );
+        let ignored: HashSet<String> = ["streamflix".to_string()].into();
+        assert!(findings_of(&txns, &ignored).is_empty());
+        // Stopped in July: late by October's end.
+        let late = monthly(
+            "Streamflix",
+            &[
+                (2026, 4, 1599),
+                (2026, 5, 1599),
+                (2026, 6, 1599),
+                (2026, 7, 1599),
+            ],
+        );
+        assert!(findings_of(&late, &HashSet::new()).is_empty());
     }
 }

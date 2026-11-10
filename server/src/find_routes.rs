@@ -6,7 +6,9 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use outflow_core::{find, set_dismissed, today_local, FindError, FindOptions, FindReport, Period};
+use outflow_core::{
+    find, set_dismissed, set_reviewed, today_local, FindError, FindOptions, FindReport, Period,
+};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -97,10 +99,54 @@ async fn set_finding_dismissed(
     }
 }
 
+#[derive(Deserialize)]
+struct ReviewedBody {
+    /// Merchant, any spelling (normalized like `RecurringMerchant::merchant`).
+    merchant: String,
+    reviewed: bool,
+}
+
+/// Mark a merchant Reviewed (it needs a subscription or price rise Finding
+/// in the report for these params) or clear the mark; returns the report
+/// after the change. 404 for a merchant with no such Finding.
+async fn set_merchant_reviewed(
+    State(state): State<AppState>,
+    Query(p): Query<FindParams>,
+    Json(body): Json<ReviewedBody>,
+) -> ApiResult<FindReport> {
+    let merchant = body.merchant.trim().to_string();
+    if merchant.is_empty() {
+        return Err(ApiError::bad_request("merchant is empty"));
+    }
+    let (through, opts) = p.resolve()?;
+    let path: Option<PathBuf> = state.cfg.perks_path.clone().map(PathBuf::from);
+    let now = now_secs();
+    let res = with_store(&state, move |s| {
+        Ok(set_reviewed(
+            s,
+            path.as_deref(),
+            through,
+            now,
+            &opts,
+            &merchant,
+            body.reviewed,
+        ))
+    })
+    .await?;
+    match res {
+        Ok(report) => Ok(Json(report)),
+        Err(e @ FindError::NoSuchSubscription(_)) => {
+            Err(ApiError(StatusCode::NOT_FOUND, e.to_string()))
+        }
+        Err(e) => Err(ApiError::internal(e)),
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/find", get(find_money))
         .route("/find/dismissed", post(set_finding_dismissed))
+        .route("/find/reviewed", post(set_merchant_reviewed))
 }
 
 #[cfg(test)]
@@ -109,11 +155,16 @@ mod tests {
     use crate::state::Config;
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
+    use chrono::{Datelike, TimeZone};
     use outflow_core::{Account, AccountKind, Money, Store, Transaction, TxnFlag};
     use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
 
     fn app(perks_path: Option<String>) -> Router {
+        app_with(perks_path, false)
+    }
+
+    fn app_with(perks_path: Option<String>, with_subscription: bool) -> Router {
         let store = Store::open_in_memory().expect("in-memory store");
         store
             .upsert_accounts(&[Account {
@@ -151,6 +202,38 @@ mod tests {
                 source: "plaid".into(),
             }])
             .unwrap();
+        // A steady monthly subscription: 4 charges, a month apart, ending
+        // last month so none is late.
+        let this_month = today_local().with_day(1).unwrap();
+        let subs: Vec<Transaction> = (1..=4u32)
+            .map(|i| {
+                let day = (this_month - chrono::Months::new(i)).with_day(10).unwrap();
+                Transaction {
+                    id: format!("s{i}"),
+                    account_id: "visa".into(),
+                    posted: chrono::Local
+                        .from_local_datetime(&day.and_hms_opt(12, 0, 0).unwrap())
+                        .earliest()
+                        .unwrap()
+                        .timestamp(),
+                    transacted_at: None,
+                    amount: Money::from_cents(-1599),
+                    description: "STREAMFLIX".into(),
+                    payee: Some("Streamflix".into()),
+                    category: None,
+                    category_source: None,
+                    pending: false,
+                    flag: TxnFlag::Spending,
+                    raw: "{}".into(),
+                    pfc_primary: None,
+                    pfc_detailed: None,
+                    source: "plaid".into(),
+                }
+            })
+            .collect();
+        if with_subscription {
+            store.upsert_transactions(&subs).unwrap();
+        }
         let cfg = Config {
             db_path: ":memory:".into(),
             listen: "127.0.0.1:0".into(),
@@ -283,6 +366,38 @@ offers = [
         let (status, body) = post(app.clone(), "/find/dismissed", unknown).await;
         std::fs::remove_file(&path).ok();
         assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
+
+    /// A steady monthly charge is a subscription Finding with no offers
+    /// file; Reviewed moves it to `reviewed` and back; an unknown merchant
+    /// is a 404.
+    #[tokio::test]
+    async fn reviews_and_unreviews_a_subscription() {
+        let app = app_with(None, true);
+        let (_, body) = get(app.clone(), "/find").await;
+        let f = &body["findings"][0];
+        assert_eq!(f["kind"], "subscription", "{body}");
+        assert_eq!(f["key"], "subscription::streamflix");
+        assert_eq!(f["evidence"]["source"], "subscription");
+        assert_eq!(f["est_cents_per_year"], 12 * 1599);
+
+        let review = |m: &str, on: bool| serde_json::json!({ "merchant": m, "reviewed": on });
+        let (status, body) = post(app.clone(), "/find/reviewed", review("STREAMFLIX", true)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["reviewed"][0]["key"], "subscription::streamflix");
+        assert!(body["reviewed"][0]["evidence"]["reviewed_at"].is_i64());
+        let (_, body) = get(app.clone(), "/find").await;
+        assert_eq!(body["reviewed"][0]["key"], "subscription::streamflix");
+
+        let (status, body) = post(app.clone(), "/find/reviewed", review("streamflix", false)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["findings"][0]["key"], "subscription::streamflix");
+        assert_eq!(body["reviewed"], serde_json::json!([]));
+
+        let (status, _) = post(app.clone(), "/find/reviewed", review("nobody", true)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = post(app, "/find/reviewed", review(" ", true)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

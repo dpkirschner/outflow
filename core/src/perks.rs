@@ -432,7 +432,9 @@ fn finding(
         FindingKind::AddOffer => format!("Add the {m} offer to {on} (expires {expires})"),
         FindingKind::WrongCard => format!("Charge {m} to {on} until {expires}"),
         FindingKind::Expiring => format!("Use the {m} offer on {on} by {expires}"),
-        FindingKind::CardChoice => unreachable!("card choice Findings come from earn"),
+        FindingKind::CardChoice | FindingKind::Subscription | FindingKind::PriceRise => {
+            unreachable!("only offer Findings come from perks")
+        }
     };
     Finding {
         kind,
@@ -611,7 +613,7 @@ mod tests {
     fn ev(f: &Finding) -> &OfferEvidence {
         match &f.evidence {
             Evidence::Offer(o) => o,
-            Evidence::Earn(_) => panic!("not an offer Finding"),
+            _ => panic!("not an offer Finding"),
         }
     }
 
@@ -953,6 +955,7 @@ mod tests {
             Some(&[c]),
             &accounts(),
             &txns,
+            &Default::default(),
             through,
             day(2026, 10, 17),
             &FindOptions::default(),
@@ -989,6 +992,7 @@ mod tests {
                 Some(&[c]),
                 &accounts(),
                 &txns,
+                &Default::default(),
                 through,
                 day(2026, 10, 17),
                 &FindOptions::default(),

@@ -37,8 +37,9 @@ pub use checkin::{
 };
 pub use earn::{CardEarn, EarnEvidence, EarnTable, Rate};
 pub use find::{
-    apply_dismissed, find, set_dismissed, Evidence, FindError, FindOptions, FindReport, Finding,
-    FindingKind, OfferEvidence, MIN_EST_CENTS_PER_YEAR,
+    apply_dismissed, apply_reviewed, find, set_dismissed, set_reviewed, Evidence, FindError,
+    FindOptions, FindReport, Finding, FindingKind, OfferEvidence, SubscriptionEvidence,
+    MIN_EST_CENTS_PER_YEAR, REVIEWED_DAYS,
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
@@ -62,14 +63,18 @@ pub use query::{
     top_merchants, CategorySpend, Direction, FlowMonth, InSource, Lane, MerchantSpend, MovedFlow,
     MovedLane, SeriesMonth, SortKey, TxnFilter, TxnPage, TxnQuery, TxnRow,
 };
-pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
+pub use recurring::{
+    is_subscription_cadence, price_rise, recurring, steady_charge, Change, PriceRise,
+    RecurringMerchant, RecurringView, STEADY_CHARGES, STEADY_PCT,
+};
 pub use reset::{preview as reset_preview, ResetPreview, PLAID_REFETCH_DAYS};
 pub use stock::{
     net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
 pub use store::{
-    CategoryUndone, DismissedMark, FlagRule, PlaidBatch, SetKind, Store, Unaccept, UpsertResult,
+    CategoryUndone, DismissedMark, FlagRule, PlaidBatch, ReviewedMark, SetKind, Store, Unaccept,
+    UpsertResult,
 };
 pub use subscriptions::{
     detect_rhythms, display_merchant, normalize_payee, RhythmGroup, StreamCadence,

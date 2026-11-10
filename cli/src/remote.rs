@@ -132,25 +132,38 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
                 "{{\"version\":{version},\"upkeep\":{up},\"sync_log\":{log}}}"
             ))
         }
-        // Dismiss or restore: the same params, so the server finds the key
-        // in the same report.
+        // Dismiss, restore, review or unreview: the same params, so the
+        // server finds the Finding in the same report.
         Cmd::Find {
             period,
             expiring_days,
             dismiss,
             restore,
+            review,
+            unreview,
             ..
         } => {
-            let (key, on) = match (dismiss, restore) {
-                (Some(k), _) => (k, true),
-                (None, Some(k)) => (k, false),
-                (None, None) => unreachable!("handled by read_path"),
+            let (route, body) = match (dismiss, restore, review, unreview) {
+                (Some(k), ..) => (
+                    "/find/dismissed",
+                    serde_json::json!({ "key": k, "dismissed": true }),
+                ),
+                (_, Some(k), ..) => (
+                    "/find/dismissed",
+                    serde_json::json!({ "key": k, "dismissed": false }),
+                ),
+                (_, _, Some(m), _) => (
+                    "/find/reviewed",
+                    serde_json::json!({ "merchant": m, "reviewed": true }),
+                ),
+                (.., Some(m)) => (
+                    "/find/reviewed",
+                    serde_json::json!({ "merchant": m, "reviewed": false }),
+                ),
+                _ => unreachable!("handled by read_path"),
             };
-            let path = find_path("/find/dismissed", period, *expiring_days, today_local())?;
-            remote.post(
-                &path,
-                Some(serde_json::json!({ "key": key, "dismissed": on })),
-            )
+            let path = find_path(route, period, *expiring_days, today_local())?;
+            remote.post(&path, Some(body))
         }
         Cmd::Report { .. }
         | Cmd::Balances { .. }
@@ -301,6 +314,8 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             expiring_days,
             dismiss: None,
             restore: None,
+            review: None,
+            unreview: None,
             ..
         } => find_path("/find", period, *expiring_days, today)?,
         Cmd::Txns(a) => {
@@ -403,6 +418,10 @@ mod tests {
             find_path("/find/dismissed", &PeriodArgs::default(), 7, today()),
             Ok("/find/dismissed?expiring_days=7".to_string())
         );
+        assert_eq!(path(&["find", "--review", "streamflix"]), Ok(None));
+        assert_eq!(path(&["find", "--unreview", "streamflix"]), Ok(None));
+        let both = Cli::try_parse_from(["outflow", "find", "--review", "a", "--dismiss", "b"]);
+        assert!(both.is_err(), "one mark at a time");
     }
 
     #[test]

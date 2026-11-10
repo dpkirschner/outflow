@@ -97,6 +97,8 @@ string round-tripping in SQLite.
 | `flag_rules` | learned/manual suppression rules | same shape but carries a `flag` — an independent axis |
 | `categories` | the vocabulary | seeded on first open; constrains the LLM |
 | `merchant_overrides` | the per-merchant Ignored mark | `pattern` = normalized merchant, `mark` = `ignored` (the only value since v13) |
+| `finding_marks` | the Dismissed mark on a Finding | `key` = `Finding::key`, `mark` = `dismissed`, the estimate (cash, points) it had and `marked_at` |
+| `reviewed_merchants` | the Reviewed mark on a merchant | `merchant` = normalized merchant, `charge_cents` = the charge it had, `marked_at`; `find::apply_reviewed` lets it lapse after 365 days or a charge more than 5% above it |
 | `sync_log` | sync history | one row per source leg per run |
 | `plaid_items` | linked Plaid connections | item_id PK, institution, **cursor**, status (`ok`/`login_required`/`error`), created, last_synced, investments_consent (refreshed from `/accounts/get`'s `item` each sync) — no secrets |
 | `securities` | instruments seen in holdings | security_id PK; ticker, name, type, is_cash, cusip, isin, close_price (decimal text) + close_price_as_of |
@@ -124,7 +126,8 @@ stored flag differs from what its category gives, so no effective flag
 changes), v13 data-only: `merchant_overrides` keeps one mark — the ledger's
 `dismissed` became `ignored`, `committed`/`kept` rows were deleted, v14
 `accounts.item_id` + `txn_matches.retired_by` and the legs' prior flags, v15
-`accounts.kind_override`. The v10
+`accounts.kind_override`, v16 `finding_marks` (new table), v17
+`reviewed_merchants` (new table). The v10
 and v11 backfills still parse `raw`; nothing after v12 does.
 Column lists are positional
 (`TXN_COLUMNS` / `row_to_txn` / upsert INSERT) — **append only**.

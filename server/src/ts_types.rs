@@ -146,7 +146,7 @@ fn render() -> String {
         decls!(
             &cfg,
             out,
-            [Change, Charge, RecurringMerchant, RecurringView]
+            [Change, Charge, PriceRise, RecurringMerchant, RecurringView]
         );
     }
 
@@ -214,7 +214,14 @@ fn render() -> String {
         decls!(
             &cfg,
             out,
-            [FindingKind, OfferEvidence, Evidence, Finding, FindReport]
+            [
+                FindingKind,
+                OfferEvidence,
+                SubscriptionEvidence,
+                Evidence,
+                Finding,
+                FindReport
+            ]
         );
     }
 

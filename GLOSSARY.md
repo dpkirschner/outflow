@@ -105,8 +105,12 @@ product direction behind these terms is in
   - **Expiring**: an added offer about to expire before it has paid out.
   - **Card choice**: a category charged to a card that earns less on it
     than another card you hold.
-  - **Subscription**: a steady recurring merchant to review, or one whose
-    price rose.
+  - **Subscription**: a steady recurring merchant to review, valued at a
+    year of its charge. outflow sees charges, not usage, so it never says
+    unused.
+  - **Price rise**: a steady merchant whose price just rose, valued at a
+    year of the rise. It stands in for the merchant's subscription
+    Finding while it lasts.
 - **Offers file**: a hand-kept TOML file per card, listing its offers
   and its earn table. `OUTFLOW_PERKS` names the file or folder.
 - **Earn table**: what a card pays per Plaid category (detailed category
@@ -115,10 +119,14 @@ product direction behind these terms is in
   Its cents-per-point value also prices that card's offer points; a
   card without one counts a point as one cent.
 - **Steady**: a recurring merchant on a monthly or yearly cadence whose
-  recent charges are within 5% of their median. A steady merchant is
-  what the Subscriptions filter shows.
+  recent charges (the last three) are within 5% of their median. A steady
+  merchant is what the Subscriptions filter shows. Its price rises when
+  its latest charges sit more than 5% above a steady run before them; that
+  lasts until three charges are at the new price.
 - **Reviewed**: a mark on a steady merchant. It hides the subscription
-  Finding for 12 months, or until the merchant goes Up.
+  Finding for 12 months, or until the merchant goes Up: its charge is
+  more than 5% above the one reviewed. A price rise after a review always
+  shows. Separate from Ignored, which hides the merchant everywhere.
 - **Dismissed**: the mark on a Finding. It moves the Finding to a list
   you can restore from. The Finding comes back on its own only if its
   estimate more than doubles.

@@ -376,7 +376,9 @@ export const recurringView: RecurringView = {
         3200
       ],
       "category": "Dining",
-      "account_id": "acct-demo-card"
+      "account_id": "acct-demo-card",
+      "steady_cents": null,
+      "price_rise": null
     },
     {
       "merchant": "sample groomer",
@@ -429,14 +431,16 @@ export const recurringView: RecurringView = {
         0
       ],
       "category": "Pets",
-      "account_id": "acct-demo-card"
+      "account_id": "acct-demo-card",
+      "steady_cents": null,
+      "price_rise": null
     }
   ],
   "ignored": [
     {
       "merchant": "sample parking",
       "name": "SAMPLE PARKING 0042",
-      "cadence": "FewPerWeek",
+      "cadence": "Monthly",
       "gap_days": 2,
       "count": 36,
       "median_cents": 650,
@@ -459,7 +463,9 @@ export const recurringView: RecurringView = {
         3200
       ],
       "category": null,
-      "account_id": "acct-demo-card"
+      "account_id": "acct-demo-card",
+      "steady_cents": 2000,
+      "price_rise": null
     }
   ]
 };
@@ -1014,9 +1020,90 @@ export const findReport: FindReport = {
           "SAMPLE OUTFITTERS"
         ]
       }
+    },
+    {
+      "kind": "subscription",
+      "key": "subscription::sample-stream",
+      "subject": "Sample Stream",
+      "card_mask": "0000",
+      "est_cents_per_year": 19188,
+      "est_points_per_year": 0,
+      "est_value_cents_per_year": 19188,
+      "txn_ids": [
+        "txn-demo-007"
+      ],
+      "action": "Review Sample Stream: still worth it?",
+      "evidence": {
+        "source": "subscription",
+        "merchant": "sample stream",
+        "name": "Sample Stream",
+        "cadence": "Monthly",
+        "charge_cents": 1599,
+        "per_year": 12,
+        "price_rise": null,
+        "last_charge": 1768003200,
+        "account_id": "acct-demo-card",
+        "reviewed_at": null
+      }
+    },
+    {
+      "kind": "price_rise",
+      "key": "price_rise::sample-music",
+      "subject": "Sample Music",
+      "card_mask": "0000",
+      "est_cents_per_year": 4800,
+      "est_points_per_year": 0,
+      "est_value_cents_per_year": 4800,
+      "txn_ids": [
+        "txn-demo-007"
+      ],
+      "action": "Sample Music went up: check the plan is still worth it",
+      "evidence": {
+        "source": "subscription",
+        "merchant": "sample music",
+        "name": "Sample Music",
+        "cadence": "Monthly",
+        "charge_cents": 1499,
+        "per_year": 12,
+        "price_rise": {
+          "from_cents": 1099,
+          "to_cents": 1499,
+          "since": 1768003200
+        },
+        "last_charge": 1768003200,
+        "account_id": "acct-demo-card",
+        "reviewed_at": null
+      }
     }
   ],
-  "dismissed": []
+  "dismissed": [],
+  "reviewed": [
+    {
+      "kind": "subscription",
+      "key": "subscription::sample-news",
+      "subject": "Sample News",
+      "card_mask": "0000",
+      "est_cents_per_year": 12000,
+      "est_points_per_year": 0,
+      "est_value_cents_per_year": 12000,
+      "txn_ids": [
+        "txn-demo-007"
+      ],
+      "action": "Review Sample News: still worth it?",
+      "evidence": {
+        "source": "subscription",
+        "merchant": "sample news",
+        "name": "Sample News",
+        "cadence": "Monthly",
+        "charge_cents": 1000,
+        "per_year": 12,
+        "price_rise": null,
+        "last_charge": 1768003200,
+        "account_id": "acct-demo-card",
+        "reviewed_at": 1765843200
+      }
+    }
+  ]
 };
 
 export const plaidItem: PlaidItem = {

@@ -865,6 +865,26 @@ export type Charge = {
 };
 
 /**
+ * A steady subscription's price went up (GLOSSARY: Steady): the charges
+ * before were steady at `from_cents` and the latest ones are more than
+ * `STEADY_PCT` above it.
+ */
+export type PriceRise = {
+  /**
+   * The steady charge before the rise (median of up to `STEADY_CHARGES`).
+   */
+  from_cents: number,
+  /**
+   * The charge now (median of the charges at the new price).
+   */
+  to_cents: number,
+  /**
+   * The first charge at the new price, epoch seconds.
+   */
+  since: number,
+};
+
+/**
  * One recurring merchant.
  */
 export type RecurringMerchant = {
@@ -948,6 +968,15 @@ export type RecurringMerchant = {
    * The account most charges land on.
    */
   account_id: string,
+  /**
+   * GLOSSARY: Steady. The usual charge when steady ([`steady_charge`]),
+   * else None. The Subscriptions filter is `steady_cents != null`.
+   */
+  steady_cents: number | null,
+  /**
+   * Set while a steady price has just gone up ([`price_rise`]).
+   */
+  price_rise: PriceRise | null,
 };
 
 /**
@@ -1571,7 +1600,7 @@ export type EarnEvidence = {
   cards: Array<CardEarn>,
 };
 
-export type FindingKind = "add_offer" | "wrong_card" | "expiring" | "card_choice";
+export type FindingKind = "add_offer" | "wrong_card" | "expiring" | "card_choice" | "subscription" | "price_rise";
 
 export type OfferEvidence = {
   issuer: string,
@@ -1594,9 +1623,51 @@ export type OfferEvidence = {
 };
 
 /**
+ * Behind a subscription or price rise Finding: the recurring merchant.
+ */
+export type SubscriptionEvidence = {
+  /**
+   * Normalized merchant (`RecurringMerchant::merchant`): what the
+   * Reviewed and Ignored marks key on.
+   */
+  merchant: string,
+  /**
+   * Display name.
+   */
+  name: string,
+  /**
+   * Monthly or yearly.
+   */
+  cadence: StreamCadence,
+  /**
+   * The charge now: the steady charge, or the new price after a rise.
+   */
+  charge_cents: number,
+  /**
+   * Charges a year at this cadence (12 or 1); the estimate is the charge
+   * (or the rise) times this.
+   */
+  per_year: number,
+  price_rise: PriceRise | null,
+  /**
+   * Behavioral date of the last charge in the window, epoch seconds.
+   */
+  last_charge: number,
+  /**
+   * The account most charges land on.
+   */
+  account_id: string,
+  /**
+   * When the merchant was marked Reviewed; set only on
+   * `FindReport.reviewed`.
+   */
+  reviewed_at: number | null,
+};
+
+/**
  * The source-specific detail behind a Finding.
  */
-export type Evidence = { "source": "offer" } & OfferEvidence | { "source": "earn" } & EarnEvidence;
+export type Evidence = { "source": "offer" } & OfferEvidence | { "source": "earn" } & EarnEvidence | { "source": "subscription" } & SubscriptionEvidence;
 
 /**
  * One thing that would save or earn money.
@@ -1606,16 +1677,18 @@ export type Finding = {
   /**
    * Stable across requests and syncs: `kind:card:subject`, e.g.
    * `add_offer:4242:fubo`, `card_choice:4242:food-and-drink-groceries`.
-   * Marks (Dismissed) key off it.
+   * Subscription kinds leave the card out (`subscription::streamflix`),
+   * so a merchant moving cards keeps its key. Dismissed keys off it.
    */
   key: string,
   /**
-   * What it's about, for display: the offer's merchant, or the category
-   * for card choice.
+   * What it's about, for display: the offer's or subscription's
+   * merchant, or the category for card choice.
    */
   subject: string,
   /**
-   * The card the action is on, by its last digits.
+   * The card the action is on, by its last digits (for a subscription,
+   * the card most charges land on, when its name ends in one).
    */
   card_mask: string | null,
   /**
@@ -1667,6 +1740,11 @@ export type FindReport = {
    * the mark.
    */
   dismissed: Array<Finding>,
+  /**
+   * Subscription and price rise Findings whose merchant is marked
+   * Reviewed, in the same order. Unreviewing one clears the mark.
+   */
+  reviewed: Array<Finding>,
 };
 
 /**

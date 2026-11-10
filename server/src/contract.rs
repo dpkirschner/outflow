@@ -17,14 +17,16 @@ use outflow_core::balances::{
     PositionRow, Totals,
 };
 use outflow_core::earn::{CardEarn, EarnEvidence, Rate};
-use outflow_core::find::{Evidence, FindReport, Finding, FindingKind, OfferEvidence};
+use outflow_core::find::{
+    Evidence, FindReport, Finding, FindingKind, OfferEvidence, SubscriptionEvidence,
+};
 use outflow_core::model::{
     Account, AccountKind, CategorySource, MatchConfidence, MatchStatus, PlaidItem, SyncEntry,
     Transaction, TxnFlag, TxnMatch,
 };
 use outflow_core::perks::{Cap, CardStatus, Offer, Reward};
 use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, MovedLane, TxnPage};
-use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
+use outflow_core::recurring::{Change, PriceRise, RecurringMerchant, RecurringView};
 use outflow_core::stock::{
     AccountChange, ChangeReason, ContributedPoint, ExcludedAccount, GainReason, NetWorthChange,
     PositionChange,
@@ -221,6 +223,8 @@ fn recurring_merchant() -> RecurringMerchant {
         spark_cents: vec![7_100, 7_400, 7_900, 7_600, 10_000, 3_200],
         category: Some("Dining".into()),
         account_id: "acct-demo-card".into(),
+        steady_cents: None,
+        price_rise: None,
     }
 }
 
@@ -232,6 +236,8 @@ fn recurring_view() -> RecurringView {
     ignored.change_pct = None;
     ignored.change_base_cents = None;
     ignored.category = None;
+    ignored.cadence = StreamCadence::Monthly;
+    ignored.steady_cents = Some(2_000);
     let mut slow = recurring_merchant();
     slow.merchant = "sample groomer".into();
     slow.name = "Sample Groomer".into();
@@ -831,8 +837,75 @@ fn find_report() -> FindReport {
                     matched_merchants: vec!["SAMPLE OUTFITTERS".into()],
                 }),
             },
+            subscription_finding(
+                FindingKind::Subscription,
+                "sample stream",
+                "Sample Stream",
+                1_599,
+                None,
+                None,
+            ),
+            subscription_finding(
+                FindingKind::PriceRise,
+                "sample music",
+                "Sample Music",
+                1_499,
+                Some(PriceRise {
+                    from_cents: 1_099,
+                    to_cents: 1_499,
+                    since: T0 - 5 * DAY,
+                }),
+                None,
+            ),
         ],
         dismissed: vec![],
+        reviewed: vec![subscription_finding(
+            FindingKind::Subscription,
+            "sample news",
+            "Sample News",
+            1_000,
+            None,
+            Some(T0 - 30 * DAY),
+        )],
+    }
+}
+
+fn subscription_finding(
+    kind: FindingKind,
+    merchant: &str,
+    name: &str,
+    charge_cents: i64,
+    price_rise: Option<PriceRise>,
+    reviewed_at: Option<i64>,
+) -> Finding {
+    let est = match price_rise {
+        Some(p) => 12 * (p.to_cents - p.from_cents),
+        None => 12 * charge_cents,
+    };
+    Finding {
+        kind,
+        key: format!("{}::{}", kind.as_str(), merchant.replace(' ', "-")),
+        subject: name.into(),
+        card_mask: Some("0000".into()),
+        est_cents_per_year: est,
+        est_points_per_year: 0,
+        est_value_cents_per_year: est,
+        txn_ids: vec!["txn-demo-007".into()],
+        action: match price_rise {
+            Some(_) => format!("{name} went up: check the plan is still worth it"),
+            None => format!("Review {name}: still worth it?"),
+        },
+        evidence: Evidence::Subscription(SubscriptionEvidence {
+            merchant: merchant.into(),
+            name: name.into(),
+            cadence: StreamCadence::Monthly,
+            charge_cents,
+            per_year: 12,
+            price_rise,
+            last_charge: T0 - 5 * DAY,
+            account_id: "acct-demo-card".into(),
+            reviewed_at,
+        }),
     }
 }
 

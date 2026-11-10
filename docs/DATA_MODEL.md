@@ -321,8 +321,8 @@ change`. Visible accounts only.
 
 ### Check-in (`core/src/checkin.rs`)
 
-`checkin(store, period, today, now)` behind `GET /api/checkin` and
-`outflow checkin`. One week, month or quarter; the constants are at the top
+`checkin(store, period, today, now, offers)` behind `GET /api/checkin` and
+`outflow checkin` (`offers` is the `OUTFLOW_PERKS` path, if set). One week, month or quarter; the constants are at the top
 of the module.
 
 - **Figures**: net worth change, Markets and Added (as `/net-worth/change`);
@@ -351,8 +351,28 @@ of the module.
     from a merchant not on the recurring list, at or above the nearest-rank
     95th percentile of single Out charges in the 12 months before the
     period. Needs 30 such charges; at most 5, largest first.
+  - Findings (any period), after the money items and before minor ones,
+    largest yearly estimate first: an open Finding (`find::report_with`
+    over the archive check-in already loaded, through the period's last
+    day or today; Dismissed and Reviewed ones left out, $25/yr floor
+    applied) that is new this period. Nothing is stored; "new" comes from
+    the evidence: `wrong_card` has an off-card charge (a `txn_ids` date) in
+    the period; `price_rise` has `price_rise.since` in it; `add_offer` and
+    `expiring` expire before the period ends or within `expiring_days`
+    (14) of today, or of the period's end for a past period (offers files
+    carry no start date, so "started in the period" isn't judged);
+    `card_choice` has its earliest `txn_ids` date in the period, so a
+    standing habit shows once rather than every month; `subscription`
+    never (a new recurring merchant already has its row). A price rise
+    whose merchant already has a row (up, new, late) adds none. `cents` =
+    `impact_cents` = the estimate per year; `finding_kind`, `finding_key`,
+    `action` set.
 - A check that didn't run is in `not_checked` with its reason (`week`,
-  `in_progress`, `short_history`, `range`), so the screen can say why.
+  `in_progress`, `short_history`, `range`, `offers_file`), so the screen can
+  say why. An unreadable offers file skips offer and card choice Findings
+  (`card_offers`, `offers_file`) instead of failing the check-in; with no
+  offers file set they are skipped silently and subscription Findings still
+  apply.
 - **Category changes** (`categories_vs_usual`, `/checkin/categories`, the
   Flow Out lane): each category's Out for the period against its usual,
   taken over the same earlier periods (a period with none in that

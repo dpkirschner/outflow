@@ -602,7 +602,7 @@ export type MonthMark = {
   worse: boolean,
 };
 
-export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late";
+export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late" | "finding";
 
 /**
  * One unusual item. Which fields are set depends on `kind`; each item
@@ -666,9 +666,19 @@ export type Unusual = {
   /**
    * Money at stake, positive, for ordering: the charge (large), the
    * difference from the usual (up / down), the usual monthly cost (new,
-   * late). None for attention items.
+   * late), the yearly estimate (Finding). None for attention items.
    */
   impact_cents: number | null,
+  /**
+   * Finding: its kind, its `Finding::key`, and its one suggested action.
+   * `cents` is then its estimated value per year, and `day` the charge
+   * that made it new (wrong card, card choice), the first charge at the
+   * new price (price rise), or the offer's expiry day (add offer,
+   * expiring).
+   */
+  finding_kind: FindingKind | null,
+  finding_key: string | null,
+  action: string | null,
   /**
    * A small or frequent-merchant item (see the module docs); the screen
    * folds these into one row.
@@ -676,9 +686,9 @@ export type Unusual = {
   minor: boolean,
 };
 
-export type Check = "recurring_changes" | "new_recurring" | "large_charges";
+export type Check = "recurring_changes" | "new_recurring" | "large_charges" | "card_offers";
 
-export type NotCheckedReason = "week" | "in_progress" | "short_history" | "range";
+export type NotCheckedReason = "week" | "in_progress" | "short_history" | "range" | "offers_file";
 
 export type NotChecked = {
   check: Check,

@@ -330,6 +330,9 @@ fn checkin() -> outflow_core::CheckIn {
         per_charge: false,
         impact_cents: Some(750),
         minor: true,
+        finding_kind: None,
+        finding_key: None,
+        action: None,
     };
     let mut late = up.clone();
     late.kind = UnusualKind::Late;
@@ -359,6 +362,21 @@ fn checkin() -> outflow_core::CheckIn {
     large.impact_cents = Some(120_000);
     large.minor = false;
     up.account_id = None;
+    let mut found = large.clone();
+    found.kind = UnusualKind::Finding;
+    found.label = "Sample Outfitters".into();
+    found.cents = Some(3_000);
+    found.usual_cents = None;
+    found.merchant = None;
+    found.txn_id = None;
+    found.account_id = None;
+    found.day = Some("2026-10-20".into());
+    found.impact_cents = Some(3_000);
+    found.finding_kind = Some(outflow_core::FindingKind::WrongCard);
+    found.finding_key = Some("wrong_card:0000:sample-outfitters".into());
+    found.action = Some(
+        "Charge Sample Outfitters to the Demo Issuer card ending 0000 until 2027-01-31".into(),
+    );
     let p = outflow_core::Period::parse("2026-10", NaiveDate::from_ymd_opt(2026, 11, 7).unwrap())
         .unwrap();
     CheckIn {
@@ -406,7 +424,7 @@ fn checkin() -> outflow_core::CheckIn {
             in_diff_cents: Some(0),
             contributors: vec![],
         }),
-        unusual: vec![large, late, up],
+        unusual: vec![large, late, found, up],
         not_checked: vec![NotChecked {
             check: Check::LargeCharges,
             reason: NotCheckedReason::ShortHistory,

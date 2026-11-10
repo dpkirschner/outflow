@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type {
   CheckIn as CheckInData,
+  FindingKind,
   FlowMonth,
   MonthMark,
   NotChecked,
@@ -615,8 +616,14 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
   // Minor items are folded on the list; the sentence counts the rest.
   const needs = c.unusual.filter((u) => ATTENTION.has(u.kind)).length;
   const odd = c.unusual.filter(
-    (u) => !ATTENTION.has(u.kind) && !u.minor,
+    (u) => !ATTENTION.has(u.kind) && u.kind !== "finding" && !u.minor,
   ).length;
+  // Findings aren't unusual spending: said apart, after the rest.
+  const finds = c.unusual.filter((u) => u.kind === "finding").length;
+  const findTail =
+    finds === 0
+      ? ""
+      : ` ${cap(num(finds))} new ${finds === 1 ? "way" : "ways"} to save.`;
   const unchecked = c.not_checked.length > 0;
   let tail: string;
   if (needs === 0 && odd === 0)
@@ -637,7 +644,10 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
       {lead}, {clauses[0]}
       {clauses.length > 1 && <> and {clauses[1]}</>}
       {because && <>; {because}</>}.{" "}
-      <span className="ci-answer-tail">{tail}</span>
+      <span className="ci-answer-tail">
+        {tail}
+        {findTail}
+      </span>
     </p>
   );
 }
@@ -876,6 +886,8 @@ const NOT_CHECKED: Record<string, string> = {
     "Large charges need 30 charges in the year before to know what's large for you.",
   range:
     "Recurring and large-charge checks cover weeks, months and quarters only.",
+  offers_file:
+    "The card offers file couldn't be read, so offers and card choice weren't checked.",
 };
 
 function notCheckedLines(list: NotChecked[]): string[] {
@@ -907,7 +919,9 @@ interface Row {
   cents: number | null;
   /** The amount is what it usually costs, not what was charged: Text Dim. */
   usual?: boolean;
-  dest: "Flow" | "Settings";
+  /** None: the row has nowhere to open yet (a Finding, until the Find
+   *  money screen lands), so its name is plain text. */
+  dest: "Flow" | "Settings" | null;
   href: string;
   go?: () => void;
 }
@@ -1077,8 +1091,31 @@ function rowBody(
         href: flowHref,
         go: flowGo(merchantPick(true), u.day?.slice(0, 7) ?? fallbackMonth),
       };
+    case "finding":
+      return {
+        note: FINDING_NOTE[u.finding_kind ?? "subscription"],
+        warn: false,
+        name: u.label,
+        detail: `${u.action ?? ""}${
+          u.cents !== null ? `; about ${unsignedCents(u.cents)} a year` : ""
+        }.`,
+        // An estimate per year, not spend in the period: said in words.
+        cents: null,
+        dest: null,
+        href: "",
+      };
   }
 }
+
+/** The note column for a Finding row, by its kind. */
+const FINDING_NOTE: Record<FindingKind, string> = {
+  add_offer: "offer",
+  wrong_card: "card",
+  expiring: "expiring",
+  card_choice: "card",
+  subscription: "review",
+  price_rise: "price up",
+};
 
 function UnusualList({
   c,
@@ -1166,30 +1203,39 @@ function RowItem({ r }: { r: Row }) {
         {r.note}
       </span>
       <span className="ci-main">
-        <a
-          className="ci-name"
-          href={r.href}
-          data-return={r.key}
-          onClick={(e) => {
-            if (e.defaultPrevented || e.button !== 0) return;
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-            e.preventDefault();
-            returnTo = r.key;
-            if (r.go) r.go();
-            else navigate(r.href);
-          }}
-        >
-          {r.name}
-          <span className="lg-sr">
-            , {r.note}
-            {r.cents !== null
-              ? r.usual
-                ? `, usually ${signedCents(r.cents)} a month`
-                : `, ${signedCents(r.cents)}`
-              : ""}
-            . {r.detail} Opens in {r.dest}.
+        {r.dest === null ? (
+          <span className="ci-name ci-name-plain">
+            {r.name}
+            <span className="lg-sr">
+              , {r.note}. {r.detail}
+            </span>
           </span>
-        </a>
+        ) : (
+          <a
+            className="ci-name"
+            href={r.href}
+            data-return={r.key}
+            onClick={(e) => {
+              if (e.defaultPrevented || e.button !== 0) return;
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              returnTo = r.key;
+              if (r.go) r.go();
+              else navigate(r.href);
+            }}
+          >
+            {r.name}
+            <span className="lg-sr">
+              , {r.note}
+              {r.cents !== null
+                ? r.usual
+                  ? `, usually ${signedCents(r.cents)} a month`
+                  : `, ${signedCents(r.cents)}`
+                : ""}
+              . {r.detail} Opens in {r.dest}.
+            </span>
+          </a>
+        )}
         <span className="ci-detail" aria-hidden="true">
           {r.detail}
         </span>

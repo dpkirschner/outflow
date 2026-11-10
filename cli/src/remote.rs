@@ -294,7 +294,9 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             let p = crate::change_period(period, today)?;
             with_query("/net-worth/change", &[p.to_query()])
         }
-        Cmd::Checkin { period, categories } => {
+        Cmd::Checkin {
+            period, categories, ..
+        } => {
             let p = crate::checkin_period(period.as_deref(), today)?;
             let path = if *categories {
                 "/checkin/categories"

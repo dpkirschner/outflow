@@ -2858,6 +2858,13 @@ button.fl-lane-figure {
 .ci-row:hover .ci-name {
   text-decoration-color: var(--lg-teal);
 }
+/* a row with nowhere to open yet (a Finding): plain text, no hit area */
+.ci-name-plain {
+  text-decoration: none;
+}
+.ci-name-plain::after {
+  content: none;
+}
 .ci-detail {
   font-size: 0.75rem;
   line-height: 1.45;

@@ -347,9 +347,8 @@ pub fn find(
     let accounts = store.accounts().map_err(FindError::Store)?;
     let txns = store.all_transactions().map_err(FindError::Store)?;
     let ignored = store.ignored_merchants().map_err(FindError::Store)?;
-    let marks = store.dismissed_findings().map_err(FindError::Store)?;
-    let reviewed = store.reviewed_merchants().map_err(FindError::Store)?;
-    let mut report = evaluate(
+    report_with(
+        store,
         offers.as_deref(),
         &accounts,
         &txns,
@@ -357,7 +356,27 @@ pub fn find(
         through,
         now,
         opts,
-    );
+    )
+    .map_err(FindError::Store)
+}
+
+/// [`evaluate`] over an archive the caller already loaded, with the stored
+/// Reviewed and Dismissed marks applied: what [`find`] returns, for callers
+/// (check-in) that hold the transactions anyway.
+#[allow(clippy::too_many_arguments)]
+pub fn report_with(
+    store: &Store,
+    offers: Option<&[CardOffers]>,
+    accounts: &[Account],
+    txns: &[Transaction],
+    ignored: &HashSet<String>,
+    through: NaiveDate,
+    now: i64,
+    opts: &FindOptions,
+) -> rusqlite::Result<FindReport> {
+    let marks = store.dismissed_findings()?;
+    let reviewed = store.reviewed_merchants()?;
+    let mut report = evaluate(offers, accounts, txns, ignored, through, now, opts);
     apply_reviewed(&mut report, &reviewed, now);
     apply_dismissed(&mut report, &marks);
     Ok(report)

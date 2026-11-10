@@ -651,8 +651,9 @@ async fn checkin(
         None => Period::current(outflow_core::PeriodKind::Month, today),
     };
     let now = now_secs();
+    let offers: Option<std::path::PathBuf> = state.cfg.perks_path.clone().map(Into::into);
     with_store(&state, move |s| {
-        outflow_core::checkin(s, period, today, now).map_err(|e| e.to_string())
+        outflow_core::checkin(s, period, today, now, offers.as_deref()).map_err(|e| e.to_string())
     })
     .await
     .map(Json)

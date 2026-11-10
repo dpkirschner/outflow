@@ -280,6 +280,11 @@ pub(crate) enum Cmd {
         /// at 2x or half their usual and $50 or more away.
         #[arg(long)]
         categories: bool,
+        /// Offers file or folder, for the card offer Findings (local mode
+        /// only; with --server the server reads its own OUTFLOW_PERKS). A
+        /// bad file skips those Findings instead of failing.
+        #[arg(long, env = "OUTFLOW_PERKS")]
+        offers: Option<String>,
     },
     /// Net worth change over a period (default this month), split into
     /// Markets (gain net of contributions on measurable investment accounts)
@@ -1278,11 +1283,17 @@ fn cmd_checkin_categories(store: &Store, period: Option<&str>, json: bool) -> Re
     Ok(())
 }
 
-fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
+fn cmd_checkin(
+    store: &Store,
+    period: Option<&str>,
+    offers: Option<&std::path::Path>,
+    json: bool,
+) -> Result<(), String> {
     use outflow_core::{Check, NotCheckedReason, UnusualKind};
     let today = today_local();
     let p = checkin_period(period, today)?;
-    let c = outflow_core::checkin(store, p, today, now_secs()).map_err(|e| format!("{e}"))?;
+    let c =
+        outflow_core::checkin(store, p, today, now_secs(), offers).map_err(|e| format!("{e}"))?;
     if json {
         return json_out(&c);
     }
@@ -1455,6 +1466,13 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
                 amt(u.usual_cents),
                 u.txn_id.as_deref().unwrap_or("")
             ),
+            UnusualKind::Finding => format!(
+                "find money  {}: {} (about {} a year)  [{}]",
+                u.label,
+                u.action.as_deref().unwrap_or(""),
+                amt(u.cents),
+                u.finding_key.as_deref().unwrap_or("")
+            ),
         };
         let minor = if u.minor { "  (minor)" } else { "" };
         let earlier = match (u.kind, u.change_pct, u.month.as_deref()) {
@@ -1468,12 +1486,14 @@ fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), St
             Check::RecurringChanges => "recurring cost changes",
             Check::NewRecurring => "new recurring merchants",
             Check::LargeCharges => "large charges",
+            Check::CardOffers => "card offer Findings",
         };
         let why = match nc.reason {
             NotCheckedReason::Week => "monthly costs aren't judged by the week",
             NotCheckedReason::InProgress => "no completed month in the period yet",
             NotCheckedReason::ShortHistory => "too few charges before the period",
             NotCheckedReason::Range => "check-in covers weeks, months and quarters",
+            NotCheckedReason::OffersFile => "the offers file can't be read; run outflow find",
         };
         println!("  not checked: {what} ({why})");
     }
@@ -2000,8 +2020,14 @@ fn run() -> Result<(), String> {
         Cmd::Checkin {
             period,
             categories: true,
+            ..
         } => cmd_checkin_categories(&store, period.as_deref(), cli.json),
-        Cmd::Checkin { period, .. } => cmd_checkin(&store, period.as_deref(), cli.json),
+        Cmd::Checkin { period, offers, .. } => cmd_checkin(
+            &store,
+            period.as_deref(),
+            offers.as_deref().map(std::path::Path::new),
+            cli.json,
+        ),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),

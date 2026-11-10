@@ -140,7 +140,9 @@ product direction behind these terms is in
   whose monthly cost (or, every few months, its latest charge) is more
   than 25% away from its usual; a recurring merchant that went late; a one-off
   charge that is large compared with your own spending (around your 95th
-  percentile); or a connection or match review that needs attention.
+  percentile); a connection or match review that needs attention; or a
+  **Finding** that is new this period (a wrong-card charge or price rise
+  in it, an offer about to expire, a card choice that started in it).
   The thresholds are constants in `core`. Items about a place you visit
   every few weeks, or changes under $20 a month, are **minor**: still
   listed, folded at the end.

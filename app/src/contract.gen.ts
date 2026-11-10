@@ -241,6 +241,9 @@ export const checkIn: CheckIn = {
       "gap_days": null,
       "per_charge": false,
       "impact_cents": 120000,
+      "finding_kind": null,
+      "finding_key": null,
+      "action": null,
       "minor": false
     },
     {
@@ -260,6 +263,31 @@ export const checkIn: CheckIn = {
       "gap_days": 61,
       "per_charge": false,
       "impact_cents": 4000,
+      "finding_kind": null,
+      "finding_key": null,
+      "action": null,
+      "minor": false
+    },
+    {
+      "kind": "finding",
+      "label": "Sample Outfitters",
+      "cents": 3000,
+      "usual_cents": null,
+      "change_pct": null,
+      "merchant": null,
+      "txn_id": null,
+      "account_id": null,
+      "day": "2026-10-20",
+      "month": null,
+      "item_id": null,
+      "status": null,
+      "count": null,
+      "gap_days": null,
+      "per_charge": false,
+      "impact_cents": 3000,
+      "finding_kind": "wrong_card",
+      "finding_key": "wrong_card:0000:sample-outfitters",
+      "action": "Charge Sample Outfitters to the Demo Issuer card ending 0000 until 2027-01-31",
       "minor": false
     },
     {
@@ -279,6 +307,9 @@ export const checkIn: CheckIn = {
       "gap_days": 30,
       "per_charge": false,
       "impact_cents": 750,
+      "finding_kind": null,
+      "finding_key": null,
+      "action": null,
       "minor": true
     }
   ],

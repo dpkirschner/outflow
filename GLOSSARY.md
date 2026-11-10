@@ -15,7 +15,7 @@ product direction behind these terms is in
   leave and enter?"
 - **Find money**: things outflow can point out that would save or earn
   money, such as an unused card offer, a purchase on the wrong card, or
-  a subscription nobody uses. Each one is a **Finding**. Not built yet.
+  a subscription worth reviewing. Each one is a **Finding**.
 
 ## Flow lanes
 
@@ -90,6 +90,35 @@ product direction behind these terms is in
 - **Ignored**: the one per-merchant mark. It moves the merchant off the
   recurring list into a separate ignored list, where it can be restored.
 
+## Find money
+
+- **Finding**: one thing that would save or earn money. It has a kind,
+  an estimate in dollars per year, the transactions behind it, one
+  suggested action, and a stable key. Findings under $25 a year are
+  dropped. The kinds are:
+  - **Add offer**: a card offer you haven't added, at a merchant you
+    already pay.
+  - **Wrong card**: an added offer whose merchant keeps getting charged
+    to a different card.
+  - **Expiring**: an added offer about to expire before it has paid out.
+  - **Card choice**: a category charged to a card that earns less on it
+    than another card you hold.
+  - **Subscription**: a steady recurring merchant to review, or one whose
+    price rose.
+- **Offers file**: a hand-kept TOML file per card, listing its offers
+  and its earn table. `OUTFLOW_PERKS` names the file or folder.
+- **Earn table**: what a card pays per Plaid category (detailed category
+  first, then primary, then `default`), with a cents-per-point value and
+  optional yearly caps. A card without one is left out of card choice.
+- **Steady**: a recurring merchant on a monthly or yearly cadence whose
+  recent charges are within 5% of their median. A steady merchant is
+  what the Subscriptions filter shows.
+- **Reviewed**: a mark on a steady merchant. It hides the subscription
+  Finding for 12 months, or until the merchant goes Up.
+- **Dismissed**: the mark on a Finding. It moves the Finding to a list
+  you can restore from. The Finding comes back on its own only if its
+  estimate more than doubles.
+
 ## Screens
 
 - **Check-in**: the home screen. It summarizes a period (month by
@@ -113,6 +142,8 @@ product direction behind these terms is in
   month the same way, so the month strip can mark the ones well below
   their usual.
 - **Holdings**: the Stock screen.
+- **Find money**: every open Finding, ranked by estimated dollars per
+  year, with a dismissed list.
 - **Flow**: the In / Out / Moved screen, with the transaction table and
   the recurring list.
 - **Settings**: upkeep. Bank connections, card-payment match review,

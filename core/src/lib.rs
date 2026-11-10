@@ -52,9 +52,9 @@ pub use plaid::{
     InvestmentTxnPage, SourceError, SyncPage,
 };
 pub use query::{
-    flow_lanes, lane_of, search_transactions, spend_by_category, top_merchants, CategorySpend,
-    Direction, FlowMonth, Lane, MerchantSpend, MovedFlow, MovedLane, SortKey, TxnFilter, TxnPage,
-    TxnQuery, TxnRow,
+    flow_lanes, in_sources, lane_of, search_transactions, spend_by_category, top_merchants,
+    CategorySpend, Direction, FlowMonth, InSource, Lane, MerchantSpend, MovedFlow, MovedLane,
+    SortKey, TxnFilter, TxnPage, TxnQuery, TxnRow,
 };
 pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
 pub use reset::{preview as reset_preview, ResetPreview, PLAID_REFETCH_DAYS};

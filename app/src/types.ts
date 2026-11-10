@@ -317,6 +317,30 @@ export type MerchantSpend = {
 };
 
 /**
+ * One source of In money: a payee, as the In lane lists it.
+ */
+export type InSource = {
+  /**
+   * Normalized payee (`normalize_payee`), `merchant=` on `/transactions`.
+   * Empty for deposits with no payee at all.
+   */
+  merchant: string,
+  /**
+   * Display name (`display_merchant` of the first row seen).
+   */
+  name: string,
+  /**
+   * Money in, positive.
+   */
+  total_cents: number,
+  count: number,
+  /**
+   * The part of `total_cents` with no category yet.
+   */
+  uncategorized_cents: number,
+};
+
+/**
  * The Flow lane (or Moved group) a transaction is counted in.
  */
 export type Lane = "in" | "out" | "card_payment" | "invest" | "save" | "loan_paydown" | "between";

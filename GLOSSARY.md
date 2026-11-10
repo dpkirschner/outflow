@@ -24,6 +24,8 @@ product direction behind these terms is in
   inflow is In comes from the bank's own category and the account type,
   never from the category you gave it, so a missing rule can't move a
   paycheck into Out.
+  Flow lists In by **source**: the payee (employer, bank paying
+  interest), since income mostly shares one category.
 - **Out**: spending. Refunds and returns net against Out in their
   category instead of counting as In.
 - **Moved**: money going between your own accounts. It is shown, never

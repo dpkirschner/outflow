@@ -860,6 +860,18 @@ button.fl-lane-figure {
   font-size: 0.6875rem;
   color: var(--lg-dim);
 }
+/* The In lane's "not yet categorized" amount: a drill-down inside the
+   note's sentence, so it keeps the note's size and colour until hovered. */
+.fl-note-pick {
+  font-size: inherit;
+  /* Room inside the selected ring and a taller hit area; the negative
+     margins keep the sentence's spacing as if it were plain text. */
+  padding: 6px 6px;
+  margin: -6px -4px;
+  text-decoration: underline dotted var(--lg-faint);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
 /* A category far from its usual (finished months only): the margin note
    in words under its name. Up is attention amber, like the recurring list's
    "up"; down stays quiet. */

@@ -14,6 +14,7 @@ import { api, type MovedGroup, type SortKey } from "../api";
 import type {
   Account,
   CategoryVsUsual,
+  InSource,
   Direction,
   FlowMonth,
   Lane,
@@ -35,6 +36,7 @@ import type { ToastMsg } from "./Toast";
 
 const PAGE = 50;
 const CATEGORY_PREVIEW = 6;
+const SOURCE_PREVIEW = 6;
 
 // The strip shows Out per month, scaled to the largest month.
 function stripMonths(months: FlowMonth[]): StripMonth[] {
@@ -173,7 +175,7 @@ const LANE_PATH: Record<Lane, string[]> = {
 
 /** "Moved › Save › back", for the chip and the empty state. */
 function pickLabel(p: Pick): string {
-  if (p.merchant && p.inMonth) return `Out › ${p.name ?? p.merchant}`;
+  if (p.merchant && p.inMonth) return `${LANE_PATH[p.lane][0]} › ${p.name ?? p.merchant}`;
   if (p.merchant) return `Recurring › ${p.name ?? p.merchant}`;
   const parts = [...LANE_PATH[p.lane]];
   if (p.uncategorized) parts.push("Not yet categorized");
@@ -206,6 +208,8 @@ export function Flow({
   const [flow, setFlow] = useState<Load<FlowMonth[]>>({ state: "loading" });
   const [cats, setCats] = useState<CategoryVsUsual[] | null>(null);
   const [allCats, setAllCats] = useState(false);
+  const [sources, setSources] = useState<InSource[] | null>(null);
+  const [allSources, setAllSources] = useState(false);
   // Survives a month change (Flow stays mounted); resets on leaving Flow.
   const [pick, setPick] = useState<Pick | null>(initialPick ?? null);
   const onPick = useCallback((p: Pick) => {
@@ -265,6 +269,21 @@ export function Flow({
     void loadCats();
   }, [loadCats]);
 
+  const loadSources = useCallback(async () => {
+    if (!month) return;
+    try {
+      setSources(await api.inSources({ period: month }));
+    } catch (err) {
+      setSources(null);
+      notify({ kind: "err", text: `Couldn't load In sources: ${errMessage(err)}` });
+    }
+  }, [month, notify]);
+
+  useEffect(() => {
+    setSources(null);
+    void loadSources();
+  }, [loadSources]);
+
   const [recurring, setRecurring] = useState<Load<RecurringView>>({ state: "loading" });
   const loadRecurring = useCallback(async () => {
     if (!month) return;
@@ -280,8 +299,8 @@ export function Flow({
   }, [loadRecurring]);
 
   const refreshFigures = useCallback(async () => {
-    await Promise.all([loadFlow(), loadCats(), loadRecurring()]);
-  }, [loadFlow, loadCats, loadRecurring]);
+    await Promise.all([loadFlow(), loadCats(), loadSources(), loadRecurring()]);
+  }, [loadFlow, loadCats, loadSources, loadRecurring]);
 
   // Merchants ignored since the last toast that wasn't an ignore toast. The
   // app has one toast slot, so each Ignore replaces the previous toast; its
@@ -415,7 +434,14 @@ export function Flow({
           <Headline m={selected} />
 
           <div className="fl-lanes">
-            <InLane m={selected} pick={pick} onPick={onPick} />
+            <InLane
+              m={selected}
+              sources={sources}
+              all={allSources}
+              onToggleAll={() => setAllSources((a) => !a)}
+              pick={pick}
+              onPick={onPick}
+            />
             <OutLane
               m={selected}
               cats={cats}
@@ -596,7 +622,24 @@ function Row({
   );
 }
 
-function InLane({ m, pick, onPick }: { m: FlowMonth } & PickProps) {
+function InLane({
+  m,
+  sources,
+  all,
+  onToggleAll,
+  pick,
+  onPick,
+}: {
+  m: FlowMonth;
+  sources: InSource[] | null;
+  all: boolean;
+  onToggleAll: () => void;
+} & PickProps) {
+  const shown = sources ? (all ? sources : sources.slice(0, SOURCE_PREVIEW)) : [];
+  const hidden = sources ? sources.length - SOURCE_PREVIEW : 0;
+  const uncat = m.in_uncategorized_cents;
+  const uncatTarget: Pick = { lane: "in", uncategorized: true };
+  const uncatOn = samePick(pick, uncatTarget);
   return (
     <Lane
       id="in"
@@ -611,18 +654,59 @@ function InLane({ m, pick, onPick }: { m: FlowMonth } & PickProps) {
           onPick={onPick}
         />
       }
-      note="Income from outside your own accounts."
+      note={
+        <>
+          Income from outside your own accounts.
+          {uncat !== 0 && (
+            <>
+              {" "}
+              <button
+                className={`fl-pick fl-note-pick${uncatOn ? " on" : ""}`}
+                aria-pressed={uncatOn}
+                aria-label={`${signedCents(uncat)} not yet categorized: show these transactions`}
+                onClick={() => onPick(uncatTarget)}
+              >
+                {unsignedCents(uncat)}
+              </button>{" "}
+              not yet categorized.
+            </>
+          )}
+        </>
+      }
     >
-      <ul className="fl-rows">
-        <Row
-          label="Not yet categorized"
-          value={signedCents(m.in_uncategorized_cents)}
-          cents={m.in_uncategorized_cents}
-          target={{ lane: "in", uncategorized: true }}
-          pick={pick}
-          onPick={onPick}
-        />
-      </ul>
+      {sources === null ? (
+        <p className="fl-lane-note">Loading sources…</p>
+      ) : sources.length === 0 ? (
+        <p className="fl-lane-note">No income this month.</p>
+      ) : (
+        <>
+          <ul className="fl-rows" aria-label="In by source">
+            {shown.map((src) => {
+              const name = src.name || "No payee";
+              return (
+                <Row
+                  key={src.merchant}
+                  label={name}
+                  value={signedCents(src.total_cents)}
+                  cents={src.total_cents}
+                  target={
+                    src.merchant
+                      ? { lane: "in", merchant: src.merchant, name, inMonth: true }
+                      : undefined
+                  }
+                  pick={pick}
+                  onPick={onPick}
+                />
+              );
+            })}
+          </ul>
+          {hidden > 0 && (
+            <button className="fl-more" aria-expanded={all} onClick={onToggleAll}>
+              {all ? "Show fewer" : `Show all ${sources.length} sources`}
+            </button>
+          )}
+        </>
+      )}
     </Lane>
   );
 }

@@ -211,8 +211,9 @@ pub(crate) enum Cmd {
         #[arg(long)]
         llm: bool,
     },
-    /// Spending by category or merchant, or the Flow lanes per month
-    /// (`--by monthly`: in / out / earned - spent / saved / Moved groups).
+    /// Spending by category or merchant, In by source (`--by source`: payee),
+    /// or the Flow lanes per month (`--by monthly`: in / out / earned -
+    /// spent / saved / Moved groups).
     /// No period = all of history.
     Report {
         #[arg(long, value_enum, default_value_t = By::Category)]
@@ -515,6 +516,8 @@ pub(crate) enum By {
     Category,
     Merchant,
     Monthly,
+    /// The In lane by payee.
+    Source,
 }
 
 fn dollars(cents: i64) -> String {
@@ -710,6 +713,16 @@ fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(
             for r in spend_by_category(store, filter).map_err(|e| format!("{e}"))? {
                 let name = r.category.unwrap_or_else(|| "(uncategorized)".into());
                 println!("{:>12}  {:<24} {}", dollars(r.total_cents), name, r.count);
+            }
+        }
+        By::Source => {
+            for r in outflow_core::in_sources(store, filter).map_err(|e| format!("{e}"))? {
+                let name = if r.name.is_empty() {
+                    "(no payee)"
+                } else {
+                    &r.name
+                };
+                println!("{:>12}  {:<28} {}", dollars(r.total_cents), name, r.count);
             }
         }
         By::Merchant => {
@@ -1885,6 +1898,9 @@ fn report_json(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<
         By::Category => json_out(&spend_by_category(store, filter).map_err(|e| format!("{e}"))?),
         By::Merchant => json_out(&top_merchants(store, filter, top).map_err(|e| format!("{e}"))?),
         By::Monthly => json_out(&flow_lanes(store, filter).map_err(|e| format!("{e}"))?),
+        By::Source => {
+            json_out(&outflow_core::in_sources(store, filter).map_err(|e| format!("{e}"))?)
+        }
     }
 }
 

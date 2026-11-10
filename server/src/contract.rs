@@ -145,6 +145,16 @@ fn merchant_spend() -> MerchantSpend {
     }
 }
 
+fn in_source() -> outflow_core::InSource {
+    outflow_core::InSource {
+        merchant: "sample employer payroll".into(),
+        name: "Sample Employer Payroll".into(),
+        total_cents: 310_000,
+        count: 2,
+        uncategorized_cents: 0,
+    }
+}
+
 fn flow_month() -> FlowMonth {
     FlowMonth {
         year: 2026,
@@ -908,6 +918,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("CategorySpend", j(category_spend())),
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
+        ("InSource", j(in_source())),
         ("CheckIn", j(checkin())),
         ("CategoriesVsUsual", j(categories_vs_usual())),
         ("RecurringView", j(recurring_view())),

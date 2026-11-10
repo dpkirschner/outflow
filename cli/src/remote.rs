@@ -199,6 +199,7 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
                     "/merchants"
                 }
                 By::Monthly => "/flow",
+                By::Source => "/flow/in-sources",
             };
             with_query(path, &q)
         }
@@ -368,6 +369,10 @@ mod tests {
             "/merchants?period=2026-Q3&limit=5"
         );
         assert_eq!(ok(&["report"]), "/spend/categories");
+        assert_eq!(
+            ok(&["report", "--by", "source", "--period", "last-month"]),
+            "/flow/in-sources?period=2026-10"
+        );
     }
 
     #[test]

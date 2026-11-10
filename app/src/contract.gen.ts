@@ -18,6 +18,7 @@ import type {
   ExchangeResult,
   FlowMonth,
   GroupEdit,
+  InSource,
   MatchView,
   MerchantSpend,
   NetWorthChange,
@@ -154,6 +155,14 @@ export const flowMonth: FlowMonth = {
   "earned_minus_spent_cents": 190000,
   "saved_cents": 95000,
   "gap_cents": 95000
+};
+
+export const inSource: InSource = {
+  "merchant": "sample employer payroll",
+  "name": "Sample Employer Payroll",
+  "total_cents": 310000,
+  "count": 2,
+  "uncategorized_cents": 0
 };
 
 export const checkIn: CheckIn = {

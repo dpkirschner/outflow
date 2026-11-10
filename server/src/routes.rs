@@ -521,6 +521,19 @@ async fn categorize(State(state): State<AppState>) -> ApiResult<CategorizeResult
     .map(Json)
 }
 
+/// The In lane by payee (core::in_sources).
+async fn flow_in_sources(
+    State(state): State<AppState>,
+    Query(params): Query<FilterParams>,
+) -> ApiResult<Vec<outflow_core::InSource>> {
+    let f = params.to_filter()?;
+    with_store(&state, move |s| {
+        outflow_core::in_sources(s, &f).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
 async fn spend_categories(
     State(state): State<AppState>,
     Query(params): Query<FilterParams>,
@@ -992,6 +1005,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
         .route("/flow", get(flow))
+        .route("/flow/in-sources", get(flow_in_sources))
         .route("/checkin", get(checkin))
         .route("/checkin/categories", get(checkin_categories))
         .route("/recurring", get(recurring))
@@ -1566,6 +1580,9 @@ mod tests {
         assert_eq!(ci["period"]["kind"], "Week");
         let (status, _) = get_json(app.clone(), "/checkin?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, src) = get_json(app.clone(), "/flow/in-sources?period=this-month").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(src.is_array());
         let (status, cc) = get_json(app.clone(), "/checkin/categories?period=last-month").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(cc["period"]["kind"], "Month");

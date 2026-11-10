@@ -6,6 +6,7 @@ import type {
   Account,
   CategoriesVsUsual,
   CheckIn,
+  InSource,
   BalancesView,
   DayTotals,
   ExchangeResult,
@@ -231,6 +232,7 @@ export const api = {
     return get<TxnPage>(`/transactions${qs ? `?${qs}` : ""}`);
   },
   categorize: () => post<CategorizeResult>("/categorize"),
+  inSources: (filter?: Filter) => get<InSource[]>(`/flow/in-sources${filterQuery(filter)}`),
   spendCategories: (filter?: Filter) =>
     get<CategorySpend[]>(`/spend/categories${filterQuery(filter)}`),
   merchants: (filter?: Filter, limit?: number) =>

@@ -48,7 +48,7 @@ Subcommands (`outflow <cmd> --help` is the authoritative list of flags):
 | `pull --from-file P` | offline fixture ingest; live syncs are the server's job (`--server URL pull` triggers one) |
 | `categorize [--llm]` | rule pass over uncategorized rows, then optionally the LLM tail |
 | `fix <id> <category> [--no-learn]` | manual category; also points the merchant's rule at it unless `--no-learn` |
-| `report --by category\|merchant\|monthly [--top N --posted-only]` | spending by category or merchant, or Flow lanes per month (in / out / earned − spent / saved / Moved groups); no period = all history |
+| `report --by category\|merchant\|source\|monthly [--top N --posted-only]` | spending by category or merchant, In by source (payee), or Flow lanes per month (in / out / earned − spent / saved / Moved groups); no period = all history |
 | `recurring [--ignored]` | recurring merchants over the 12 months ending with the period's last month (default this month): cadence, usual monthly cost, new / late / up / down >25%, year on year |
 | `checkin` | one week, month or quarter (default this month): net worth change, earned − spent, saved, each against its usual, and what's unusual; `--categories` lists Out per category against each one's usual instead |
 | `change` | net worth change (default this month) split into Markets + Added, per account |

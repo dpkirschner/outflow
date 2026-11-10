@@ -114,6 +114,13 @@
     "saved_cents": 95000,
     "gap_cents": 95000
   },
+  "InSource": {
+    "merchant": "sample employer payroll",
+    "name": "Sample Employer Payroll",
+    "total_cents": 310000,
+    "count": 2,
+    "uncategorized_cents": 0
+  },
   "CheckIn": {
     "period": {
       "kind": "Month",

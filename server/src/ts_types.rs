@@ -84,6 +84,7 @@ fn render() -> String {
                 TxnRow,
                 CategorySpend,
                 MerchantSpend,
+                InSource,
                 Lane,
                 Direction,
                 MovedFlow,

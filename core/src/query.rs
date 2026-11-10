@@ -356,6 +356,64 @@ pub fn top_merchants(
     Ok(out)
 }
 
+/// One source of In money: a payee, as the In lane lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct InSource {
+    /// Normalized payee (`normalize_payee`), `merchant=` on `/transactions`.
+    /// Empty for deposits with no payee at all.
+    pub merchant: String,
+    /// Display name (`display_merchant` of the first row seen).
+    pub name: String,
+    /// Money in, positive.
+    pub total_cents: i64,
+    pub count: usize,
+    /// The part of `total_cents` with no category yet.
+    pub uncategorized_cents: i64,
+}
+
+/// The In lane by payee (GLOSSARY: Flow lanes, In source): every row
+/// `lane_of` puts in In, grouped by `normalize_payee`, largest first. The
+/// totals sum to `flow_lanes`' `in_cents` over the same range.
+pub fn in_sources(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<InSource>> {
+    let txns = store.all_transactions()?;
+    let kind = account_kinds(store)?;
+    let all = TxnFilter {
+        include_non_spending: true,
+        ..*f
+    };
+    let mut map: HashMap<String, InSource> = HashMap::new();
+    for t in txns.iter().filter(|t| passes(t, &all)) {
+        if lane_of(t, kind(&t.account_id)) != Some(Lane::In) {
+            continue;
+        }
+        let key = normalize_payee(t.merchant());
+        let e = map.entry(key.clone()).or_insert_with(|| InSource {
+            name: if key.is_empty() {
+                String::new()
+            } else {
+                display_merchant(t.merchant())
+            },
+            merchant: key,
+            total_cents: 0,
+            count: 0,
+            uncategorized_cents: 0,
+        });
+        e.total_cents += t.amount.cents();
+        e.count += 1;
+        if t.category.is_none() {
+            e.uncategorized_cents += t.amount.cents();
+        }
+    }
+    let mut out: Vec<InSource> = map.into_values().collect();
+    out.sort_by(|a, b| {
+        b.total_cents
+            .cmp(&a.total_cents)
+            .then(a.merchant.cmp(&b.merchant))
+    });
+    Ok(out)
+}
+
 /// Which Flow lane a positive Spending transaction belongs to, from provider
 /// data and account kind only; the user's category never moves a row between
 /// In and Out (ADR 0001, amendment 2026-11-07). In: Plaid says INCOME, or
@@ -850,6 +908,50 @@ mod tests {
             .unwrap();
         assert_eq!(spotify.count, 2);
         assert_eq!(spotify.total_cents, 2900);
+    }
+
+    #[test]
+    fn in_sources_group_by_payee_and_sum_to_in() {
+        use crate::model::AccountKind::Checking;
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[account("chk", Checking)]).unwrap();
+        let on = |id: &str, payee: &str, cents: i64, cat: Option<&str>, pfc: Option<&str>| {
+            let mut x = t(id, JAN15, cents, payee, cat, false);
+            x.account_id = "chk".into();
+            x.pfc_primary = pfc.map(Into::into);
+            x
+        };
+        s.upsert_transactions(&[
+            on(
+                "p1",
+                "ACME CORP PAYROLL",
+                300000,
+                Some("Income"),
+                Some("INCOME"),
+            ),
+            on("p2", "ACME CORP PAYROLL", 300000, None, Some("INCOME")),
+            on(
+                "i",
+                "Demo Bank Interest",
+                412,
+                Some("Income"),
+                Some("INCOME"),
+            ),
+            on("b", "Grocer", -5000, Some("Groceries"), None),
+        ])
+        .unwrap();
+        let src = in_sources(&s, &TxnFilter::all()).unwrap();
+        let total: i64 = src.iter().map(|x| x.total_cents).sum();
+        let lanes: i64 = flow_lanes(&s, &TxnFilter::all())
+            .unwrap()
+            .iter()
+            .map(|m| m.in_cents)
+            .sum();
+        assert_eq!(total, lanes);
+        assert_eq!(src[0].total_cents, 600000);
+        assert_eq!(src[0].count, 2);
+        assert_eq!(src[0].uncategorized_cents, 300000);
+        assert_eq!(src.len(), 2);
     }
 
     #[test]

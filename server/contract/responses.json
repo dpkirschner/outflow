@@ -904,7 +904,8 @@
           ]
         }
       }
-    ]
+    ],
+    "dismissed": []
   },
   "PlaidItem": {
     "item_id": "item-demo-001",

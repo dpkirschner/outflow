@@ -6,13 +6,18 @@
 //! Every estimate is in dollars per year, read off the 12 calendar months
 //! ending with the chosen month (the same window as the recurring list).
 //! Findings under [`MIN_EST_CENTS_PER_YEAR`] are dropped.
+//!
+//! A Finding marked Dismissed moves to [`FindReport::dismissed`] and comes
+//! back on its own only when its estimate more than doubles the one it had
+//! when dismissed ([`apply_dismissed`]).
 
 use crate::model::{Account, Transaction};
 use crate::period::{Period, PeriodKind};
 use crate::perks::{self, CardOffers, CardStatus, Offer, PerksError};
-use crate::store::Store;
+use crate::store::{DismissedMark, Store};
 use chrono::{Datelike, Months, NaiveDate};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Findings estimated under this (cents per year) are dropped. Until earn
@@ -102,8 +107,11 @@ pub struct FindReport {
     pub cards: Vec<CardStatus>,
     /// Sources that couldn't run, in words (e.g. no offers configured).
     pub notes: Vec<String>,
-    /// Highest estimate first.
+    /// Open Findings, highest estimate first.
     pub findings: Vec<Finding>,
+    /// Findings marked Dismissed, in the same order. Restoring one clears
+    /// the mark.
+    pub dismissed: Vec<Finding>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -122,6 +130,8 @@ impl Default for FindOptions {
 pub enum FindError {
     Store(rusqlite::Error),
     Offers(PerksError),
+    /// Dismiss named a key that isn't among this report's Findings.
+    NoSuchFinding(String),
 }
 
 impl std::fmt::Display for FindError {
@@ -129,6 +139,7 @@ impl std::fmt::Display for FindError {
         match self {
             FindError::Store(e) => write!(f, "{e}"),
             FindError::Offers(e) => write!(f, "{e}"),
+            FindError::NoSuchFinding(k) => write!(f, "no Finding with key {k}"),
         }
     }
 }
@@ -179,7 +190,24 @@ pub fn evaluate(
         cards,
         notes,
         findings,
+        dismissed: Vec::new(),
     }
+}
+
+/// Move every Finding with a Dismissed mark to `report.dismissed`, unless
+/// its estimate now more than doubles the one it had when dismissed. Cash
+/// and points add up as they do for the floor.
+pub fn apply_dismissed(report: &mut FindReport, marks: &HashMap<String, DismissedMark>) {
+    let (dismissed, open) = std::mem::take(&mut report.findings)
+        .into_iter()
+        .partition(|f| {
+            marks.get(&f.key).is_some_and(|m| {
+                let then = m.est_cents_per_year + m.est_points_per_year;
+                f.est_cents_per_year + f.est_points_per_year <= 2 * then
+            })
+        });
+    report.findings = open;
+    report.dismissed = dismissed;
 }
 
 fn days_left(f: &Finding) -> i64 {
@@ -203,14 +231,50 @@ pub fn find(
         .map_err(FindError::Offers)?;
     let accounts = store.accounts().map_err(FindError::Store)?;
     let txns = store.all_transactions().map_err(FindError::Store)?;
-    Ok(evaluate(
-        offers.as_deref(),
-        &accounts,
-        &txns,
-        through,
-        now,
-        opts,
-    ))
+    let marks = store.dismissed_findings().map_err(FindError::Store)?;
+    let mut report = evaluate(offers.as_deref(), &accounts, &txns, through, now, opts);
+    apply_dismissed(&mut report, &marks);
+    Ok(report)
+}
+
+/// Dismiss the Finding with `key` (it must be in the report for these
+/// params, open or dismissed), or restore it, then return the new report.
+/// Dismissing stores the estimate it has now; dismissing an already
+/// dismissed Finding keeps the first estimate, so the bar doesn't creep.
+/// Restoring a key with no mark is a no-op.
+#[allow(clippy::too_many_arguments)]
+pub fn set_dismissed(
+    store: &Store,
+    offers_path: Option<&Path>,
+    through: NaiveDate,
+    now: i64,
+    opts: &FindOptions,
+    key: &str,
+    dismissed: bool,
+) -> Result<FindReport, FindError> {
+    if dismissed {
+        let report = find(store, offers_path, through, now, opts)?;
+        if !report.dismissed.iter().any(|f| f.key == key) {
+            let f = report
+                .findings
+                .iter()
+                .find(|f| f.key == key)
+                .ok_or_else(|| FindError::NoSuchFinding(key.to_string()))?;
+            let mark = DismissedMark {
+                est_cents_per_year: f.est_cents_per_year,
+                est_points_per_year: f.est_points_per_year,
+                marked_at: now,
+            };
+            store
+                .set_finding_dismissed(key, Some(mark))
+                .map_err(FindError::Store)?;
+        }
+    } else {
+        store
+            .set_finding_dismissed(key, None)
+            .map_err(FindError::Store)?;
+    }
+    find(store, offers_path, through, now, opts)
 }
 
 /// `kind:card:subject`, the subject normalized so a respelled merchant name
@@ -246,6 +310,69 @@ mod tests {
             key(FindingKind::WrongCard, "4242", "Fubo TV"),
             "wrong_card:4242:fubo-tv"
         );
+    }
+
+    fn finding(key: &str, cents: i64, points: i64) -> Finding {
+        Finding {
+            kind: FindingKind::AddOffer,
+            key: key.into(),
+            subject: key.into(),
+            card_mask: None,
+            est_cents_per_year: cents,
+            est_points_per_year: points,
+            txn_ids: vec![],
+            action: String::new(),
+            evidence: Evidence::Offer(OfferEvidence {
+                issuer: String::new(),
+                offer: Offer {
+                    merchant: key.into(),
+                    reward: crate::perks::Reward::Back(crate::money::Money::from_cents(cents)),
+                    min: None,
+                    uses: None,
+                    cap: crate::perks::Cap::None,
+                    single: false,
+                    per_year: false,
+                    added: false,
+                    expires: 0,
+                    patterns: vec![],
+                    note: None,
+                },
+                days_left: 30,
+                charges: 0,
+                last_charge: None,
+                typical_charge_cents: None,
+                matched_merchants: vec![],
+            }),
+        }
+    }
+
+    fn mark(cents: i64, points: i64) -> DismissedMark {
+        DismissedMark {
+            est_cents_per_year: cents,
+            est_points_per_year: points,
+            marked_at: 0,
+        }
+    }
+
+    #[test]
+    fn dismissed_stays_down_until_its_estimate_more_than_doubles() {
+        let mut r = evaluate(None, &[], &[], d(2026, 11, 9), 0, &FindOptions::default());
+        r.findings = vec![
+            finding("doubled", 6_000, 0),
+            finding("exactly-double", 6_000, 0),
+            finding("points", 0, 9_000),
+            finding("open", 5_000, 0),
+        ];
+        let marks = HashMap::from([
+            ("doubled".to_string(), mark(2_999, 0)),
+            ("exactly-double".to_string(), mark(3_000, 0)),
+            ("points".to_string(), mark(0, 4_500)),
+            ("stale".to_string(), mark(100, 0)),
+        ]);
+        apply_dismissed(&mut r, &marks);
+        let keys = |v: &[Finding]| v.iter().map(|f| f.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&r.findings), vec!["doubled", "open"]);
+        assert_eq!(keys(&r.dismissed), vec!["exactly-double", "points"]);
     }
 
     #[test]

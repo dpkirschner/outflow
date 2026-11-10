@@ -35,8 +35,8 @@ pub use checkin::{
     Usual,
 };
 pub use find::{
-    find, Evidence, FindError, FindOptions, FindReport, Finding, FindingKind, OfferEvidence,
-    MIN_EST_CENTS_PER_YEAR,
+    apply_dismissed, find, set_dismissed, Evidence, FindError, FindOptions, FindReport, Finding,
+    FindingKind, OfferEvidence, MIN_EST_CENTS_PER_YEAR,
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
@@ -66,7 +66,9 @@ pub use stock::{
     net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
-pub use store::{CategoryUndone, FlagRule, PlaidBatch, SetKind, Store, Unaccept, UpsertResult};
+pub use store::{
+    CategoryUndone, DismissedMark, FlagRule, PlaidBatch, SetKind, Store, Unaccept, UpsertResult,
+};
 pub use subscriptions::{
     detect_rhythms, display_merchant, normalize_payee, RhythmGroup, StreamCadence,
 };

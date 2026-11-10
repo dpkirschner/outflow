@@ -968,7 +968,8 @@ export const findReport: FindReport = {
         ]
       }
     }
-  ]
+  ],
+  "dismissed": []
 };
 
 export const plaidItem: PlaidItem = {

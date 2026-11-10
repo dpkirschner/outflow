@@ -3,9 +3,10 @@
 //! (flip `added = true`), so edits apply without a restart.
 
 use axum::extract::{Query, State};
-use axum::routing::get;
+use axum::http::StatusCode;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use outflow_core::{find, today_local, FindOptions, FindReport, Period};
+use outflow_core::{find, set_dismissed, today_local, FindError, FindOptions, FindReport, Period};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -21,24 +22,32 @@ struct FindParams {
     expiring_days: Option<i64>,
 }
 
+impl FindParams {
+    /// The last day the estimates read, and the options.
+    fn resolve(&self) -> Result<(chrono::NaiveDate, FindOptions), ApiError> {
+        let today = today_local();
+        let through = Period::resolve(
+            blank(self.period.as_deref()),
+            blank(self.since.as_deref()),
+            blank(self.until.as_deref()),
+            today,
+        )
+        .map_err(ApiError::bad_request)?
+        .map_or(today, |period| period.last_day());
+        let opts = FindOptions {
+            expiring_days: self.expiring_days.unwrap_or(14).max(0),
+        };
+        Ok((through, opts))
+    }
+}
+
 /// Every Finding, estimated over the 12 months ending with the period's last
 /// month (default: this month).
 async fn find_money(
     State(state): State<AppState>,
     Query(p): Query<FindParams>,
 ) -> ApiResult<FindReport> {
-    let today = today_local();
-    let through = Period::resolve(
-        blank(p.period.as_deref()),
-        blank(p.since.as_deref()),
-        blank(p.until.as_deref()),
-        today,
-    )
-    .map_err(ApiError::bad_request)?
-    .map_or(today, |period| period.last_day());
-    let opts = FindOptions {
-        expiring_days: p.expiring_days.unwrap_or(14).max(0),
-    };
+    let (through, opts) = p.resolve()?;
     let path: Option<PathBuf> = state.cfg.perks_path.clone().map(PathBuf::from);
     let now = now_secs();
     with_store(&state, move |s| {
@@ -48,8 +57,50 @@ async fn find_money(
     .map(Json)
 }
 
+#[derive(Deserialize)]
+struct DismissedBody {
+    /// `Finding::key`.
+    key: String,
+    dismissed: bool,
+}
+
+/// Dismiss a Finding (it must be in the report for these params) or restore
+/// it; returns the report after the change. 404 for a key not in the report.
+async fn set_finding_dismissed(
+    State(state): State<AppState>,
+    Query(p): Query<FindParams>,
+    Json(body): Json<DismissedBody>,
+) -> ApiResult<FindReport> {
+    let key = body.key.trim().to_string();
+    if key.is_empty() {
+        return Err(ApiError::bad_request("key is empty"));
+    }
+    let (through, opts) = p.resolve()?;
+    let path: Option<PathBuf> = state.cfg.perks_path.clone().map(PathBuf::from);
+    let now = now_secs();
+    let res = with_store(&state, move |s| {
+        Ok(set_dismissed(
+            s,
+            path.as_deref(),
+            through,
+            now,
+            &opts,
+            &key,
+            body.dismissed,
+        ))
+    })
+    .await?;
+    match res {
+        Ok(report) => Ok(Json(report)),
+        Err(e @ FindError::NoSuchFinding(_)) => Err(ApiError(StatusCode::NOT_FOUND, e.to_string())),
+        Err(e) => Err(ApiError::internal(e)),
+    }
+}
+
 pub fn router() -> Router<AppState> {
-    Router::new().route("/find", get(find_money))
+    Router::new()
+        .route("/find", get(find_money))
+        .route("/find/dismissed", post(set_finding_dismissed))
 }
 
 #[cfg(test)]
@@ -177,6 +228,61 @@ offers = [
             serde_json::json!({"kind": "back", "value": 3000})
         );
         assert_eq!(f["evidence"]["matched_merchants"][0], "Dropbox");
+    }
+
+    async fn post(
+        app: Router,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        let req = Request::post(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        let status = res.status();
+        let bytes = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or_default())
+    }
+
+    /// Dismiss moves the Finding to `dismissed` and survives a fresh GET;
+    /// restore brings it back; an unknown key is a 404.
+    #[tokio::test]
+    async fn dismisses_and_restores_a_finding() {
+        let path =
+            std::env::temp_dir().join(format!("outflow-dismiss-{}.toml", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"[card]
+issuer = "Demo Issuer"
+mask = "4242"
+captured = 2026-01-01
+offers = [
+  { merchant = "Dropbox", back = "30.00", expires = 2099-12-31, match = ["dropbox"] },
+]
+"#,
+        )
+        .unwrap();
+        let app = app(Some(path.display().to_string()));
+        let key = "add_offer:4242:dropbox";
+        let dismiss = |on: bool| serde_json::json!({ "key": key, "dismissed": on });
+
+        let (status, body) = post(app.clone(), "/find/dismissed", dismiss(true)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["findings"], serde_json::json!([]));
+        assert_eq!(body["dismissed"][0]["key"], key);
+        let (_, body) = get(app.clone(), "/find").await;
+        assert_eq!(body["dismissed"][0]["key"], key);
+
+        let (status, body) = post(app.clone(), "/find/dismissed", dismiss(false)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["findings"][0]["key"], key);
+        assert_eq!(body["dismissed"], serde_json::json!([]));
+
+        let unknown = serde_json::json!({ "key": "add_offer:4242:nope", "dismissed": true });
+        let (status, body) = post(app.clone(), "/find/dismissed", unknown).await;
+        std::fs::remove_file(&path).ok();
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
     }
 
     #[tokio::test]

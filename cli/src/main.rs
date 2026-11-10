@@ -316,6 +316,13 @@ pub(crate) enum Cmd {
         /// Flag added offers expiring within this many days.
         #[arg(long, default_value_t = 14)]
         expiring_days: i64,
+        /// Dismiss the Finding with this key (shown under each one). It
+        /// comes back only if its estimate more than doubles.
+        #[arg(long, value_name = "KEY", conflicts_with = "restore")]
+        dismiss: Option<String>,
+        /// Restore a dismissed Finding by its key.
+        #[arg(long, value_name = "KEY")]
+        restore: Option<String>,
     },
     /// What needs you (connections, card payments to review, last sync),
     /// then recent sync runs. --json: {"version": ..., "upkeep": ...,
@@ -962,6 +969,7 @@ fn cmd_find(
     file: Option<String>,
     period: &PeriodArgs,
     expiring_days: i64,
+    mark: Option<(&str, bool)>,
     json: bool,
 ) -> Result<(), String> {
     let through = period.resolve()?.map_or(today_local(), |p| p.last_day());
@@ -969,8 +977,13 @@ fn cmd_find(
         expiring_days: expiring_days.max(0),
     };
     let path = file.map(std::path::PathBuf::from);
-    let report =
-        find(store, path.as_deref(), through, now_secs(), &opts).map_err(|e| e.to_string())?;
+    let report = match mark {
+        Some((key, on)) => {
+            outflow_core::set_dismissed(store, path.as_deref(), through, now_secs(), &opts, key, on)
+        }
+        None => find(store, path.as_deref(), through, now_secs(), &opts),
+    }
+    .map_err(|e| e.to_string())?;
     if json {
         return json_out(&report);
     }
@@ -992,10 +1005,19 @@ fn cmd_find(
     }
     if report.findings.is_empty() {
         println!("\nnothing found");
-        return Ok(());
+    } else {
+        println!("\nFINDINGS ({})", report.findings.len());
+        print_findings(&report.findings);
     }
-    println!("\nFINDINGS ({})", report.findings.len());
-    for f in &report.findings {
+    if !report.dismissed.is_empty() {
+        println!("\nDISMISSED ({}; --restore KEY)", report.dismissed.len());
+        print_findings(&report.dismissed);
+    }
+    Ok(())
+}
+
+fn print_findings(findings: &[outflow_core::Finding]) {
+    for f in findings {
         let value = match (f.est_cents_per_year, f.est_points_per_year) {
             (c, 0) => format!("{}/yr", dollars(c)),
             (0, p) => format!("{p} pts/yr"),
@@ -1023,7 +1045,6 @@ fn cmd_find(
         println!("  {:>14}  {detail}", "");
         println!("  {:>14}  key {}", "", f.key);
     }
-    Ok(())
 }
 
 fn date_label(secs: i64) -> String {
@@ -1880,7 +1901,16 @@ fn run() -> Result<(), String> {
             file,
             period,
             expiring_days,
-        } => cmd_find(&store, file, &period, expiring_days, cli.json),
+            dismiss,
+            restore,
+        } => {
+            let mark = match (&dismiss, &restore) {
+                (Some(k), _) => Some((k.as_str(), true)),
+                (None, Some(k)) => Some((k.as_str(), false)),
+                (None, None) => None,
+            };
+            cmd_find(&store, file, &period, expiring_days, mark, cli.json)
+        }
     }
 }
 

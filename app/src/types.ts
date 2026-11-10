@@ -1597,9 +1597,14 @@ export type FindReport = {
    */
   notes: Array<string>,
   /**
-   * Highest estimate first.
+   * Open Findings, highest estimate first.
    */
   findings: Array<Finding>,
+  /**
+   * Findings marked Dismissed, in the same order. Restoring one clears
+   * the mark.
+   */
+  dismissed: Array<Finding>,
 };
 
 /**

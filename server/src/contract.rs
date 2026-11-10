@@ -788,6 +788,7 @@ fn find_report() -> FindReport {
                 }),
             },
         ],
+        dismissed: vec![],
     }
 }
 

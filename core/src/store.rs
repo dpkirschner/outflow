@@ -958,7 +958,7 @@ impl Store {
     }
 
     /// Transactions on visible accounts — the single read behind search,
-    /// spend, recurring and perks, so hiding an account drops its
+    /// spend, recurring and find, so hiding an account drops its
     /// rows from all of them. Rows whose account isn't in `accounts` at all
     /// (e.g. fixture-only ingests) are kept.
     pub fn all_transactions(&self) -> rusqlite::Result<Vec<Transaction>> {

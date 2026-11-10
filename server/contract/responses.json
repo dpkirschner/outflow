@@ -788,7 +788,12 @@
       }
     }
   },
-  "PerksReport": {
+  "FindReport": {
+    "window": {
+      "kind": "Custom",
+      "start": "2025-02-01",
+      "end": "2026-02-01"
+    },
     "cards": [
       {
         "issuer": "Demo Issuer",
@@ -803,82 +808,101 @@
         "issuer": "Demo Issuer",
         "mask": "9999",
         "account_id": null,
-        "problem": "no linked account ends in 9999",
+        "problem": "no account name ends in (9999)",
         "offers": 0,
         "added": 0,
         "expired": 0
       }
     ],
+    "notes": [],
     "findings": [
       {
         "kind": "add_offer",
+        "key": "add_offer:0000:sample-outfitters",
+        "subject": "Sample Outfitters",
         "card_mask": "0000",
-        "offer": {
-          "merchant": "Sample Outfitters",
-          "reward": {
-            "kind": "back",
-            "value": 1000
-          },
-          "min": 5000,
-          "uses": 1,
-          "cap": {
-            "kind": "none"
-          },
-          "single": true,
-          "per_year": false,
-          "added": false,
-          "expires": 1771027200,
-          "patterns": [
-            "SAMPLE OUTFITTERS"
-          ],
-          "note": null
-        },
-        "days_left": 30,
-        "charges": 2,
-        "last_charge": 1767571200,
-        "typical_charge_cents": -6000,
-        "est_cash_cents": 1000,
-        "est_points": 0,
+        "est_cents_per_year": 3000,
+        "est_points_per_year": 0,
         "txn_ids": [
           "txn-demo-004",
           "txn-demo-005"
         ],
-        "matched_merchants": [
-          "Sample Outfitters"
-        ]
+        "action": "Add the Sample Outfitters offer to the Demo Issuer card ending 0000 (expires 2026-02-14)",
+        "evidence": {
+          "source": "offer",
+          "issuer": "Demo Issuer",
+          "offer": {
+            "merchant": "Sample Outfitters",
+            "reward": {
+              "kind": "back",
+              "value": 3000
+            },
+            "min": 5000,
+            "uses": 1,
+            "cap": {
+              "kind": "none"
+            },
+            "single": true,
+            "per_year": false,
+            "added": false,
+            "expires": 1771027200,
+            "patterns": [
+              "SAMPLE OUTFITTERS"
+            ],
+            "note": null
+          },
+          "days_left": 30,
+          "charges": 2,
+          "last_charge": 1767571200,
+          "typical_charge_cents": 6000,
+          "matched_merchants": [
+            "SAMPLE OUTFITTERS"
+          ]
+        }
       },
       {
         "kind": "expiring",
+        "key": "expiring:0000:sample-outfitters",
+        "subject": "Sample Outfitters",
         "card_mask": "0000",
-        "offer": {
-          "merchant": "Sample Outfitters",
-          "reward": {
-            "kind": "pts_per_dollar",
-            "value": 3
+        "est_cents_per_year": 0,
+        "est_points_per_year": 3000,
+        "txn_ids": [
+          "txn-demo-004"
+        ],
+        "action": "Use the Sample Outfitters offer on the Demo Issuer card ending 0000 by 2026-01-19",
+        "evidence": {
+          "source": "offer",
+          "issuer": "Demo Issuer",
+          "offer": {
+            "merchant": "Sample Outfitters",
+            "reward": {
+              "kind": "pts_per_dollar",
+              "value": 3
+            },
+            "min": 5000,
+            "uses": 1,
+            "cap": {
+              "kind": "points",
+              "value": 3000
+            },
+            "single": true,
+            "per_year": false,
+            "added": false,
+            "expires": 1771027200,
+            "patterns": [
+              "SAMPLE OUTFITTERS"
+            ],
+            "note": null
           },
-          "min": 5000,
-          "uses": 1,
-          "cap": {
-            "kind": "points",
-            "value": 3000
-          },
-          "single": true,
-          "per_year": false,
-          "added": false,
-          "expires": 1771027200,
-          "patterns": [
+          "days_left": 4,
+          "charges": 1,
+          "last_charge": 1767571200,
+          "typical_charge_cents": 6000,
+          "matched_merchants": [
             "SAMPLE OUTFITTERS"
-          ],
-          "note": null
-        },
-        "days_left": 4,
-        "charges": 0,
-        "last_charge": null,
-        "typical_charge_cents": null,
-        "est_cash_cents": 0,
-        "est_points": 0,
-        "txn_ids": [],
-        "matched_merchants": []
+          ]
+        }
       }
     ]
   },

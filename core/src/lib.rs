@@ -4,6 +4,7 @@ pub mod balances;
 pub mod build;
 pub mod categorize;
 pub mod checkin;
+pub mod find;
 pub mod llm;
 pub mod model;
 pub mod money;
@@ -33,6 +34,10 @@ pub use checkin::{
     CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual, UnusualKind,
     Usual,
 };
+pub use find::{
+    find, Evidence, FindError, FindOptions, FindReport, Finding, FindingKind, OfferEvidence,
+    MIN_EST_CENTS_PER_YEAR,
+};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
     account_display_label, Account, AccountKind, BalanceSnapshot, CategoryEdit, CategorySource,
@@ -43,8 +48,7 @@ pub use model::{
 pub use money::{Money, MoneyParseError};
 pub use period::{parse_day, today_local, Period, PeriodError, PeriodKind};
 pub use perks::{
-    evaluate as evaluate_perks, load_offers, parse_offers, Cap, CardOffers, CardStatus, Finding,
-    FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
+    load_offers, parse_offers, Cap, CardOffers, CardStatus, Offer, PerksError, Reward,
 };
 pub use plaid::{
     item_has_investments_consent, item_has_product, item_is_investments_only, parse_accounts_get,

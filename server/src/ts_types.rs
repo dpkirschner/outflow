@@ -199,18 +199,16 @@ fn render() -> String {
     // --- core::perks ---
     {
         use outflow_core::perks::*;
+        decls!(&cfg, out, [Reward, Cap, Offer, CardStatus]);
+    }
+
+    // --- core::find ---
+    {
+        use outflow_core::find::*;
         decls!(
             &cfg,
             out,
-            [
-                Reward,
-                Cap,
-                Offer,
-                FindingKind,
-                Finding,
-                CardStatus,
-                PerksReport
-            ]
+            [FindingKind, OfferEvidence, Evidence, Finding, FindReport]
         );
     }
 

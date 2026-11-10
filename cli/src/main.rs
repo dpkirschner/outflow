@@ -1,12 +1,11 @@
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    account_display_label, activity, balance_history, evaluate_perks, flow_lanes, load_offers,
-    net_worth_change, parse_fixture, position_change, position_history, positions,
-    search_transactions, spend_by_category, summarize_balances, today_local, top_merchants,
-    ActivityFilter, Cap, CategorySource, Direction, FindingKind, Lane, MatchStatus, Money, Offer,
-    Period, PerkOptions, PositionFilter, PositionLens, Reward, SortKey, Store, TxnFilter, TxnFlag,
-    TxnQuery,
+    account_display_label, activity, balance_history, find, flow_lanes, net_worth_change,
+    parse_fixture, position_change, position_history, positions, search_transactions,
+    spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
+    CategorySource, Direction, Evidence, FindOptions, Lane, MatchStatus, Money, Offer, Period,
+    PositionFilter, PositionLens, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
@@ -302,18 +301,19 @@ pub(crate) enum Cmd {
         #[command(subcommand)]
         action: MatchCmd,
     },
-    /// Card offers worth acting on: available offers at merchants you already
-    /// pay, added offers charged to the wrong card, and added offers expiring
-    /// unused. Reads an offers TOML (see examples/amex-offers-4242.toml).
-    Perks {
-        /// Offers file, or a directory of them (local mode only; with --server
+    /// Find money: every Finding (card offers today), ranked by estimated
+    /// dollars per year over the 12 months ending with the period's last
+    /// month (default: this month). Card offers come from the offers TOML
+    /// file or folder (see examples/amex-offers-4242.toml); a bad file is an
+    /// error, so this also checks the files.
+    Find {
+        /// Offers file, or a folder of them (local mode only; with --server
         /// the server reads its own OUTFLOW_PERKS).
         #[arg(long, env = "OUTFLOW_PERKS")]
         file: Option<String>,
-        /// How far back to look for spending at an offer's merchant.
-        #[arg(long, default_value = "12mo", value_parser = ["3mo", "6mo", "12mo", "all"])]
-        lookback: String,
-        /// Warn about added offers expiring within this many days.
+        #[command(flatten)]
+        period: PeriodArgs,
+        /// Flag added offers expiring within this many days.
         #[arg(long, default_value_t = 14)]
         expiring_days: i64,
     },
@@ -930,17 +930,6 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Same windows as the server's `window_since` (~30.5-day months).
-fn lookback_since(window: &str, now: i64) -> Option<i64> {
-    const MONTH_SECS: i64 = 2_635_200;
-    match window {
-        "all" => None,
-        "3mo" => Some(now - 3 * MONTH_SECS),
-        "6mo" => Some(now - 6 * MONTH_SECS),
-        _ => Some(now - 12 * MONTH_SECS),
-    }
-}
-
 fn reward_label(o: &Offer) -> String {
     let mut s = match o.reward {
         Reward::Back(m) => format!("{} back", dollars(m.cents())),
@@ -968,27 +957,29 @@ fn reward_label(o: &Offer) -> String {
     s
 }
 
-fn cmd_perks(
+fn cmd_find(
     store: &Store,
     file: Option<String>,
-    lookback: &str,
+    period: &PeriodArgs,
     expiring_days: i64,
     json: bool,
 ) -> Result<(), String> {
-    let path = file.ok_or("no offers file: pass --file or set OUTFLOW_PERKS")?;
-    let cards = load_offers(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
-    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
-    let txns = store.all_transactions().map_err(|e| format!("{e}"))?;
-    let now = now_secs();
-    let opts = PerkOptions {
-        since: lookback_since(lookback, now),
+    let through = period.resolve()?.map_or(today_local(), |p| p.last_day());
+    let opts = FindOptions {
         expiring_days: expiring_days.max(0),
     };
-    let report = evaluate_perks(&cards, &accounts, &txns, now, &opts);
+    let path = file.map(std::path::PathBuf::from);
+    let report =
+        find(store, path.as_deref(), through, now_secs(), &opts).map_err(|e| e.to_string())?;
     if json {
         return json_out(&report);
     }
 
+    let w = &report.window;
+    println!("estimates over {} .. {}", w.start, w.last_day());
+    for n in &report.notes {
+        println!("note: {n}");
+    }
     for c in &report.cards {
         let acct = c.account_id.as_deref().unwrap_or("?");
         println!(
@@ -999,52 +990,38 @@ fn cmd_perks(
             println!("  ! {p}; only add-offer suggestions are possible");
         }
     }
-    let sections = [
-        (FindingKind::WrongCard, "CHARGED TO THE WRONG CARD"),
-        (FindingKind::Expiring, "ADDED, EXPIRING UNUSED"),
-        (FindingKind::AddOffer, "ADD THESE OFFERS"),
-    ];
     if report.findings.is_empty() {
-        println!("\nnothing to act on");
+        println!("\nnothing found");
+        return Ok(());
     }
-    for (kind, title) in sections {
-        let fs: Vec<_> = report.findings.iter().filter(|f| f.kind == kind).collect();
-        if fs.is_empty() {
-            continue;
+    println!("\nFINDINGS ({})", report.findings.len());
+    for f in &report.findings {
+        let value = match (f.est_cents_per_year, f.est_points_per_year) {
+            (c, 0) => format!("{}/yr", dollars(c)),
+            (0, p) => format!("{p} pts/yr"),
+            (c, p) => format!("{} + {p} pts/yr", dollars(c)),
+        };
+        println!("  {value:>14}  {:<10}  {}", f.kind.as_str(), f.action);
+        let Evidence::Offer(o) = &f.evidence;
+        let history = match (o.last_charge, o.typical_charge_cents) {
+            (Some(last), Some(typ)) => format!(
+                "{} charge{}, typical {}, last {}",
+                o.charges,
+                if o.charges == 1 { "" } else { "s" },
+                dollars(typ),
+                date_label(last)
+            ),
+            _ => "no charges in the window".to_string(),
+        };
+        let mut detail = format!("{history} · {}", reward_label(&o.offer));
+        if !o.matched_merchants.is_empty() {
+            detail.push_str(&format!(" · matched: {}", o.matched_merchants.join(", ")));
         }
-        println!("\n{title} ({})", fs.len());
-        for f in fs {
-            let value = match (f.est_cash_cents, f.est_points) {
-                (0, 0) => "-".to_string(),
-                (0, p) => format!("{p} pts"),
-                (c, 0) => dollars(c),
-                (c, p) => format!("{} + {p} pts", dollars(c)),
-            };
-            // Expiry is 23:59:59 local on the last day: its local day.
-            let expires = date_label(f.offer.expires);
-            let history = match (f.last_charge, f.typical_charge_cents) {
-                (Some(last), Some(typ)) => format!(
-                    "{} charge{}, typical {}, last {}",
-                    f.charges,
-                    if f.charges == 1 { "" } else { "s" },
-                    dollars(typ),
-                    date_label(last)
-                ),
-                _ => "no charges in lookback".to_string(),
-            };
-            println!(
-                "  {:<36} {:>10}  expires {expires} ({}d)  {history}",
-                f.offer.merchant, value, f.days_left
-            );
-            let mut detail = reward_label(&f.offer);
-            if !f.matched_merchants.is_empty() {
-                detail.push_str(&format!(" · matched: {}", f.matched_merchants.join(", ")));
-            }
-            if let Some(n) = &f.offer.note {
-                detail.push_str(&format!(" · {n}"));
-            }
-            println!("      {detail}");
+        if let Some(n) = &o.offer.note {
+            detail.push_str(&format!(" · {n}"));
         }
+        println!("  {:>14}  {detail}", "");
+        println!("  {:>14}  key {}", "", f.key);
     }
     Ok(())
 }
@@ -1899,11 +1876,11 @@ fn run() -> Result<(), String> {
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
         Cmd::Status { limit } => cmd_status(&store, limit, cli.json),
-        Cmd::Perks {
+        Cmd::Find {
             file,
-            lookback,
+            period,
             expiring_days,
-        } => cmd_perks(&store, file, &lookback, expiring_days, cli.json),
+        } => cmd_find(&store, file, &period, expiring_days, cli.json),
     }
 }
 
@@ -2074,6 +2051,7 @@ mod tests {
             &["outflow", "activity", "--until", "2026-11-01"],
             &["outflow", "holdings", "--history", "--period", "2026"],
             &["outflow", "balances", "--history", "--period", "this-year"],
+            &["outflow", "find", "--period", "last-month"],
         ] {
             assert!(Cli::try_parse_from(argv).is_ok(), "{argv:?}");
         }

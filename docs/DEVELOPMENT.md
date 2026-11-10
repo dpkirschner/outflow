@@ -58,7 +58,7 @@ Subcommands (`outflow <cmd> --help` is the authoritative list of flags):
 | `txns [--search --category --account --merchant --flag --lane --direction --uncategorized --posted-only --show-excluded --sort --asc --limit --offset --by-month]` | the transaction list; `--lane` = exactly the rows behind a `report --by monthly` figure; `--by-month` = their sum per month instead (`/flow/series`) |
 | `accounts [--all]` | one row per account (`--all` includes hidden) |
 | `matches list\|accept\|reject\|unaccept` | card-payment match review |
-| `perks [--file F --lookback 3mo\|6mo\|12mo\|all --expiring-days N]` | card offers vs spending |
+| `find [--file F --expiring-days N]` | Find money: every Finding ranked by $/yr over the 12 months ending with the period's last month (default this month); also validates the offers files |
 | `status [--limit N]` | what needs you (connections, matches to review, last sync), then sync runs |
 | `backup --to PATH` | a verified snapshot of the DB, encrypted with the same key, safe while the server runs; local only (see DEPLOYMENT §8) |
 

@@ -1,59 +1,55 @@
-//! Card offers: evaluate the offers file(s) named by `OUTFLOW_PERKS` against
-//! the archive. The file is re-read on every request — it's tiny and
-//! hand-edited (flip `added = true`), so edits apply without a restart.
+//! Find money: every Finding (core::find). The offers file(s) named by
+//! `OUTFLOW_PERKS` are re-read on every request: they're tiny and hand-edited
+//! (flip `added = true`), so edits apply without a restart.
 
 use axum::extract::{Query, State};
 use axum::routing::get;
 use axum::{Json, Router};
-use outflow_core::{evaluate_perks, load_offers, PerkOptions, PerksReport};
+use outflow_core::{find, today_local, FindOptions, FindReport, Period};
 use serde::Deserialize;
 use std::path::PathBuf;
 
-use crate::routes::window_since;
+use crate::routes::blank;
 use crate::state::{now_secs, with_store, ApiError, ApiResult, AppState};
 
 #[derive(Deserialize)]
-struct PerksParams {
-    /// History window for "do you shop here": `3mo`/`6mo`/`12mo`/`all`
-    /// (default 12mo).
-    lookback: Option<String>,
-    /// Warn about added offers expiring within this many days (default 14).
+struct FindParams {
+    period: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+    /// Flag added offers expiring within this many days (default 14).
     expiring_days: Option<i64>,
 }
 
-async fn perks(
+/// Every Finding, estimated over the 12 months ending with the period's last
+/// month (default: this month).
+async fn find_money(
     State(state): State<AppState>,
-    Query(p): Query<PerksParams>,
-) -> ApiResult<PerksReport> {
-    let path: PathBuf = state
-        .cfg
-        .perks_path
-        .clone()
-        .ok_or_else(|| ApiError::bad_request("card offers not configured: set OUTFLOW_PERKS"))?
-        .into();
-    let lookback = p.lookback.as_deref().unwrap_or("12mo");
-    if !matches!(lookback, "3mo" | "6mo" | "12mo" | "all") {
-        return Err(ApiError::bad_request(format!(
-            "bad lookback {lookback:?} (3mo|6mo|12mo|all)"
-        )));
-    }
-    let now = now_secs();
-    let opts = PerkOptions {
-        since: window_since(lookback, now),
+    Query(p): Query<FindParams>,
+) -> ApiResult<FindReport> {
+    let today = today_local();
+    let through = Period::resolve(
+        blank(p.period.as_deref()),
+        blank(p.since.as_deref()),
+        blank(p.until.as_deref()),
+        today,
+    )
+    .map_err(ApiError::bad_request)?
+    .map_or(today, |period| period.last_day());
+    let opts = FindOptions {
         expiring_days: p.expiring_days.unwrap_or(14).max(0),
     };
+    let path: Option<PathBuf> = state.cfg.perks_path.clone().map(PathBuf::from);
+    let now = now_secs();
     with_store(&state, move |s| {
-        let cards = load_offers(&path).map_err(|e| e.to_string())?;
-        let accounts = s.accounts().map_err(|e| e.to_string())?;
-        let txns = s.all_transactions().map_err(|e| e.to_string())?;
-        Ok(evaluate_perks(&cards, &accounts, &txns, now, &opts))
+        find(s, path.as_deref(), through, now, &opts).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/perks", get(perks))
+    Router::new().route("/find", get(find_money))
 }
 
 #[cfg(test)]
@@ -134,21 +130,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unconfigured_is_a_400() {
-        let (status, body) = get(app(None), "/perks").await;
-        assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert!(body["error"].as_str().unwrap().contains("OUTFLOW_PERKS"));
+    async fn unconfigured_offers_is_a_note() {
+        let (status, body) = get(app(None), "/find").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(body["notes"][0].as_str().unwrap().contains("OUTFLOW_PERKS"));
+        assert_eq!(body["findings"], serde_json::json!([]));
     }
 
     #[tokio::test]
-    async fn rejects_unknown_lookback() {
-        let (status, _) = get(app(Some("/nonexistent".into())), "/perks?lookback=2wk").await;
+    async fn rejects_a_bad_period() {
+        let (status, _) = get(app(None), "/find?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn evaluates_the_offers_file() {
-        let path = std::env::temp_dir().join(format!("outflow-perks-{}.toml", std::process::id()));
+        let path = std::env::temp_dir().join(format!("outflow-find-{}.toml", std::process::id()));
         std::fs::write(
             &path,
             r#"[card]
@@ -156,12 +153,12 @@ issuer = "American Express"
 mask = "4242"
 captured = 2026-01-01
 offers = [
-  { merchant = "Dropbox", pct = 40, max = "30.00", expires = 2099-12-31, match = ["dropbox"] },
+  { merchant = "Dropbox", back = "30.00", expires = 2099-12-31, match = ["dropbox"] },
 ]
 "#,
         )
         .unwrap();
-        let (status, body) = get(app(Some(path.display().to_string())), "/perks").await;
+        let (status, body) = get(app(Some(path.display().to_string())), "/find").await;
         std::fs::remove_file(&path).ok();
         assert_eq!(status, StatusCode::OK, "{body}");
         // No (4242) account seeded: reported, but AddOffer still works.
@@ -171,17 +168,20 @@ offers = [
             .contains("(4242)"));
         let f = &body["findings"][0];
         assert_eq!(f["kind"], "add_offer");
+        assert_eq!(f["key"], "add_offer:4242:dropbox");
+        assert_eq!(f["est_cents_per_year"], 3000);
+        assert_eq!(f["txn_ids"], serde_json::json!(["t1"]));
+        assert_eq!(f["evidence"]["source"], "offer");
         assert_eq!(
-            f["offer"]["reward"],
-            serde_json::json!({"kind": "pct", "value": 40})
+            f["evidence"]["offer"]["reward"],
+            serde_json::json!({"kind": "back", "value": 3000})
         );
-        assert_eq!(f["est_cash_cents"], 479);
-        assert_eq!(f["matched_merchants"][0], "Dropbox");
+        assert_eq!(f["evidence"]["matched_merchants"][0], "Dropbox");
     }
 
     #[tokio::test]
     async fn bad_offers_file_is_an_error() {
-        let (status, body) = get(app(Some("/nonexistent/perks.toml".into())), "/perks").await;
+        let (status, body) = get(app(Some("/nonexistent/perks.toml".into())), "/find").await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(body["error"]
             .as_str()

@@ -17,20 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{now_secs, with_store, ApiError, ApiResult, AppState};
 
-/// The perks lookback (`3mo`/`6mo`/`12mo`/`all`) → a `since` bound (epoch
-/// secs), with coarse ~30.5-day months.
-const MONTH_SECS: i64 = 2_635_200;
-pub fn window_since(window: &str, now: i64) -> Option<i64> {
-    match window {
-        "all" => None,
-        "3mo" => Some(now - 3 * MONTH_SECS),
-        "12mo" => Some(now - 12 * MONTH_SECS),
-        _ => Some(now - 6 * MONTH_SECS), // default 6mo
-    }
-}
-
 /// `None` for a missing or blank query value.
-fn blank(o: Option<&str>) -> Option<&str> {
+pub(crate) fn blank(o: Option<&str>) -> Option<&str> {
     o.map(str::trim).filter(|s| !s.is_empty())
 }
 

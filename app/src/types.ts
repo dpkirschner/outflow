@@ -1502,36 +1502,9 @@ export type Offer = {
   note: string | null,
 };
 
-export type FindingKind = "add_offer" | "wrong_card" | "expiring";
-
-export type Finding = {
-  kind: FindingKind,
-  card_mask: string,
-  offer: Offer,
-  /**
-   * Whole days until expiry (0 on the last day).
-   */
-  days_left: number,
-  /**
-   * The charges behind this finding: lookback history for `AddOffer` and
-   * `Expiring`, the off-card charges for `WrongCard`.
-   */
-  charges: number,
-  last_charge: number | null,
-  typical_charge_cents: number | null,
-  /**
-   * What the offer would have paid on those charges (`WrongCard`: what it
-   * would have added beyond what the card already earned).
-   */
-  est_cash_cents: number,
-  est_points: number,
-  txn_ids: Array<string>,
-  /**
-   * Distinct raw merchant strings the patterns caught — for checking them.
-   */
-  matched_merchants: Array<string>,
-};
-
+/**
+ * One card from the offers files, and whether it tied to an account.
+ */
 export type CardStatus = {
   issuer: string,
   mask: string,
@@ -1546,10 +1519,85 @@ export type CardStatus = {
   expired: number,
 };
 
-export type PerksReport = {
+export type FindingKind = "add_offer" | "wrong_card" | "expiring";
+
+export type OfferEvidence = {
+  issuer: string,
+  offer: Offer,
+  /**
+   * Whole days until expiry (0 on the last day).
+   */
+  days_left: number,
+  /**
+   * Charges behind the estimate: window history for `AddOffer` and
+   * `Expiring`, the off-card charges for `WrongCard`.
+   */
+  charges: number,
+  last_charge: number | null,
+  typical_charge_cents: number | null,
+  /**
+   * Distinct raw merchant strings the patterns caught, for checking them.
+   */
+  matched_merchants: Array<string>,
+};
+
+/**
+ * The source-specific detail behind a Finding.
+ */
+export type Evidence = { "source": "offer" } & OfferEvidence;
+
+/**
+ * One thing that would save or earn money.
+ */
+export type Finding = {
+  kind: FindingKind,
+  /**
+   * Stable across requests and syncs: `kind:card:subject`, e.g.
+   * `add_offer:4242:fubo`. Marks (Dismissed) key off it.
+   */
+  key: string,
+  /**
+   * What it's about, for display: the offer's merchant.
+   */
+  subject: string,
+  /**
+   * The card the action is on, by its last digits.
+   */
+  card_mask: string | null,
+  /**
+   * Estimated cash per year, in cents.
+   */
+  est_cents_per_year: number,
+  /**
+   * Estimated points per year, kept apart from cash.
+   */
+  est_points_per_year: number,
+  /**
+   * The transactions behind the estimate.
+   */
+  txn_ids: Array<string>,
+  /**
+   * The one thing to do about it.
+   */
+  action: string,
+  evidence: Evidence,
+};
+
+export type FindReport = {
+  /**
+   * The months the estimates read.
+   */
+  window: Period,
+  /**
+   * Every offers file's card, and whether it tied to an account.
+   */
   cards: Array<CardStatus>,
   /**
-   * Highest estimated cash first, then soonest expiry.
+   * Sources that couldn't run, in words (e.g. no offers configured).
+   */
+  notes: Array<string>,
+  /**
+   * Highest estimate first.
    */
   findings: Array<Finding>,
 };

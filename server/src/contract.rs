@@ -16,11 +16,12 @@ use outflow_core::balances::{
     AccountBalance, BalancesView, DayTotals, Group, GroupBalance, HoldingRow, PositionPoint,
     PositionRow, Totals,
 };
+use outflow_core::find::{Evidence, FindReport, Finding, FindingKind, OfferEvidence};
 use outflow_core::model::{
     Account, AccountKind, CategorySource, MatchConfidence, MatchStatus, PlaidItem, SyncEntry,
     Transaction, TxnFlag, TxnMatch,
 };
-use outflow_core::perks::{Cap, CardStatus, Finding, FindingKind, Offer, PerksReport, Reward};
+use outflow_core::perks::{Cap, CardStatus, Offer, Reward};
 use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, MovedLane, TxnPage};
 use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
 use outflow_core::stock::{
@@ -715,8 +716,13 @@ fn offer(reward: Reward, cap: Cap) -> Offer {
     }
 }
 
-fn perks_report() -> PerksReport {
-    PerksReport {
+fn find_report() -> FindReport {
+    FindReport {
+        window: outflow_core::Period {
+            kind: outflow_core::PeriodKind::Custom,
+            start: chrono::NaiveDate::from_ymd_opt(2025, 2, 1).unwrap(),
+            end: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+        },
         cards: vec![
             CardStatus {
                 issuer: "Demo Issuer".into(),
@@ -731,38 +737,55 @@ fn perks_report() -> PerksReport {
                 issuer: "Demo Issuer".into(),
                 mask: "9999".into(),
                 account_id: None,
-                problem: Some("no linked account ends in 9999".into()),
+                problem: Some("no account name ends in (9999)".into()),
                 offers: 0,
                 added: 0,
                 expired: 0,
             },
         ],
+        notes: vec![],
         findings: vec![
             Finding {
                 kind: FindingKind::AddOffer,
-                card_mask: "0000".into(),
-                offer: offer(Reward::Back(m(1_000)), Cap::None),
-                days_left: 30,
-                charges: 2,
-                last_charge: Some(T0 - 10 * DAY),
-                typical_charge_cents: Some(-6_000),
-                est_cash_cents: 1_000,
-                est_points: 0,
+                key: "add_offer:0000:sample-outfitters".into(),
+                subject: "Sample Outfitters".into(),
+                card_mask: Some("0000".into()),
+                est_cents_per_year: 3_000,
+                est_points_per_year: 0,
                 txn_ids: vec!["txn-demo-004".into(), "txn-demo-005".into()],
-                matched_merchants: vec!["Sample Outfitters".into()],
+                action: "Add the Sample Outfitters offer to the Demo Issuer card ending 0000 \
+                         (expires 2026-02-14)"
+                    .into(),
+                evidence: Evidence::Offer(OfferEvidence {
+                    issuer: "Demo Issuer".into(),
+                    offer: offer(Reward::Back(m(3_000)), Cap::None),
+                    days_left: 30,
+                    charges: 2,
+                    last_charge: Some(T0 - 10 * DAY),
+                    typical_charge_cents: Some(6_000),
+                    matched_merchants: vec!["SAMPLE OUTFITTERS".into()],
+                }),
             },
             Finding {
                 kind: FindingKind::Expiring,
-                card_mask: "0000".into(),
-                offer: offer(Reward::PtsPerDollar(3), Cap::Points(3_000)),
-                days_left: 4,
-                charges: 0,
-                last_charge: None,
-                typical_charge_cents: None,
-                est_cash_cents: 0,
-                est_points: 0,
-                txn_ids: vec![],
-                matched_merchants: vec![],
+                key: "expiring:0000:sample-outfitters".into(),
+                subject: "Sample Outfitters".into(),
+                card_mask: Some("0000".into()),
+                est_cents_per_year: 0,
+                est_points_per_year: 3_000,
+                txn_ids: vec!["txn-demo-004".into()],
+                action: "Use the Sample Outfitters offer on the Demo Issuer card ending 0000 \
+                         by 2026-01-19"
+                    .into(),
+                evidence: Evidence::Offer(OfferEvidence {
+                    issuer: "Demo Issuer".into(),
+                    offer: offer(Reward::PtsPerDollar(3), Cap::Points(3_000)),
+                    days_left: 4,
+                    charges: 1,
+                    last_charge: Some(T0 - 10 * DAY),
+                    typical_charge_cents: Some(6_000),
+                    matched_merchants: vec!["SAMPLE OUTFITTERS".into()],
+                }),
             },
         ],
     }
@@ -951,8 +974,8 @@ fn entries() -> Vec<(&'static str, String)> {
         ("CategorizeResult", j(categorize_result())),
         ("CategoryEdit", j(category_edit())),
         ("GroupEdit", j(group_edit())),
-        // perks_routes.rs
-        ("PerksReport", j(perks_report())),
+        // find_routes.rs
+        ("FindReport", j(find_report())),
         // plaid_routes.rs
         ("PlaidItem", j(plaid_item())),
         ("ExchangeResult", j(exchange_result())),

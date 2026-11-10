@@ -1,12 +1,14 @@
-//! Card offers (e.g. Amex Offers) matched against transaction history, to flag
-//! value being left on the table: an available offer at a merchant you already
-//! pay, an added offer whose merchant keeps getting charged to a different
-//! card, or an added offer about to expire unused. Pure — offers come from a
-//! hand-maintained TOML file (see `examples/amex-offers-4242.toml`), parsed and
-//! validated at the boundary like Plaid JSON.
+//! Card offers (e.g. Amex Offers), one source of [`crate::find`] Findings:
+//! an available offer at a merchant you already pay, an added offer whose
+//! merchant keeps getting charged to a different card, or an added offer
+//! about to expire unused. Pure: offers come from hand-kept TOML files (see
+//! `examples/amex-offers-4242.toml`), parsed and validated at the boundary
+//! like Plaid JSON.
 
+use crate::find::{self, Evidence, FindOptions, Finding, FindingKind, OfferEvidence};
 use crate::model::{mask_suffix, Account, AccountKind, Transaction, TxnFlag};
 use crate::money::Money;
+use crate::period::local_day;
 use crate::subscriptions::normalize_payee;
 use chrono::{Local, NaiveDate, TimeZone};
 use serde::{Deserialize, Serialize};
@@ -305,40 +307,7 @@ pub fn load_offers(path: &Path) -> Result<Vec<CardOffers>, PerksError> {
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-#[serde(rename_all = "snake_case")]
-pub enum FindingKind {
-    /// Not added, and you already spend at this merchant.
-    AddOffer,
-    /// Added, but the merchant was charged to a different card.
-    WrongCard,
-    /// Added, expiring soon, and it hasn't triggered on the card.
-    Expiring,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct Finding {
-    pub kind: FindingKind,
-    pub card_mask: String,
-    pub offer: Offer,
-    /// Whole days until expiry (0 on the last day).
-    pub days_left: i64,
-    /// The charges behind this finding: lookback history for `AddOffer` and
-    /// `Expiring`, the off-card charges for `WrongCard`.
-    pub charges: usize,
-    pub last_charge: Option<i64>,
-    pub typical_charge_cents: Option<i64>,
-    /// What the offer would have paid on those charges (`WrongCard`: what it
-    /// would have added beyond what the card already earned).
-    pub est_cash_cents: i64,
-    pub est_points: i64,
-    pub txn_ids: Vec<String>,
-    /// Distinct raw merchant strings the patterns caught — for checking them.
-    pub matched_merchants: Vec<String>,
-}
-
+/// One card from the offers files, and whether it tied to an account.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct CardStatus {
@@ -351,30 +320,6 @@ pub struct CardStatus {
     pub offers: usize,
     pub added: usize,
     pub expired: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
-pub struct PerksReport {
-    pub cards: Vec<CardStatus>,
-    /// Highest estimated cash first, then soonest expiry.
-    pub findings: Vec<Finding>,
-}
-
-pub struct PerkOptions {
-    /// History window start for "do you shop here" (`None` = all history).
-    pub since: Option<i64>,
-    /// Warn about added offers expiring within this many days.
-    pub expiring_days: i64,
-}
-
-impl Default for PerkOptions {
-    fn default() -> Self {
-        PerkOptions {
-            since: None,
-            expiring_days: 14,
-        }
-    }
 }
 
 /// The card's account: names ending in `" (<mask>)"`. Credit accounts win a
@@ -457,29 +402,47 @@ fn finding(
     let mut amounts: Vec<i64> = charges.iter().map(|t| t.amount.cents().abs()).collect();
     amounts.sort_unstable();
     let merchants: BTreeSet<String> = charges.iter().map(|t| t.merchant().to_string()).collect();
+    let on = format!("the {} card ending {}", card.issuer, card.mask);
+    let expires = local_day(offer.expires).format("%Y-%m-%d");
+    let m = &offer.merchant;
+    let action = match kind {
+        FindingKind::AddOffer => format!("Add the {m} offer to {on} (expires {expires})"),
+        FindingKind::WrongCard => format!("Charge {m} to {on} until {expires}"),
+        FindingKind::Expiring => format!("Use the {m} offer on {on} by {expires}"),
+    };
     Finding {
         kind,
-        card_mask: card.mask.clone(),
-        offer: offer.clone(),
-        days_left: (offer.expires - now).max(0) / DAY,
-        charges: charges.len(),
-        last_charge: charges.iter().map(|t| t.effective_date()).max(),
-        typical_charge_cents: amounts.get(amounts.len() / 2).copied(),
-        est_cash_cents: est.cash_cents,
-        est_points: est.points,
+        key: find::key(kind, &card.mask, m),
+        subject: m.clone(),
+        card_mask: Some(card.mask.clone()),
+        est_cents_per_year: est.cash_cents,
+        est_points_per_year: est.points,
         txn_ids: charges.iter().map(|t| t.id.clone()).collect(),
-        matched_merchants: merchants.into_iter().collect(),
+        action,
+        evidence: Evidence::Offer(OfferEvidence {
+            issuer: card.issuer.clone(),
+            offer: offer.clone(),
+            days_left: (offer.expires - now).max(0) / DAY,
+            charges: charges.len(),
+            last_charge: charges.iter().map(|t| t.effective_date()).max(),
+            typical_charge_cents: amounts.get(amounts.len() / 2).copied(),
+            matched_merchants: merchants.into_iter().collect(),
+        }),
     }
 }
 
-/// Match every card's live offers against the transaction history.
-pub fn evaluate(
+/// Match every card's live offers against the transactions. `window` is
+/// `[since, until)` epoch seconds: the history an offer's estimate replays.
+/// Offers pay at most once per their caps, so the window's replay is the
+/// yearly estimate as is. Unsorted and unfloored; `find` does both.
+pub(crate) fn findings(
     cards: &[CardOffers],
     accounts: &[Account],
     txns: &[Transaction],
+    window: (i64, i64),
     now: i64,
-    opts: &PerkOptions,
-) -> PerksReport {
+    opts: &FindOptions,
+) -> (Vec<CardStatus>, Vec<Finding>) {
     // Real spending only, oldest first, merchant normalized once.
     let mut spend: Vec<(&Transaction, String)> = txns
         .iter()
@@ -511,7 +474,7 @@ pub fn evaluate(
             let history: Vec<&Transaction> = matched
                 .iter()
                 .copied()
-                .filter(|t| opts.since.is_none_or(|s| t.effective_date() >= s))
+                .filter(|t| (window.0..window.1).contains(&t.effective_date()))
                 .collect();
 
             if !offer.added {
@@ -575,23 +538,54 @@ pub fn evaluate(
             }
         }
     }
-
-    findings.sort_by(|a, b| {
-        b.est_cash_cents
-            .cmp(&a.est_cash_cents)
-            .then(a.offer.expires.cmp(&b.offer.expires))
-            .then(a.offer.merchant.cmp(&b.offer.merchant))
-    });
-    PerksReport {
-        cards: statuses,
-        findings,
-    }
+    (statuses, findings)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::default_source;
+
+    /// The test-side view of one `findings` run.
+    struct Report {
+        cards: Vec<CardStatus>,
+        findings: Vec<Finding>,
+    }
+
+    struct PerkOptions {
+        since: Option<i64>,
+        expiring_days: i64,
+    }
+
+    impl Default for PerkOptions {
+        fn default() -> Self {
+            PerkOptions {
+                since: None,
+                expiring_days: 14,
+            }
+        }
+    }
+
+    fn evaluate(
+        cards: &[CardOffers],
+        accounts: &[Account],
+        txns: &[Transaction],
+        now: i64,
+        o: &PerkOptions,
+    ) -> Report {
+        let window = (o.since.unwrap_or(i64::MIN), i64::MAX);
+        let opts = FindOptions {
+            expiring_days: o.expiring_days,
+        };
+        let (cards, findings) = findings(cards, accounts, txns, window, now, &opts);
+        Report { cards, findings }
+    }
+
+    fn ev(f: &Finding) -> &OfferEvidence {
+        match &f.evidence {
+            Evidence::Offer(o) => o,
+        }
+    }
 
     fn day(y: i32, m: u32, d: u32) -> i64 {
         local_epoch(NaiveDate::from_ymd_opt(y, m, d).unwrap(), 12, 0, 0).unwrap()
@@ -745,12 +739,12 @@ mod tests {
         assert_eq!(r.findings.len(), 1);
         let f = &r.findings[0];
         assert_eq!(f.kind, FindingKind::AddOffer);
-        assert_eq!(f.charges, 4);
+        assert_eq!(ev(f).charges, 4);
         // 3 uses × $30, capped at $90.
-        assert_eq!(f.est_cash_cents, 9000);
-        assert_eq!(f.typical_charge_cents, Some(8499));
-        assert_eq!(f.matched_merchants, vec!["FUBO TV".to_string()]);
-        assert_eq!(f.days_left, 21);
+        assert_eq!(f.est_cents_per_year, 9000);
+        assert_eq!(ev(f).typical_charge_cents, Some(8499));
+        assert_eq!(ev(f).matched_merchants, vec!["FUBO TV".to_string()]);
+        assert_eq!(ev(f).days_left, 21);
     }
 
     #[test]
@@ -786,7 +780,7 @@ mod tests {
             day(2026, 10, 17),
             &PerkOptions::default(),
         );
-        assert_eq!(r.findings[0].est_cash_cents, 139); // 1999 × 7% = 139.93
+        assert_eq!(r.findings[0].est_cents_per_year, 139); // 1999 × 7% = 139.93
         let big = vec![txn("b", "visa", day(2026, 9, 1), -100000, "IKEA")];
         let r = evaluate(
             &[c],
@@ -795,7 +789,7 @@ mod tests {
             day(2026, 10, 17),
             &PerkOptions::default(),
         );
-        assert_eq!(r.findings[0].est_cash_cents, 2700);
+        assert_eq!(r.findings[0].est_cents_per_year, 2700);
     }
 
     #[test]
@@ -818,7 +812,7 @@ mod tests {
         let f = &r.findings[0];
         assert_eq!(f.kind, FindingKind::WrongCard);
         assert_eq!(f.txn_ids, vec!["after".to_string()]);
-        assert_eq!(f.est_cash_cents, 479);
+        assert_eq!(f.est_cents_per_year, 479);
     }
 
     #[test]
@@ -857,8 +851,8 @@ mod tests {
         );
         assert_eq!(r.findings.len(), 1);
         assert_eq!(r.findings[0].kind, FindingKind::Expiring);
-        assert_eq!(r.findings[0].offer.merchant, "CVS");
-        assert_eq!(r.findings[0].days_left, 6);
+        assert_eq!(r.findings[0].subject, "CVS");
+        assert_eq!(ev(&r.findings[0]).days_left, 6);
 
         // Triggered on the card → no warning. Expired → ignored entirely.
         let used = vec![txn("c", "amex", day(2026, 10, 20), -2000, "CVS")];
@@ -905,29 +899,39 @@ mod tests {
     }
 
     #[test]
-    fn findings_sort_by_cash_then_expiry() {
+    fn find_floors_sorts_and_windows_offer_findings() {
         let c = card(
             r#"{ merchant = "Small", back = "5.00", expires = 2026-10-20, match = ["small"] },
                { merchant = "Late", back = "50.00", expires = 2026-12-31, match = ["late"] },
-               { merchant = "Soon", back = "50.00", expires = 2026-11-01, match = ["soon"] }"#,
+               { merchant = "Soon", back = "50.00", expires = 2026-11-01, match = ["soon"] },
+               { merchant = "Old", back = "50.00", expires = 2026-12-31, match = ["old"] }"#,
         );
         let txns = vec![
             txn("1", "visa", day(2026, 9, 1), -1000, "SMALL"),
             txn("2", "visa", day(2026, 9, 1), -1000, "LATE"),
             txn("3", "visa", day(2026, 9, 1), -1000, "SOON"),
+            // Before the 12-month window (2025-11 .. 2026-10).
+            txn("4", "visa", day(2025, 10, 31), -1000, "OLD"),
         ];
-        let r = evaluate(
-            &[c],
+        let through = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap();
+        let r = find::evaluate(
+            Some(&[c]),
             &accounts(),
             &txns,
+            through,
             day(2026, 10, 17),
-            &PerkOptions::default(),
+            &FindOptions::default(),
         );
-        let order: Vec<&str> = r
-            .findings
-            .iter()
-            .map(|f| f.offer.merchant.as_str())
-            .collect();
-        assert_eq!(order, vec!["Soon", "Late", "Small"]);
+        let order: Vec<&str> = r.findings.iter().map(|f| f.subject.as_str()).collect();
+        // Small ($5) is under the floor; equal estimates go soonest expiry first.
+        assert_eq!(order, vec!["Soon", "Late"]);
+        let f = &r.findings[0];
+        assert_eq!(f.key, "add_offer:4242:soon");
+        assert_eq!(f.card_mask.as_deref(), Some("4242"));
+        assert_eq!(f.txn_ids, vec!["3".to_string()]);
+        assert!(f
+            .action
+            .starts_with("Add the Soon offer to the American Express card ending 4242"));
+        assert!(r.notes.is_empty());
     }
 }

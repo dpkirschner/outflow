@@ -132,15 +132,6 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
                 "{{\"version\":{version},\"upkeep\":{up},\"sync_log\":{log}}}"
             ))
         }
-        // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
-        Cmd::Perks {
-            lookback,
-            expiring_days,
-            ..
-        } => remote.get(&format!(
-            "/perks?lookback={}&expiring_days={expiring_days}",
-            enc(lookback)
-        )),
         Cmd::Report { .. }
         | Cmd::Balances { .. }
         | Cmd::Change { .. }
@@ -148,6 +139,7 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
         | Cmd::Holdings(_)
         | Cmd::Activity(_)
         | Cmd::Recurring { .. }
+        | Cmd::Find { .. }
         | Cmd::Txns(_) => unreachable!("handled by read_path"),
         Cmd::Matches { action } => match action {
             MatchCmd::List { status } => match status {
@@ -268,6 +260,17 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             let mut q = Vec::new();
             period_q(period.resolve_at(today)?, &mut q);
             with_query("/recurring", &q)
+        }
+        // The server reads its own OUTFLOW_PERKS; --file is local-only.
+        Cmd::Find {
+            period,
+            expiring_days,
+            ..
+        } => {
+            let mut q = Vec::new();
+            period_q(period.resolve_at(today)?, &mut q);
+            q.push(format!("expiring_days={expiring_days}"));
+            with_query("/find", &q)
         }
         Cmd::Txns(a) => {
             let mut q = Vec::new();

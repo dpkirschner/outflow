@@ -24,6 +24,8 @@ product direction behind these terms is in
   inflow is In comes from the bank's own category and the account type,
   never from the category you gave it, so a missing rule can't move a
   paycheck into Out.
+  Flow lists In by **source**: the payee (employer, bank paying
+  interest), since income mostly shares one category.
 - **Out**: spending. Refunds and returns net against Out in their
   category instead of counting as In.
 - **Moved**: money going between your own accounts. It is shown, never
@@ -141,6 +143,11 @@ product direction behind these terms is in
   periods swing (a rent week) is said, but not called unusual. A month check-in also judges every finished
   month the same way, so the month strip can mark the ones well below
   their usual.
+- **Category change**: a category's Out in a finished period at least
+  twice its usual or at most half of it, and at least $50 away. Flow says
+  it under the category ("about 3× usual · usually $60", "down 70%").
+  Uncategorized spend is never judged; it swings with how much is
+  categorized.
 - **Holdings**: the Stock screen.
 - **Find money**: every open Finding, ranked by estimated dollars per
   year, with a dismissed list.

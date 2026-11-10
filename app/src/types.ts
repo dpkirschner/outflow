@@ -317,6 +317,42 @@ export type MerchantSpend = {
 };
 
 /**
+ * One source of In money: a payee, as the In lane lists it.
+ */
+export type InSource = {
+  /**
+   * Normalized payee (`normalize_payee`), `merchant=` on `/transactions`.
+   * Empty for deposits with no payee at all.
+   */
+  merchant: string,
+  /**
+   * Display name (`display_merchant` of the first row seen).
+   */
+  name: string,
+  /**
+   * Money in, positive.
+   */
+  total_cents: number,
+  count: number,
+  /**
+   * The part of `total_cents` with no category yet.
+   */
+  uncategorized_cents: number,
+};
+
+/**
+ * One month of a picked figure (`pick_series`).
+ */
+export type SeriesMonth = {
+  year: number,
+  month: number,
+  /**
+   * Signed sum of the month's matching rows (outflows negative).
+   */
+  cents: number,
+};
+
+/**
  * The Flow lane (or Moved group) a transaction is counted in.
  */
 export type Lane = "in" | "out" | "card_payment" | "invest" | "save" | "loan_paydown" | "between";
@@ -647,6 +683,67 @@ export type NotCheckedReason = "week" | "in_progress" | "short_history" | "range
 export type NotChecked = {
   check: Check,
   reason: NotCheckedReason,
+};
+
+/**
+ * Which way a category is far from its usual.
+ */
+export type CategoryChange = "up" | "down";
+
+/**
+ * A category's spend against its usual, for the Flow Out lane's margin
+ * notes (GLOSSARY: Usual, Category change).
+ */
+export type CategoryVsUsual = {
+  /**
+   * `None` = uncategorized.
+   */
+  category: string | null,
+  /**
+   * Spend net of refunds this period, positive = money spent.
+   */
+  total_cents: number,
+  /**
+   * Number of purchases (refunds not counted).
+   */
+  count: number,
+  /**
+   * Median of the earlier periods' spend in this category, a period with
+   * none counting as $0. None without `USUAL_MIN_PERIODS` periods.
+   */
+  usual_cents: number | null,
+  /**
+   * Set when the spend is far from the usual (`CATEGORY_FAR_RATIO` and
+   * `CATEGORY_FAR_CENTS`) in a finished period. Never set while the period
+   * is in progress (one early trip reads as double a usual-to-date), nor
+   * on uncategorized spend, which swings with how much is categorized,
+   * not with what was bought.
+   */
+  change: CategoryChange | null,
+};
+
+/**
+ * Spend per category for one period, each against its usual.
+ */
+export type CategoriesVsUsual = {
+  period: Period,
+  /**
+   * The period's spelling (`2026-11`, `2026-W45`, `2026-Q4`).
+   */
+  label: string,
+  /**
+   * How many earlier periods the usual is taken over.
+   */
+  periods: number,
+  /**
+   * While the period is in progress: the last day each earlier period
+   * was cut to, `YYYY-MM-DD` (usual to date).
+   */
+  to_date: string | null,
+  /**
+   * Largest spend first, like `/spend/categories`.
+   */
+  items: Array<CategoryVsUsual>,
 };
 
 /**

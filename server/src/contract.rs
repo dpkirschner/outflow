@@ -145,6 +145,24 @@ fn merchant_spend() -> MerchantSpend {
     }
 }
 
+fn in_source() -> outflow_core::InSource {
+    outflow_core::InSource {
+        merchant: "sample employer payroll".into(),
+        name: "Sample Employer Payroll".into(),
+        total_cents: 310_000,
+        count: 2,
+        uncategorized_cents: 0,
+    }
+}
+
+fn series_month() -> outflow_core::SeriesMonth {
+    outflow_core::SeriesMonth {
+        year: 2026,
+        month: 10,
+        cents: -48_250,
+    }
+}
+
 fn flow_month() -> FlowMonth {
     FlowMonth {
         year: 2026,
@@ -242,6 +260,45 @@ fn recurring_view() -> RecurringView {
         monthly_total_cents: 7_800,
         items: vec![recurring_merchant(), slow],
         ignored: vec![ignored],
+    }
+}
+
+fn categories_vs_usual() -> outflow_core::CategoriesVsUsual {
+    use outflow_core::checkin::*;
+    use outflow_core::{Period, PeriodKind};
+    let row = |category: Option<&str>, total_cents, count, usual_cents, change| CategoryVsUsual {
+        category: category.map(Into::into),
+        total_cents,
+        count,
+        usual_cents,
+        change,
+    };
+    CategoriesVsUsual {
+        period: Period::containing(
+            PeriodKind::Month,
+            NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+        ),
+        label: "2026-10".into(),
+        periods: 12,
+        to_date: None,
+        items: vec![
+            row(
+                Some("Home Demo"),
+                42_000,
+                3,
+                Some(6_000),
+                Some(CategoryChange::Up),
+            ),
+            row(
+                Some("Dining Demo"),
+                6_000,
+                4,
+                Some(19_200),
+                Some(CategoryChange::Down),
+            ),
+            row(Some("Groceries Demo"), 38_200, 4, Some(38_200), None),
+            row(None, 1_500, 1, None, None),
+        ],
     }
 }
 
@@ -869,7 +926,10 @@ fn entries() -> Vec<(&'static str, String)> {
         ("CategorySpend", j(category_spend())),
         ("MerchantSpend", j(merchant_spend())),
         ("FlowMonth", j(flow_month())),
+        ("InSource", j(in_source())),
+        ("SeriesMonth", j(series_month())),
         ("CheckIn", j(checkin())),
+        ("CategoriesVsUsual", j(categories_vs_usual())),
         ("RecurringView", j(recurring_view())),
         ("BalancesView", j(balances_view())),
         ("DayTotals", j(day_totals())),

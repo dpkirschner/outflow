@@ -350,6 +350,13 @@ of the module.
     period. Needs 30 such charges; at most 5, largest first.
 - A check that didn't run is in `not_checked` with its reason (`week`,
   `in_progress`, `short_history`, `range`), so the screen can say why.
+- **Category changes** (`categories_vs_usual`, `/checkin/categories`, the
+  Flow Out lane): each category's Out for the period against its usual,
+  taken over the same earlier periods (a period with none in that
+  category counts as $0; usual to date while in progress). `change` is
+  `up` at ≥ 2x the usual, `down` at ≤ half, and only when the difference
+  is ≥ $50 (`CATEGORY_FAR_RATIO`, `CATEGORY_FAR_CENTS`). Not judged while
+  the period is in progress, nor for uncategorized spend.
 
 ## Card-payment matching (`core/src/transfers.rs`)
 

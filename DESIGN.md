@@ -429,7 +429,11 @@ those capsules.
   month with the short month and a short figure. Flow adds a 20px bar (Out,
   scaled to the largest month, from zero: months that spent about the same
   look about the same, because they did; the exact figure is on the button,
-  so no cropped baseline to exaggerate small changes); Holdings shows net worth at month end with
+  so no cropped baseline to exaggerate small changes). With a pick, Flow's
+  strip plots that figure instead, captioned to match ("Groceries per
+  month", "Save (out) per month"), so a month change becomes a comparison;
+  a month going against the figure's direction (refunds over spending)
+  shows its figure and no bar. Holdings shows net worth at month end with
   no bar (a level, not an amount to compare by height); Check-in shows
   earned − spent, signed and with no bar (it crosses zero); a finished
   month well below its usual (core's versus rule, the same one the answer

@@ -199,6 +199,7 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
                     "/merchants"
                 }
                 By::Monthly => "/flow",
+                By::Source => "/flow/in-sources",
             };
             with_query(path, &q)
         }
@@ -254,9 +255,14 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             let p = crate::change_period(period, today)?;
             with_query("/net-worth/change", &[p.to_query()])
         }
-        Cmd::Checkin { period } => {
+        Cmd::Checkin { period, categories } => {
             let p = crate::checkin_period(period.as_deref(), today)?;
-            with_query("/checkin", &[p.to_query()])
+            let path = if *categories {
+                "/checkin/categories"
+            } else {
+                "/checkin"
+            };
+            with_query(path, &[p.to_query()])
         }
         Cmd::Recurring { period, .. } => {
             let mut q = Vec::new();
@@ -304,7 +310,12 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             push("limit", a.limit.to_string());
             push("offset", a.offset.to_string());
             period_q(a.period.resolve_at(today)?, &mut q);
-            with_query("/transactions", &q)
+            let path = if a.by_month {
+                "/flow/series"
+            } else {
+                "/transactions"
+            };
+            with_query(path, &q)
         }
         _ => return Ok(None),
     };
@@ -363,6 +374,22 @@ mod tests {
             "/merchants?period=2026-Q3&limit=5"
         );
         assert_eq!(ok(&["report"]), "/spend/categories");
+        assert_eq!(
+            ok(&["report", "--by", "source", "--period", "last-month"]),
+            "/flow/in-sources?period=2026-10"
+        );
+    }
+
+    #[test]
+    fn checkin_categories_reads_its_own_path() {
+        assert_eq!(
+            ok(&["checkin", "--categories", "--period", "last-month"]),
+            "/checkin/categories?period=2026-10"
+        );
+        assert_eq!(
+            ok(&["checkin", "--period", "2026-10"]),
+            "/checkin?period=2026-10"
+        );
     }
 
     #[test]
@@ -438,6 +465,21 @@ mod tests {
             ]),
             "/transactions?lane=card_payment&uncategorized=true&direction=out\
              &sort=date&dir=desc&limit=50&offset=0&period=2026-11"
+        );
+    }
+
+    #[test]
+    fn txns_by_month_reads_the_series() {
+        assert_eq!(
+            ok(&[
+                "txns",
+                "--lane",
+                "out",
+                "--category",
+                "Groceries",
+                "--by-month"
+            ]),
+            "/flow/series?category=Groceries&lane=out&sort=date&dir=desc&limit=50&offset=0"
         );
     }
 

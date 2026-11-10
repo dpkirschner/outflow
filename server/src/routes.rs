@@ -455,54 +455,77 @@ impl TxnQueryParams {
     }
 }
 
+impl TxnQueryParams {
+    /// The core query these params name; a bad sort/lane/direction is a JSON
+    /// 400. Shared by `/transactions` and `/flow/series`.
+    fn into_query(self) -> Result<outflow_core::TxnQuery, ApiError> {
+        let p = self;
+        let sort = match p.sort.as_deref() {
+            None => outflow_core::SortKey::Date,
+            Some(s) => outflow_core::SortKey::from_str(s)
+                .ok_or_else(|| ApiError::bad_request(format!("bad sort key {s:?}")))?,
+        };
+        let lane = match p.lane.as_deref() {
+            None => None,
+            Some(s) => Some(
+                outflow_core::Lane::from_str(s)
+                    .ok_or_else(|| ApiError::bad_request(format!("bad lane {s:?}")))?,
+            ),
+        };
+        let direction = match p.direction.as_deref() {
+            None => None,
+            Some(s) => Some(
+                outflow_core::Direction::from_str(s)
+                    .ok_or_else(|| ApiError::bad_request(format!("bad direction {s:?}")))?,
+            ),
+        };
+        let mut filter = p.to_filter()?;
+        // Filtering BY a suppressed flag only makes sense with those rows visible.
+        if p.flag.is_some_and(TxnFlag::is_moved) {
+            filter.include_non_spending = true;
+        }
+        Ok(outflow_core::TxnQuery {
+            filter,
+            text: p.q.filter(|s| !s.trim().is_empty()),
+            account_id: p.account,
+            category: p.category,
+            source: p.source,
+            flag: p.flag,
+            lane,
+            merchant: p.merchant.filter(|s| !s.trim().is_empty()),
+            uncategorized: p.uncategorized.unwrap_or(false),
+            direction,
+            min_cents: p.min_cents,
+            max_cents: p.max_cents,
+            sort,
+            descending: p.dir.as_deref() != Some("asc"),
+            offset: p.offset.unwrap_or(0),
+            limit: p.limit.unwrap_or(100).min(1000),
+        })
+    }
+}
+
 async fn transactions(
     State(state): State<AppState>,
     Query(p): Query<TxnQueryParams>,
 ) -> ApiResult<outflow_core::TxnPage> {
-    let sort = match p.sort.as_deref() {
-        None => outflow_core::SortKey::Date,
-        Some(s) => outflow_core::SortKey::from_str(s)
-            .ok_or_else(|| ApiError::bad_request(format!("bad sort key {s:?}")))?,
-    };
-    let lane = match p.lane.as_deref() {
-        None => None,
-        Some(s) => Some(
-            outflow_core::Lane::from_str(s)
-                .ok_or_else(|| ApiError::bad_request(format!("bad lane {s:?}")))?,
-        ),
-    };
-    let direction = match p.direction.as_deref() {
-        None => None,
-        Some(s) => Some(
-            outflow_core::Direction::from_str(s)
-                .ok_or_else(|| ApiError::bad_request(format!("bad direction {s:?}")))?,
-        ),
-    };
-    let mut filter = p.to_filter()?;
-    // Filtering BY a suppressed flag only makes sense with those rows visible.
-    if p.flag.is_some_and(TxnFlag::is_moved) {
-        filter.include_non_spending = true;
-    }
-    let q = outflow_core::TxnQuery {
-        filter,
-        text: p.q.filter(|s| !s.trim().is_empty()),
-        account_id: p.account,
-        category: p.category,
-        source: p.source,
-        flag: p.flag,
-        lane,
-        merchant: p.merchant.filter(|s| !s.trim().is_empty()),
-        uncategorized: p.uncategorized.unwrap_or(false),
-        direction,
-        min_cents: p.min_cents,
-        max_cents: p.max_cents,
-        sort,
-        descending: p.dir.as_deref() != Some("asc"),
-        offset: p.offset.unwrap_or(0),
-        limit: p.limit.unwrap_or(100).min(1000),
-    };
+    let q = p.into_query()?;
     with_store(&state, move |s| {
         outflow_core::search_transactions(s, &q).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+/// A picked figure per month (core::pick_series): the rows `/transactions`
+/// would list for the same params, summed by month. Sort and paging ignored.
+async fn flow_series(
+    State(state): State<AppState>,
+    Query(p): Query<TxnQueryParams>,
+) -> ApiResult<Vec<outflow_core::SeriesMonth>> {
+    let q = p.into_query()?;
+    with_store(&state, move |s| {
+        outflow_core::pick_series(s, &q).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -516,6 +539,19 @@ async fn categorize(State(state): State<AppState>) -> ApiResult<CategorizeResult
             .map_err(|e| e.to_string())?;
         let remaining = s.uncategorized().map_err(|e| e.to_string())?.len();
         Ok(CategorizeResult { rule, remaining })
+    })
+    .await
+    .map(Json)
+}
+
+/// The In lane by payee (core::in_sources).
+async fn flow_in_sources(
+    State(state): State<AppState>,
+    Query(params): Query<FilterParams>,
+) -> ApiResult<Vec<outflow_core::InSource>> {
+    let f = params.to_filter()?;
+    with_store(&state, move |s| {
+        outflow_core::in_sources(s, &f).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -629,6 +665,24 @@ async fn checkin(
     let now = now_secs();
     with_store(&state, move |s| {
         outflow_core::checkin(s, period, today, now).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+/// Out per category for one period, each against its usual, for the Flow
+/// lane's margin notes (core::categories_vs_usual).
+async fn checkin_categories(
+    State(state): State<AppState>,
+    Query(p): Query<CheckinParams>,
+) -> ApiResult<outflow_core::CategoriesVsUsual> {
+    let today = today_local();
+    let period = match blank(p.period.as_deref()) {
+        Some(s) => Period::parse(s, today).map_err(ApiError::bad_request)?,
+        None => Period::current(outflow_core::PeriodKind::Month, today),
+    };
+    with_store(&state, move |s| {
+        outflow_core::categories_vs_usual(s, period, today).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -974,7 +1028,10 @@ pub fn api_router() -> Router<AppState> {
         .route("/spend/categories", get(spend_categories))
         .route("/merchants", get(merchants))
         .route("/flow", get(flow))
+        .route("/flow/in-sources", get(flow_in_sources))
+        .route("/flow/series", get(flow_series))
         .route("/checkin", get(checkin))
+        .route("/checkin/categories", get(checkin_categories))
         .route("/recurring", get(recurring))
         .route("/recurring/ignored", post(set_recurring_ignored))
         .route("/categories", get(categories))
@@ -1547,6 +1604,15 @@ mod tests {
         assert_eq!(ci["period"]["kind"], "Week");
         let (status, _) = get_json(app.clone(), "/checkin?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, src) = get_json(app.clone(), "/flow/in-sources?period=this-month").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(src.is_array());
+        let (status, cc) = get_json(app.clone(), "/checkin/categories?period=last-month").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cc["period"]["kind"], "Month");
+        assert!(cc["items"].is_array());
+        let (status, _) = get_json(app.clone(), "/checkin/categories?period=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // /holdings/change: one holdings snapshot (the second sync kept the
         // positions), so no period gain yet; basis and unrealized from it.
@@ -1738,9 +1804,28 @@ mod tests {
         assert_eq!(ids, ["sav-out"]);
         let ids = txn_ids(app.clone(), "/transactions?lane=in&uncategorized=true").await;
         assert_eq!(ids, ["pay"]);
-        let (status, body) = get_json(app, "/transactions?lane=bogus").await;
+        let (status, body) = get_json(app.clone(), "/transactions?lane=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(body["error"].as_str().unwrap().contains("bogus"));
+    }
+
+    /// /flow/series sums the same rows /transactions lists, by month.
+    #[tokio::test]
+    async fn flow_series_sums_the_listed_rows() {
+        let store = Store::open_in_memory().unwrap();
+        let mut g = txn("g", -2500, "Grocer");
+        g.category = Some("Groceries".into());
+        store
+            .upsert_transactions(&[txn("a", -5000, "Cafe"), txn("b", -1500, "Cafe"), g])
+            .unwrap();
+        let app = app_with_store(store);
+        let (status, body) = get_json(app.clone(), "/flow/series?lane=out&category=Dining").await;
+        assert_eq!(status, StatusCode::OK);
+        let months = body.as_array().unwrap();
+        assert_eq!(months.len(), 1);
+        assert_eq!(months[0]["cents"], -6500);
+        let (status, _) = get_json(app, "/flow/series?lane=bogus").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     /// /recurring lists a monthly merchant as of a chosen month, Ignore moves

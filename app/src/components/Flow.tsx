@@ -13,13 +13,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type MovedGroup, type SortKey } from "../api";
 import type {
   Account,
-  CategorySpend,
+  CategoryVsUsual,
+  InSource,
   Direction,
   FlowMonth,
   Lane,
   MovedFlow,
   RecurringMerchant,
   RecurringView,
+  SeriesMonth,
   TxnRow,
   CategoryUndo,
   GroupEdit,
@@ -35,19 +37,109 @@ import type { ToastMsg } from "./Toast";
 
 const PAGE = 50;
 const CATEGORY_PREVIEW = 6;
+const SOURCE_PREVIEW = 6;
 
-// The strip shows Out per month, scaled to the largest month.
-function stripMonths(months: FlowMonth[]): StripMonth[] {
-  const maxOut = Math.max(1, ...months.map((m) => m.out_cents));
-  return months.map((m) => ({
-    key: monthKey(m.year, m.month),
-    label: monthLabel(m.year, m.month),
-    short: monthLabelShort(m.year, m.month),
-    figure: formatCentsShort(-m.out_cents).replace("-", "\u2212"),
-    spoken: `${signedCents(-m.out_cents)} out`,
-    bar: Math.max(0, m.out_cents) / maxOut,
-    sofar: isCurrentMonth(m),
-  }));
+/** What the strip plots for a pick: a caption and each month's signed
+ *  figure (outflows negative). With no pick, Out. */
+interface StripPlot {
+  caption: string;
+  /** Signed cents per month; undefined = still loading (strip shows Out). */
+  value: (m: FlowMonth) => number | undefined;
+  /** +1 when the figure is money in, −1 when money out: bars grow that way. */
+  sign: 1 | -1;
+}
+
+const OUT_PLOT: StripPlot = {
+  caption: "Out per month",
+  value: (m) => -m.out_cents,
+  sign: -1,
+};
+
+/** A pick FlowMonth can't answer (a category, a merchant, Out's
+ *  uncategorized): the strip reads `/flow/series` for it. */
+function needsSeries(p: Pick): boolean {
+  return !!p.category || !!p.merchant || (!!p.uncategorized && p.lane !== "in");
+}
+
+/** The series request's identity: the pick's filter fields, nothing else. */
+function seriesKey(p: Pick): string {
+  return JSON.stringify([p.lane, p.direction, p.category, p.merchant, !!p.uncategorized]);
+}
+
+/** Which way a pick's money goes, for the strip's bars. */
+function pickSign(p: Pick): 1 | -1 {
+  if (p.direction) return p.direction === "in" ? 1 : -1;
+  return p.lane === "in" ? 1 : -1;
+}
+
+/** The pick's figure for one month, read from FlowMonth (lane picks). */
+function laneFigure(p: Pick, m: FlowMonth): number {
+  const mv = m.moved;
+  switch (p.lane) {
+    case "in":
+      return p.uncategorized ? m.in_uncategorized_cents : m.in_cents;
+    case "out":
+      return -m.out_cents;
+    case "card_payment":
+      if (p.direction === "out") return -mv.card_payment_bank_cents;
+      if (p.direction === "in") return mv.card_payment_card_cents;
+      return -mv.card_payment_cents;
+    default: {
+      const f = mv[p.lane];
+      if (p.direction === "out") return -f.out_cents;
+      if (p.direction === "in") return f.in_cents;
+      return f.in_cents - f.out_cents;
+    }
+  }
+}
+
+/** "Groceries per month", "Save (out) per month". */
+function plotCaption(p: Pick): string {
+  let what: string;
+  if (p.merchant) what = p.name ?? p.merchant;
+  else if (p.category) what = p.category;
+  else if (p.uncategorized) what = `${LANE_PATH[p.lane][0]} not yet categorized`;
+  else if (p.lane === "card_payment" && p.direction)
+    what = p.direction === "out" ? "Card payment from checking" : "Card payment into cards";
+  else {
+    what = LANE_PATH[p.lane][LANE_PATH[p.lane].length - 1];
+    if (p.direction && p.lane !== "in" && p.lane !== "out") {
+      what += p.direction === "out" ? " (out)" : " (back)";
+    }
+  }
+  return `${what} per month`;
+}
+
+function stripPlot(p: Pick | null, series: { key: string; data: SeriesMonth[] } | null): StripPlot {
+  if (!p) return OUT_PLOT;
+  const caption = plotCaption(p);
+  const sign = pickSign(p);
+  if (!needsSeries(p)) return { caption, sign, value: (m) => laneFigure(p, m) };
+  if (series?.key !== seriesKey(p)) return { ...OUT_PLOT, value: () => undefined };
+  const by = new Map(series.data.map((x) => [monthKey(x.year, x.month), x.cents]));
+  return { caption, sign, value: (m) => by.get(monthKey(m.year, m.month)) ?? 0 };
+}
+
+// One button per month, bars scaled to the plot's largest month. A month
+// against the plot's direction (refunds over spending) shows no bar.
+function stripMonths(months: FlowMonth[], plot: StripPlot): StripMonth[] {
+  const ready = months.every((m) => plot.value(m) !== undefined);
+  const p = ready ? plot : OUT_PLOT;
+  const figs = months.map((m) => (p.value(m) ?? 0) * p.sign);
+  const max = Math.max(1, ...figs);
+  const noun = p.caption.replace(/ per month$/, "");
+  return months.map((m, i) => {
+    const cents = p.value(m) ?? 0;
+    return {
+      key: monthKey(m.year, m.month),
+      label: monthLabel(m.year, m.month),
+      short: monthLabelShort(m.year, m.month),
+      figure: formatCentsShort(cents).replace("-", "\u2212"),
+      spoken: p === OUT_PLOT ? `${signedCents(cents)} out` : `${noun} ${signedCents(cents)}`,
+      bar: Math.max(0, figs[i]) / max,
+      sofar: isCurrentMonth(m),
+    };
+  });
 }
 
 export function monthKey(year: number, month: number): string {
@@ -173,7 +265,7 @@ const LANE_PATH: Record<Lane, string[]> = {
 
 /** "Moved › Save › back", for the chip and the empty state. */
 function pickLabel(p: Pick): string {
-  if (p.merchant && p.inMonth) return `Out › ${p.name ?? p.merchant}`;
+  if (p.merchant && p.inMonth) return `${LANE_PATH[p.lane][0]} › ${p.name ?? p.merchant}`;
   if (p.merchant) return `Recurring › ${p.name ?? p.merchant}`;
   const parts = [...LANE_PATH[p.lane]];
   if (p.uncategorized) parts.push("Not yet categorized");
@@ -204,8 +296,10 @@ export function Flow({
   initialPick?: Pick | null;
 }) {
   const [flow, setFlow] = useState<Load<FlowMonth[]>>({ state: "loading" });
-  const [cats, setCats] = useState<CategorySpend[] | null>(null);
+  const [cats, setCats] = useState<CategoryVsUsual[] | null>(null);
   const [allCats, setAllCats] = useState(false);
+  const [sources, setSources] = useState<InSource[] | null>(null);
+  const [allSources, setAllSources] = useState(false);
   // Survives a month change (Flow stays mounted); resets on leaving Flow.
   const [pick, setPick] = useState<Pick | null>(initialPick ?? null);
   const onPick = useCallback((p: Pick) => {
@@ -253,7 +347,7 @@ export function Flow({
   const loadCats = useCallback(async () => {
     if (!month) return;
     try {
-      setCats(await api.spendCategories({ period: month }));
+      setCats((await api.checkinCategories(month)).items);
     } catch (err) {
       setCats(null);
       notify({ kind: "err", text: `Couldn't load categories: ${errMessage(err)}` });
@@ -264,6 +358,21 @@ export function Flow({
     setCats(null);
     void loadCats();
   }, [loadCats]);
+
+  const loadSources = useCallback(async () => {
+    if (!month) return;
+    try {
+      setSources(await api.inSources({ period: month }));
+    } catch (err) {
+      setSources(null);
+      notify({ kind: "err", text: `Couldn't load In sources: ${errMessage(err)}` });
+    }
+  }, [month, notify]);
+
+  useEffect(() => {
+    setSources(null);
+    void loadSources();
+  }, [loadSources]);
 
   const [recurring, setRecurring] = useState<Load<RecurringView>>({ state: "loading" });
   const loadRecurring = useCallback(async () => {
@@ -280,8 +389,8 @@ export function Flow({
   }, [loadRecurring]);
 
   const refreshFigures = useCallback(async () => {
-    await Promise.all([loadFlow(), loadCats(), loadRecurring()]);
-  }, [loadFlow, loadCats, loadRecurring]);
+    await Promise.all([loadFlow(), loadCats(), loadSources(), loadRecurring()]);
+  }, [loadFlow, loadCats, loadSources, loadRecurring]);
 
   // Merchants ignored since the last toast that wasn't an ignore toast. The
   // app has one toast slot, so each Ignore replaces the previous toast; its
@@ -340,6 +449,33 @@ export function Flow({
     window.requestAnimationFrame(() => bringTableIntoView());
   }, [flow.state, month]);
 
+  // With a pick, the strip plots that figure per month. Lane picks read
+  // FlowMonth; the rest fetch their series once per pick (and again when the
+  // figures reload), not per month.
+  const [series, setSeries] = useState<{ key: string; data: SeriesMonth[] } | null>(null);
+  const wantSeries = pick && needsSeries(pick) ? pick : null;
+  const wantKey = wantSeries ? seriesKey(wantSeries) : null;
+  useEffect(() => {
+    if (!wantSeries || !wantKey || flow.state !== "ok") return;
+    let live = true;
+    api
+      .flowSeries({
+        includeNonSpending: true,
+        lane: wantSeries.lane,
+        direction: wantSeries.direction,
+        uncategorized: wantSeries.uncategorized,
+        category: wantSeries.category,
+        merchant: wantSeries.merchant,
+      })
+      .then((data) => live && setSeries({ key: wantKey, data }))
+      .catch((err) => live && notify({ kind: "err", text: `Couldn't load the month strip: ${errMessage(err)}` }));
+    return () => {
+      live = false;
+    };
+    // wantSeries is read through wantKey: same key, same request.
+  }, [wantKey, flow, notify]);
+  const strip = stripPlot(pick, series);
+
   // A merchant pick reads the recurring window, not the month.
   const range =
     pick?.merchant && !pick.inMonth && recurring.state === "ok"
@@ -394,8 +530,8 @@ export function Flow({
       }}
     >
       <MonthStrip
-        caption="Out per month"
-        months={stripMonths(months)}
+        caption={strip.caption}
+        months={stripMonths(months, strip)}
         selected={month}
         onSelect={onMonth}
       />
@@ -415,7 +551,14 @@ export function Flow({
           <Headline m={selected} />
 
           <div className="fl-lanes">
-            <InLane m={selected} pick={pick} onPick={onPick} />
+            <InLane
+              m={selected}
+              sources={sources}
+              all={allSources}
+              onToggleAll={() => setAllSources((a) => !a)}
+              pick={pick}
+              onPick={onPick}
+            />
             <OutLane
               m={selected}
               cats={cats}
@@ -596,7 +739,24 @@ function Row({
   );
 }
 
-function InLane({ m, pick, onPick }: { m: FlowMonth } & PickProps) {
+function InLane({
+  m,
+  sources,
+  all,
+  onToggleAll,
+  pick,
+  onPick,
+}: {
+  m: FlowMonth;
+  sources: InSource[] | null;
+  all: boolean;
+  onToggleAll: () => void;
+} & PickProps) {
+  const shown = sources ? (all ? sources : sources.slice(0, SOURCE_PREVIEW)) : [];
+  const hidden = sources ? sources.length - SOURCE_PREVIEW : 0;
+  const uncat = m.in_uncategorized_cents;
+  const uncatTarget: Pick = { lane: "in", uncategorized: true };
+  const uncatOn = samePick(pick, uncatTarget);
   return (
     <Lane
       id="in"
@@ -611,18 +771,59 @@ function InLane({ m, pick, onPick }: { m: FlowMonth } & PickProps) {
           onPick={onPick}
         />
       }
-      note="Income from outside your own accounts."
+      note={
+        <>
+          Income from outside your own accounts.
+          {uncat !== 0 && (
+            <>
+              {" "}
+              <button
+                className={`fl-pick fl-note-pick${uncatOn ? " on" : ""}`}
+                aria-pressed={uncatOn}
+                aria-label={`${signedCents(uncat)} not yet categorized: show these transactions`}
+                onClick={() => onPick(uncatTarget)}
+              >
+                {unsignedCents(uncat)}
+              </button>{" "}
+              not yet categorized.
+            </>
+          )}
+        </>
+      }
     >
-      <ul className="fl-rows">
-        <Row
-          label="Not yet categorized"
-          value={signedCents(m.in_uncategorized_cents)}
-          cents={m.in_uncategorized_cents}
-          target={{ lane: "in", uncategorized: true }}
-          pick={pick}
-          onPick={onPick}
-        />
-      </ul>
+      {sources === null ? (
+        <p className="fl-lane-note">Loading sources…</p>
+      ) : sources.length === 0 ? (
+        <p className="fl-lane-note">No income this month.</p>
+      ) : (
+        <>
+          <ul className="fl-rows" aria-label="In by source">
+            {shown.map((src) => {
+              const name = src.name || "No payee";
+              return (
+                <Row
+                  key={src.merchant}
+                  label={name}
+                  value={signedCents(src.total_cents)}
+                  cents={src.total_cents}
+                  target={
+                    src.merchant
+                      ? { lane: "in", merchant: src.merchant, name, inMonth: true }
+                      : undefined
+                  }
+                  pick={pick}
+                  onPick={onPick}
+                />
+              );
+            })}
+          </ul>
+          {hidden > 0 && (
+            <button className="fl-more" aria-expanded={all} onClick={onToggleAll}>
+              {all ? "Show fewer" : `Show all ${sources.length} sources`}
+            </button>
+          )}
+        </>
+      )}
     </Lane>
   );
 }
@@ -636,7 +837,7 @@ function OutLane({
   onPick,
 }: {
   m: FlowMonth;
-  cats: CategorySpend[] | null;
+  cats: CategoryVsUsual[] | null;
   all: boolean;
   onToggleAll: () => void;
 } & PickProps) {
@@ -672,8 +873,8 @@ function OutLane({
             {shown.map((c) => (
               <Row
                 key={c.category ?? "\u0000"}
-                label={c.category ?? "Not yet categorized"}
-                name={c.category ?? "Not yet categorized"}
+                label={<CategoryLabel c={c} />}
+                name={categorySpoken(c)}
                 value={signedCents(-c.total_cents)}
                 cents={c.total_cents}
                 target={
@@ -694,6 +895,45 @@ function OutLane({
         </>
       )}
     </Lane>
+  );
+}
+
+/** "about 7× usual" / "down 69%": a category far from its usual, in words
+ *  (Up in attention amber, Down quiet); null when it isn't. */
+function categoryNote(c: CategoryVsUsual): string | null {
+  const u = c.usual_cents;
+  if (c.change === null || u === null) return null;
+  if (c.change === "up") {
+    if (u <= 0) return "usually none";
+    const r = c.total_cents / u;
+    const x = r < 5 ? Math.round(r * 2) / 2 : Math.round(r);
+    return `about ${x}× usual`;
+  }
+  return `down ${Math.round(((u - c.total_cents) / u) * 100)}%`;
+}
+
+function categorySpoken(c: CategoryVsUsual): string {
+  const name = c.category ?? "Not yet categorized";
+  const note = categoryNote(c);
+  if (!note) return name;
+  const base = c.usual_cents! > 0 ? `, usually ${unsignedCents(c.usual_cents!)}` : "";
+  return `${name}, ${note}${base}`;
+}
+
+function CategoryLabel({ c }: { c: CategoryVsUsual }) {
+  const note = categoryNote(c);
+  return (
+    <>
+      {c.category ?? "Not yet categorized"}
+      {note && (
+        <span className={`fl-cat-note ${c.change}`}>
+          {note}
+          {c.usual_cents! > 0 && (
+            <span className="fl-cat-base"> · usually {unsignedCents(c.usual_cents!)}</span>
+          )}
+        </span>
+      )}
+    </>
   );
 }
 

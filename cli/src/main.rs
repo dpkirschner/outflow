@@ -211,8 +211,9 @@ pub(crate) enum Cmd {
         #[arg(long)]
         llm: bool,
     },
-    /// Spending by category or merchant, or the Flow lanes per month
-    /// (`--by monthly`: in / out / earned - spent / saved / Moved groups).
+    /// Spending by category or merchant, In by source (`--by source`: payee),
+    /// or the Flow lanes per month (`--by monthly`: in / out / earned -
+    /// spent / saved / Moved groups).
     /// No period = all of history.
     Report {
         #[arg(long, value_enum, default_value_t = By::Category)]
@@ -276,6 +277,10 @@ pub(crate) enum Cmd {
         /// 2026-11, 2026-W45, 2026-Q4, or this-/last- week|month|quarter.
         #[arg(long, value_name = "P")]
         period: Option<String>,
+        /// Out per category against each one's usual instead, marking those
+        /// at 2x or half their usual and $50 or more away.
+        #[arg(long)]
+        categories: bool,
     },
     /// Net worth change over a period (default this month), split into
     /// Markets (gain net of contributions on measurable investment accounts)
@@ -372,6 +377,10 @@ pub(crate) struct TxnsArgs {
     /// Rows to skip, for paging.
     #[arg(long, default_value_t = 0)]
     pub offset: usize,
+    /// The matching rows' sum per month instead of the rows (Flow's month
+    /// strip with a pick); sort and paging are ignored.
+    #[arg(long)]
+    pub by_month: bool,
 }
 
 #[derive(Subcommand)]
@@ -511,6 +520,8 @@ pub(crate) enum By {
     Category,
     Merchant,
     Monthly,
+    /// The In lane by payee.
+    Source,
 }
 
 fn dollars(cents: i64) -> String {
@@ -708,6 +719,16 @@ fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(
                 println!("{:>12}  {:<24} {}", dollars(r.total_cents), name, r.count);
             }
         }
+        By::Source => {
+            for r in outflow_core::in_sources(store, filter).map_err(|e| format!("{e}"))? {
+                let name = if r.name.is_empty() {
+                    "(no payee)"
+                } else {
+                    &r.name
+                };
+                println!("{:>12}  {:<28} {}", dollars(r.total_cents), name, r.count);
+            }
+        }
         By::Merchant => {
             for r in top_merchants(store, filter, top).map_err(|e| format!("{e}"))? {
                 println!(
@@ -875,6 +896,16 @@ fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
         offset: a.offset,
         limit: a.limit,
     };
+    if a.by_month {
+        let series = outflow_core::pick_series(store, &q).map_err(|e| format!("{e}"))?;
+        if json {
+            return json_out(&series);
+        }
+        for m in &series {
+            println!("{}-{:02}  {:>12}", m.year, m.month, dollars(m.cents));
+        }
+        return Ok(());
+    }
     let page = search_transactions(store, &q).map_err(|e| format!("{e}"))?;
     if json {
         return json_out(&page);
@@ -1104,6 +1135,40 @@ fn signed(cents: i64) -> String {
 /// `checkin`'s period: the one given, else this month.
 pub(crate) fn checkin_period(p: Option<&str>, today: NaiveDate) -> Result<Period, String> {
     Period::parse(p.unwrap_or("this-month"), today).map_err(|e| e.to_string())
+}
+
+fn cmd_checkin_categories(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
+    use outflow_core::CategoryChange;
+    let today = today_local();
+    let p = checkin_period(period, today)?;
+    let c = outflow_core::categories_vs_usual(store, p, today).map_err(|e| format!("{e}"))?;
+    if json {
+        return json_out(&c);
+    }
+    let by = c
+        .to_date
+        .as_deref()
+        .map(|d| format!(" by {d}"))
+        .unwrap_or_default();
+    println!(
+        "{}  out by category, usual{by} = median of {} earlier",
+        c.label, c.periods
+    );
+    for i in &c.items {
+        let usual = i.usual_cents.map(dollars).unwrap_or_else(|| "-".into());
+        let mark = match i.change {
+            Some(CategoryChange::Up) => "  UP",
+            Some(CategoryChange::Down) => "  down",
+            None => "",
+        };
+        println!(
+            "  {:<28} {:>12}   usual {:>12}{mark}",
+            i.category.as_deref().unwrap_or("(uncategorized)"),
+            dollars(i.total_cents),
+            usual
+        );
+    }
+    Ok(())
 }
 
 fn cmd_checkin(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
@@ -1825,7 +1890,11 @@ fn run() -> Result<(), String> {
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),
         Cmd::Change { period } => cmd_change(&store, &period, cli.json),
-        Cmd::Checkin { period } => cmd_checkin(&store, period.as_deref(), cli.json),
+        Cmd::Checkin {
+            period,
+            categories: true,
+        } => cmd_checkin_categories(&store, period.as_deref(), cli.json),
+        Cmd::Checkin { period, .. } => cmd_checkin(&store, period.as_deref(), cli.json),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),
         Cmd::Activity(args) => cmd_activity(&store, &args, cli.json),
         Cmd::Matches { action } => cmd_matches(&store, &action, cli.json),
@@ -1843,6 +1912,9 @@ fn report_json(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<
         By::Category => json_out(&spend_by_category(store, filter).map_err(|e| format!("{e}"))?),
         By::Merchant => json_out(&top_merchants(store, filter, top).map_err(|e| format!("{e}"))?),
         By::Monthly => json_out(&flow_lanes(store, filter).map_err(|e| format!("{e}"))?),
+        By::Source => {
+            json_out(&outflow_core::in_sources(store, filter).map_err(|e| format!("{e}"))?)
+        }
     }
 }
 

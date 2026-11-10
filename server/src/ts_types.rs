@@ -84,6 +84,8 @@ fn render() -> String {
                 TxnRow,
                 CategorySpend,
                 MerchantSpend,
+                InSource,
+                SeriesMonth,
                 Lane,
                 Direction,
                 MovedFlow,
@@ -112,7 +114,10 @@ fn render() -> String {
                 Unusual,
                 Check,
                 NotCheckedReason,
-                NotChecked
+                NotChecked,
+                CategoryChange,
+                CategoryVsUsual,
+                CategoriesVsUsual
             ]
         );
     }

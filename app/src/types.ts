@@ -1517,9 +1517,61 @@ export type CardStatus = {
   offers: number,
   added: number,
   expired: number,
+  /**
+   * The file has an `[earn]` table (else the card is left out of card
+   * choice).
+   */
+  earn: boolean,
 };
 
-export type FindingKind = "add_offer" | "wrong_card" | "expiring";
+/**
+ * One card's side of a card choice Finding.
+ */
+export type CardEarn = {
+  issuer: string,
+  mask: string,
+  /**
+   * The window's Out in this category on this card.
+   */
+  spend_cents: number,
+  charges: number,
+  /**
+   * Points per dollar here (percent for a cash back card).
+   */
+  rate: string,
+  /**
+   * `None` = cash back.
+   */
+  cents_per_point: string | null,
+  /**
+   * What a dollar earns here at `rate`, in hundredths of a percent.
+   */
+  return_bp: number,
+  /**
+   * Yearly spend left at `rate` for this category, when it is capped
+   * (the cap less this card's spend in other categories sharing it).
+   */
+  cap_left_cents: number | null,
+  /**
+   * What this card earned on its own spend here, in cents.
+   */
+  earned_cents: number,
+};
+
+export type EarnEvidence = {
+  /**
+   * The Plaid category the cards' rates were read for (detailed or
+   * primary, the finest any card names), or `default` for spending no
+   * card names.
+   */
+  category: string,
+  /**
+   * Every card with an earn table, highest `return_bp` first.
+   */
+  cards: Array<CardEarn>,
+};
+
+export type FindingKind = "add_offer" | "wrong_card" | "expiring" | "card_choice";
 
 export type OfferEvidence = {
   issuer: string,
@@ -1544,7 +1596,7 @@ export type OfferEvidence = {
 /**
  * The source-specific detail behind a Finding.
  */
-export type Evidence = { "source": "offer" } & OfferEvidence;
+export type Evidence = { "source": "offer" } & OfferEvidence | { "source": "earn" } & EarnEvidence;
 
 /**
  * One thing that would save or earn money.
@@ -1553,11 +1605,13 @@ export type Finding = {
   kind: FindingKind,
   /**
    * Stable across requests and syncs: `kind:card:subject`, e.g.
-   * `add_offer:4242:fubo`. Marks (Dismissed) key off it.
+   * `add_offer:4242:fubo`, `card_choice:4242:food-and-drink-groceries`.
+   * Marks (Dismissed) key off it.
    */
   key: string,
   /**
-   * What it's about, for display: the offer's merchant.
+   * What it's about, for display: the offer's merchant, or the category
+   * for card choice.
    */
   subject: string,
   /**
@@ -1565,13 +1619,20 @@ export type Finding = {
    */
   card_mask: string | null,
   /**
-   * Estimated cash per year, in cents.
+   * Estimated cash per year, in cents. Card choice compares cards in
+   * different currencies, so its whole estimate is here, points already
+   * valued at each card's `cents_per_point`.
    */
   est_cents_per_year: number,
   /**
-   * Estimated points per year, kept apart from cash.
+   * Estimated points per year, kept apart from cash (offers only).
    */
   est_points_per_year: number,
+  /**
+   * Cash plus points valued at the card's `cents_per_point` (one cent
+   * without an earn table). The floor and the ranking read this.
+   */
+  est_value_cents_per_year: number,
   /**
    * The transactions behind the estimate.
    */
@@ -1589,7 +1650,8 @@ export type FindReport = {
    */
   window: Period,
   /**
-   * Every offers file's card, and whether it tied to an account.
+   * Every offers file's card, whether it tied to an account, and whether
+   * it has an earn table.
    */
   cards: Array<CardStatus>,
   /**

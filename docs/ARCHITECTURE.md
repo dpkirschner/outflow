@@ -6,7 +6,7 @@ One Cargo workspace, four crates (`Cargo.toml` `members`):
 
 ```
 core/    pure domain — money, model, store, plaid, categorize, query,
-         subscriptions, recurring, transfers, find, perks, balances, activity, stock,
+         subscriptions, recurring, transfers, find, perks, earn, balances, activity, stock,
          checkin, llm, backup (verified DB snapshot), secrets (0600-file
          helpers). Zero
          GUI/network deps by default. Source of truth.
@@ -63,6 +63,8 @@ money            i64-cents type, decimal parse, display
           │                12 months, evidence txns, action, stable key), $25 floor
           ├ perks          card offers TOML → domain (parse_offers/load_offers);
           │                a Finding source: add-offer / wrong-card / expiring
+          ├ earn           a card's [earn] table (rates by Plaid category);
+          │                a Finding source: card choice
           ├ balances       current state + daily trend: account_cash (the one
           │                cash rule), summarize, history (per-sync snapshots),
           │                positions / position_history (flat per-holding rows,
@@ -173,7 +175,7 @@ files. See DEPLOYMENT.md for the full recipe.
 | Plaid access tokens | `OUTFLOW_PLAID_TOKENS_FILE` (default `<data-dir>/plaid-tokens.json`, 0600) | per-item map; never in the DB |
 | OAuth redirect | `OUTFLOW_OAUTH_REDIRECT` | `https://<mini>.<tailnet>.ts.net/oauth-return`, must match the Plaid dashboard exactly |
 | Sync cadence | `OUTFLOW_SYNC_INTERVAL_SECS` (default 21600) | background interval |
-| Card offers | `OUTFLOW_PERKS` | a card-offers TOML or a directory of them (see `examples/amex-offers-4242.toml`); not a secret. Unset → `/api/find` has no offer Findings and says so in `notes` |
+| Card offers | `OUTFLOW_PERKS` | a card-offers TOML or a directory of them, one per card, each optionally with the card's `[earn]` table (see `examples/amex-offers-4242.toml`); not a secret. Unset → `/api/find` has no offer or card choice Findings and says so in `notes` |
 | API auth | `OUTFLOW_API_TOKEN` or `OUTFLOW_API_TOKEN_FILE` (0600) | full access; setting it flips `/api/*` to deny-by-default. The SPA prompts once and keeps it in localStorage. Use `_FILE` under launchd — the plist is world-readable |
 | API auth (read-only) | `OUTFLOW_API_TOKEN_RO` or `OUTFLOW_API_TOKEN_RO_FILE` (0600) | `GET /api/*` only, 403 on mutations — for agents/scripts in CLI `--server` mode |
 | DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | env or 0600 file only — no keychain path |

@@ -4,6 +4,7 @@ pub mod balances;
 pub mod build;
 pub mod categorize;
 pub mod checkin;
+pub mod earn;
 pub mod find;
 pub mod llm;
 pub mod model;
@@ -34,6 +35,7 @@ pub use checkin::{
     CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual, UnusualKind,
     Usual,
 };
+pub use earn::{CardEarn, EarnEvidence, EarnTable, Rate};
 pub use find::{
     apply_dismissed, find, set_dismissed, Evidence, FindError, FindOptions, FindReport, Finding,
     FindingKind, OfferEvidence, MIN_EST_CENTS_PER_YEAR,

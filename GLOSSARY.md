@@ -112,6 +112,8 @@ product direction behind these terms is in
 - **Earn table**: what a card pays per Plaid category (detailed category
   first, then primary, then `default`), with a cents-per-point value and
   optional yearly caps. A card without one is left out of card choice.
+  Its cents-per-point value also prices that card's offer points; a
+  card without one counts a point as one cent.
 - **Steady**: a recurring merchant on a monthly or yearly cadence whose
   recent charges are within 5% of their median. A steady merchant is
   what the Subscriptions filter shows.

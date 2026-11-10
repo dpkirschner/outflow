@@ -866,7 +866,8 @@ export const findReport: FindReport = {
       "problem": null,
       "offers": 2,
       "added": 1,
-      "expired": 0
+      "expired": 0,
+      "earn": true
     },
     {
       "issuer": "Demo Issuer",
@@ -875,11 +876,55 @@ export const findReport: FindReport = {
       "problem": "no account name ends in (9999)",
       "offers": 0,
       "added": 0,
-      "expired": 0
+      "expired": 0,
+      "earn": false
     }
   ],
-  "notes": [],
+  "notes": [
+    "card choice leaves out cards with no [earn] table: 9999"
+  ],
   "findings": [
+    {
+      "kind": "card_choice",
+      "key": "card_choice:0000:food-and-drink-groceries",
+      "subject": "Food and drink groceries",
+      "card_mask": "0000",
+      "est_cents_per_year": 4500,
+      "est_points_per_year": 0,
+      "est_value_cents_per_year": 4500,
+      "txn_ids": [
+        "txn-demo-006"
+      ],
+      "action": "Charge food and drink groceries to the Demo Issuer card ending 0000",
+      "evidence": {
+        "source": "earn",
+        "category": "FOOD_AND_DRINK_GROCERIES",
+        "cards": [
+          {
+            "issuer": "Demo Issuer",
+            "mask": "0000",
+            "spend_cents": 0,
+            "charges": 0,
+            "rate": "4",
+            "cents_per_point": "1.25",
+            "return_bp": 500,
+            "cap_left_cents": 2500000,
+            "earned_cents": 0
+          },
+          {
+            "issuer": "Demo Bank",
+            "mask": "1111",
+            "spend_cents": 150000,
+            "charges": 1,
+            "rate": "2",
+            "cents_per_point": null,
+            "return_bp": 200,
+            "cap_left_cents": null,
+            "earned_cents": 3000
+          }
+        ]
+      }
+    },
     {
       "kind": "add_offer",
       "key": "add_offer:0000:sample-outfitters",
@@ -887,6 +932,7 @@ export const findReport: FindReport = {
       "card_mask": "0000",
       "est_cents_per_year": 3000,
       "est_points_per_year": 0,
+      "est_value_cents_per_year": 3000,
       "txn_ids": [
         "txn-demo-004",
         "txn-demo-005"
@@ -931,6 +977,7 @@ export const findReport: FindReport = {
       "card_mask": "0000",
       "est_cents_per_year": 0,
       "est_points_per_year": 3000,
+      "est_value_cents_per_year": 3750,
       "txn_ids": [
         "txn-demo-004"
       ],

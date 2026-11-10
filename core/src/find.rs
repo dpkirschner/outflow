@@ -1,16 +1,18 @@
 //! Find money: one [`Finding`] type for everything that would save or earn
-//! money, from several sources. Today the only source is card offers
-//! ([`crate::perks`]); card choice and subscriptions come next (ADR 0001,
-//! amendment 2026-11-09).
+//! money, from several sources: card offers ([`crate::perks`]) and card
+//! choice ([`crate::earn`]); subscriptions come next (ADR 0001, amendment
+//! 2026-11-09).
 //!
 //! Every estimate is in dollars per year, read off the 12 calendar months
 //! ending with the chosen month (the same window as the recurring list).
-//! Findings under [`MIN_EST_CENTS_PER_YEAR`] are dropped.
+//! Findings whose [`Finding::est_value_cents_per_year`] is under
+//! [`MIN_EST_CENTS_PER_YEAR`] are dropped.
 //!
 //! A Finding marked Dismissed moves to [`FindReport::dismissed`] and comes
 //! back on its own only when its estimate more than doubles the one it had
 //! when dismissed ([`apply_dismissed`]).
 
+use crate::earn::{self, EarnEvidence};
 use crate::model::{Account, Transaction};
 use crate::period::{Period, PeriodKind};
 use crate::perks::{self, CardOffers, CardStatus, Offer, PerksError};
@@ -20,9 +22,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Findings estimated under this (cents per year) are dropped. Until earn
-/// tables give points a value (ho-2mj.16), a point counts as one cent for
-/// this floor only; points are never converted anywhere else.
+/// Findings whose value (cash plus points at the card's earn-table
+/// `cents_per_point`, one cent when its file has no `[earn]` table) is under
+/// this many cents per year are dropped. Expiring offers included.
 pub const MIN_EST_CENTS_PER_YEAR: i64 = 2_500;
 
 /// How many calendar months the estimates read.
@@ -38,6 +40,9 @@ pub enum FindingKind {
     WrongCard,
     /// An added offer about to expire before it has paid out.
     Expiring,
+    /// A category charged to a card that earns less on it than another
+    /// card you hold.
+    CardChoice,
 }
 
 impl FindingKind {
@@ -47,6 +52,7 @@ impl FindingKind {
             FindingKind::AddOffer => "add_offer",
             FindingKind::WrongCard => "wrong_card",
             FindingKind::Expiring => "expiring",
+            FindingKind::CardChoice => "card_choice",
         }
     }
 }
@@ -57,16 +63,23 @@ impl FindingKind {
 pub struct Finding {
     pub kind: FindingKind,
     /// Stable across requests and syncs: `kind:card:subject`, e.g.
-    /// `add_offer:4242:fubo`. Marks (Dismissed) key off it.
+    /// `add_offer:4242:fubo`, `card_choice:4242:food-and-drink-groceries`.
+    /// Marks (Dismissed) key off it.
     pub key: String,
-    /// What it's about, for display: the offer's merchant.
+    /// What it's about, for display: the offer's merchant, or the category
+    /// for card choice.
     pub subject: String,
     /// The card the action is on, by its last digits.
     pub card_mask: Option<String>,
-    /// Estimated cash per year, in cents.
+    /// Estimated cash per year, in cents. Card choice compares cards in
+    /// different currencies, so its whole estimate is here, points already
+    /// valued at each card's `cents_per_point`.
     pub est_cents_per_year: i64,
-    /// Estimated points per year, kept apart from cash.
+    /// Estimated points per year, kept apart from cash (offers only).
     pub est_points_per_year: i64,
+    /// Cash plus points valued at the card's `cents_per_point` (one cent
+    /// without an earn table). The floor and the ranking read this.
+    pub est_value_cents_per_year: i64,
     /// The transactions behind the estimate.
     pub txn_ids: Vec<String>,
     /// The one thing to do about it.
@@ -80,6 +93,7 @@ pub struct Finding {
 #[serde(tag = "source", rename_all = "snake_case")]
 pub enum Evidence {
     Offer(OfferEvidence),
+    Earn(EarnEvidence),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -103,7 +117,8 @@ pub struct OfferEvidence {
 pub struct FindReport {
     /// The months the estimates read.
     pub window: Period,
-    /// Every offers file's card, and whether it tied to an account.
+    /// Every offers file's card, whether it tied to an account, and whether
+    /// it has an earn table.
     pub cards: Vec<CardStatus>,
     /// Sources that couldn't run, in words (e.g. no offers configured).
     pub notes: Vec<String>,
@@ -171,16 +186,24 @@ pub fn evaluate(
     let window = window(through);
     let mut notes = Vec::new();
     let (cards, mut findings) = match offers {
-        Some(cards) => perks::findings(cards, accounts, txns, window.bounds(), now, opts),
+        Some(cards) => {
+            let (status, mut found) =
+                perks::findings(cards, accounts, txns, window.bounds(), now, opts);
+            let (choice, choice_notes) = earn::findings(cards, accounts, txns, window.bounds());
+            found.extend(choice);
+            notes.extend(choice_notes);
+            (status, found)
+        }
         None => {
             notes.push("card offers not configured: set OUTFLOW_PERKS".to_string());
             (Vec::new(), Vec::new())
         }
     };
-    findings.retain(|f| f.est_cents_per_year + f.est_points_per_year >= MIN_EST_CENTS_PER_YEAR);
+    findings.retain(|f| f.est_value_cents_per_year >= MIN_EST_CENTS_PER_YEAR);
     findings.sort_by(|a, b| {
-        b.est_cents_per_year
-            .cmp(&a.est_cents_per_year)
+        b.est_value_cents_per_year
+            .cmp(&a.est_value_cents_per_year)
+            .then(b.est_cents_per_year.cmp(&a.est_cents_per_year))
             .then(b.est_points_per_year.cmp(&a.est_points_per_year))
             .then(days_left(a).cmp(&days_left(b)))
             .then(a.key.cmp(&b.key))
@@ -196,7 +219,8 @@ pub fn evaluate(
 
 /// Move every Finding with a Dismissed mark to `report.dismissed`, unless
 /// its estimate now more than doubles the one it had when dismissed. Cash
-/// and points add up as they do for the floor.
+/// and points are summed as stored on the mark (a point as one cent), so a
+/// change in `cents_per_point` doesn't bring a Finding back.
 pub fn apply_dismissed(report: &mut FindReport, marks: &HashMap<String, DismissedMark>) {
     let (dismissed, open) = std::mem::take(&mut report.findings)
         .into_iter()
@@ -213,6 +237,7 @@ pub fn apply_dismissed(report: &mut FindReport, marks: &HashMap<String, Dismisse
 fn days_left(f: &Finding) -> i64 {
     match &f.evidence {
         Evidence::Offer(o) => o.days_left,
+        Evidence::Earn(_) => i64::MAX,
     }
 }
 
@@ -320,6 +345,7 @@ mod tests {
             card_mask: None,
             est_cents_per_year: cents,
             est_points_per_year: points,
+            est_value_cents_per_year: cents + points,
             txn_ids: vec![],
             action: String::new(),
             evidence: Evidence::Offer(OfferEvidence {

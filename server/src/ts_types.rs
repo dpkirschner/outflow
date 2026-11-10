@@ -202,6 +202,12 @@ fn render() -> String {
         decls!(&cfg, out, [Reward, Cap, Offer, CardStatus]);
     }
 
+    // --- core::earn ---
+    {
+        use outflow_core::earn::*;
+        decls!(&cfg, out, [CardEarn, EarnEvidence]);
+    }
+
     // --- core::find ---
     {
         use outflow_core::find::*;

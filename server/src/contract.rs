@@ -16,6 +16,7 @@ use outflow_core::balances::{
     AccountBalance, BalancesView, DayTotals, Group, GroupBalance, HoldingRow, PositionPoint,
     PositionRow, Totals,
 };
+use outflow_core::earn::{CardEarn, EarnEvidence, Rate};
 use outflow_core::find::{Evidence, FindReport, Finding, FindingKind, OfferEvidence};
 use outflow_core::model::{
     Account, AccountKind, CategorySource, MatchConfidence, MatchStatus, PlaidItem, SyncEntry,
@@ -732,6 +733,7 @@ fn find_report() -> FindReport {
                 offers: 2,
                 added: 1,
                 expired: 0,
+                earn: true,
             },
             CardStatus {
                 issuer: "Demo Issuer".into(),
@@ -741,10 +743,50 @@ fn find_report() -> FindReport {
                 offers: 0,
                 added: 0,
                 expired: 0,
+                earn: false,
             },
         ],
-        notes: vec![],
+        notes: vec!["card choice leaves out cards with no [earn] table: 9999".into()],
         findings: vec![
+            Finding {
+                kind: FindingKind::CardChoice,
+                key: "card_choice:0000:food-and-drink-groceries".into(),
+                subject: "Food and drink groceries".into(),
+                card_mask: Some("0000".into()),
+                est_cents_per_year: 4_500,
+                est_points_per_year: 0,
+                est_value_cents_per_year: 4_500,
+                txn_ids: vec!["txn-demo-006".into()],
+                action: "Charge food and drink groceries to the Demo Issuer card ending 0000"
+                    .into(),
+                evidence: Evidence::Earn(EarnEvidence {
+                    category: "FOOD_AND_DRINK_GROCERIES".into(),
+                    cards: vec![
+                        CardEarn {
+                            issuer: "Demo Issuer".into(),
+                            mask: "0000".into(),
+                            spend_cents: 0,
+                            charges: 0,
+                            rate: Rate::from_thousandths(4_000),
+                            cents_per_point: Some(Rate::from_thousandths(1_250)),
+                            return_bp: 500,
+                            cap_left_cents: Some(2_500_000),
+                            earned_cents: 0,
+                        },
+                        CardEarn {
+                            issuer: "Demo Bank".into(),
+                            mask: "1111".into(),
+                            spend_cents: 150_000,
+                            charges: 1,
+                            rate: Rate::from_thousandths(2_000),
+                            cents_per_point: None,
+                            return_bp: 200,
+                            cap_left_cents: None,
+                            earned_cents: 3_000,
+                        },
+                    ],
+                }),
+            },
             Finding {
                 kind: FindingKind::AddOffer,
                 key: "add_offer:0000:sample-outfitters".into(),
@@ -752,6 +794,7 @@ fn find_report() -> FindReport {
                 card_mask: Some("0000".into()),
                 est_cents_per_year: 3_000,
                 est_points_per_year: 0,
+                est_value_cents_per_year: 3_000,
                 txn_ids: vec!["txn-demo-004".into(), "txn-demo-005".into()],
                 action: "Add the Sample Outfitters offer to the Demo Issuer card ending 0000 \
                          (expires 2026-02-14)"
@@ -773,6 +816,7 @@ fn find_report() -> FindReport {
                 card_mask: Some("0000".into()),
                 est_cents_per_year: 0,
                 est_points_per_year: 3_000,
+                est_value_cents_per_year: 3_750,
                 txn_ids: vec!["txn-demo-004".into()],
                 action: "Use the Sample Outfitters offer on the Demo Issuer card ending 0000 \
                          by 2026-01-19"

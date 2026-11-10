@@ -996,8 +996,17 @@ fn cmd_find(
     for c in &report.cards {
         let acct = c.account_id.as_deref().unwrap_or("?");
         println!(
-            "card {} ({}): {} offers, {} added, {} expired, account {acct}",
-            c.mask, c.issuer, c.offers, c.added, c.expired
+            "card {} ({}): {} offers, {} added, {} expired, {}, account {acct}",
+            c.mask,
+            c.issuer,
+            c.offers,
+            c.added,
+            c.expired,
+            if c.earn {
+                "earn table"
+            } else {
+                "no earn table"
+            }
         );
         if let Some(p) = &c.problem {
             println!("  ! {p}; only add-offer suggestions are possible");
@@ -1023,8 +1032,39 @@ fn print_findings(findings: &[outflow_core::Finding]) {
             (0, p) => format!("{p} pts/yr"),
             (c, p) => format!("{} + {p} pts/yr", dollars(c)),
         };
-        println!("  {value:>14}  {:<10}  {}", f.kind.as_str(), f.action);
-        let Evidence::Offer(o) = &f.evidence;
+        println!("  {value:>14}  {:<11}  {}", f.kind.as_str(), f.action);
+        let o = match &f.evidence {
+            Evidence::Offer(o) => o,
+            Evidence::Earn(e) => {
+                let cards: Vec<String> = e
+                    .cards
+                    .iter()
+                    .map(|c| {
+                        let rate = match c.cents_per_point {
+                            Some(v) => format!("{}x at {v}¢", c.rate),
+                            None => format!("{}%", c.rate),
+                        };
+                        format!(
+                            "{} {rate} = {}%: {} spent",
+                            c.mask,
+                            Money::from_cents(c.return_bp).to_display(),
+                            dollars(c.spend_cents)
+                        )
+                    })
+                    .collect();
+                println!("  {:>14}  {} · {}", "", e.category, cards.join(" · "));
+                println!("  {:>14}  key {}", "", f.key);
+                continue;
+            }
+        };
+        // Points valued off 1¢ (the card's earn table says what they're worth).
+        if f.est_value_cents_per_year != f.est_cents_per_year + f.est_points_per_year {
+            println!(
+                "  {:>14}  worth about {}/yr at the card's point value",
+                "",
+                dollars(f.est_value_cents_per_year)
+            );
+        }
         let history = match (o.last_charge, o.typical_charge_cents) {
             (Some(last), Some(typ)) => format!(
                 "{} charge{}, typical {}, last {}",

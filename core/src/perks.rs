@@ -3,8 +3,10 @@
 //! merchant keeps getting charged to a different card, or an added offer
 //! about to expire unused. Pure: offers come from hand-kept TOML files (see
 //! `examples/amex-offers-4242.toml`), parsed and validated at the boundary
-//! like Plaid JSON.
+//! like Plaid JSON. A file may also carry the card's `[earn]` table, which
+//! [`crate::earn`] reads for card choice.
 
+use crate::earn::{self, EarnTable};
 use crate::find::{self, Evidence, FindOptions, Finding, FindingKind, OfferEvidence};
 use crate::model::{mask_suffix, Account, AccountKind, Transaction, TxnFlag};
 use crate::money::Money;
@@ -113,12 +115,24 @@ pub struct CardOffers {
     /// toward an offer (an offer only applies after it's added).
     pub captured: i64,
     pub offers: Vec<Offer>,
+    /// What the card earns per category; `None` leaves it out of card choice.
+    pub earn: Option<EarnTable>,
+}
+
+impl CardOffers {
+    /// Cents per point: the earn table's value, else 1.
+    pub fn point_value(&self) -> earn::Rate {
+        self.earn
+            .as_ref()
+            .map_or(earn::Rate::ONE, EarnTable::point_value)
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawFile {
     card: RawCard,
+    earn: Option<earn::RawEarn>,
 }
 
 #[derive(Deserialize)]
@@ -260,6 +274,11 @@ fn convert_offer(r: RawOffer) -> Result<Offer, String> {
 pub fn parse_offers(src: &str) -> Result<CardOffers, PerksError> {
     let raw: RawFile = toml::from_str(src).map_err(|e| PerksError::Toml(e.to_string()))?;
     let card = raw.card;
+    let earn = raw
+        .earn
+        .map(earn::convert)
+        .transpose()
+        .map_err(|e| PerksError::Toml(format!("earn: {e}")))?;
     let mask = card.mask.trim().to_string();
     if mask.is_empty() {
         return Err(PerksError::Toml("card.mask is empty".into()));
@@ -280,6 +299,7 @@ pub fn parse_offers(src: &str) -> Result<CardOffers, PerksError> {
         mask,
         captured,
         offers,
+        earn,
     })
 }
 
@@ -320,11 +340,14 @@ pub struct CardStatus {
     pub offers: usize,
     pub added: usize,
     pub expired: usize,
+    /// The file has an `[earn]` table (else the card is left out of card
+    /// choice).
+    pub earn: bool,
 }
 
 /// The card's account: names ending in `" (<mask>)"`. Credit accounts win a
 /// tie with other kinds; any remaining ambiguity is reported, not guessed.
-fn resolve_card(mask: &str, accounts: &[Account]) -> Result<String, String> {
+pub(crate) fn resolve_card(mask: &str, accounts: &[Account]) -> Result<String, String> {
     let hits: Vec<&Account> = accounts
         .iter()
         .filter(|a| mask_suffix(&a.name).map(|m| m.trim_matches(['(', ')'])) == Some(mask))
@@ -409,6 +432,7 @@ fn finding(
         FindingKind::AddOffer => format!("Add the {m} offer to {on} (expires {expires})"),
         FindingKind::WrongCard => format!("Charge {m} to {on} until {expires}"),
         FindingKind::Expiring => format!("Use the {m} offer on {on} by {expires}"),
+        FindingKind::CardChoice => unreachable!("card choice Findings come from earn"),
     };
     Finding {
         kind,
@@ -417,6 +441,8 @@ fn finding(
         card_mask: Some(card.mask.clone()),
         est_cents_per_year: est.cash_cents,
         est_points_per_year: est.points,
+        est_value_cents_per_year: est.cash_cents
+            + est.points * i64::from(card.point_value().thousandths()) / 1_000,
         txn_ids: charges.iter().map(|t| t.id.clone()).collect(),
         action,
         evidence: Evidence::Offer(OfferEvidence {
@@ -463,6 +489,7 @@ pub(crate) fn findings(
             offers: card.offers.len(),
             added: card.offers.iter().filter(|o| o.added).count(),
             expired: card.offers.iter().filter(|o| o.expires < now).count(),
+            earn: card.earn.is_some(),
         });
 
         for offer in card.offers.iter().filter(|o| o.expires >= now) {
@@ -584,6 +611,7 @@ mod tests {
     fn ev(f: &Finding) -> &OfferEvidence {
         match &f.evidence {
             Evidence::Offer(o) => o,
+            Evidence::Earn(_) => panic!("not an offer Finding"),
         }
     }
 
@@ -663,6 +691,13 @@ mod tests {
         assert_eq!(s.min, Some(Money::from_cents(6500)));
         assert_eq!(s.uses, Some(3));
         assert_eq!(s.cap, Cap::Cash(Money::from_cents(9000)));
+        let e = c.earn.expect("the sample has an [earn] table");
+        assert_eq!(e.point_value(), crate::earn::Rate::from_thousandths(1_000));
+        assert_eq!(
+            e.rates["FOOD_AND_DRINK_GROCERIES"],
+            crate::earn::Rate::from_thousandths(4_000)
+        );
+        assert_eq!(e.caps["FOOD_AND_DRINK_GROCERIES"].cents(), 2_500_000);
     }
 
     #[test]
@@ -932,6 +967,40 @@ mod tests {
         assert!(f
             .action
             .starts_with("Add the Soon offer to the American Express card ending 4242"));
-        assert!(r.notes.is_empty());
+        // No [earn] table anywhere: card choice says so.
+        assert_eq!(
+            r.notes,
+            vec!["card choice: no offers file has an [earn] table".to_string()]
+        );
+    }
+
+    #[test]
+    fn points_count_at_the_cards_point_value_for_the_floor() {
+        let offers =
+            r#"{ merchant = "Kestrel", pts = 2000, expires = 2026-12-31, match = ["kestrel"] }"#;
+        let valued = parse_offers(&format!(
+            "[card]\nissuer = \"American Express\"\nmask = \"4242\"\ncaptured = 2026-10-17\noffers = [ {offers} ]\n[earn]\ncents_per_point = 1.5\ndefault = 1"
+        ))
+        .unwrap();
+        let txns = vec![txn("k", "visa", day(2026, 9, 1), -1000, "KESTREL")];
+        let through = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap();
+        let run = |c: CardOffers| {
+            find::evaluate(
+                Some(&[c]),
+                &accounts(),
+                &txns,
+                through,
+                day(2026, 10, 17),
+                &FindOptions::default(),
+            )
+        };
+        // 2,000 points at 1.5¢ = $30, over the floor; at 1¢ = $20, under it.
+        let r = run(valued);
+        assert_eq!(r.findings.len(), 1);
+        assert_eq!(r.findings[0].est_points_per_year, 2000);
+        assert_eq!(r.findings[0].est_cents_per_year, 0);
+        assert_eq!(r.findings[0].est_value_cents_per_year, 3000);
+        assert!(r.cards[0].earn);
+        assert!(run(card(offers)).findings.is_empty());
     }
 }

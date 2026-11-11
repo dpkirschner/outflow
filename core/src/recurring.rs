@@ -1,7 +1,8 @@
 //! The recurring list (GLOSSARY: Recurring). One row per recurring merchant
 //! over the 12 calendar months ending at a chosen month: how often, the
 //! monthly cost, a six-month spark and a change marker. Detection is
-//! `subscriptions::detect_rhythms`; the one per-merchant mark is
+//! `subscriptions::detect_rhythms`, plus `yearly_gap` on the archive for
+//! merchants charged once a year; the one per-merchant mark is
 //! Ignored, which moves a merchant to a separate list.
 //!
 //! [`steady_charge`] and [`price_rise`] read a merchant's charges for the
@@ -12,7 +13,8 @@ use crate::model::{mask_suffix, Account, Transaction};
 use crate::query::month_index;
 use crate::store::Store;
 use crate::subscriptions::{
-    detect_rhythms, display_merchant, median, normalize_payee, StreamCadence, MONTH_DAYS,
+    detect_rhythms, display_merchant, median, normalize_payee, RhythmGroup, StreamCadence,
+    MONTH_DAYS,
 };
 use chrono::{Datelike, Local, NaiveDate, TimeZone};
 use serde::Serialize;
@@ -50,6 +52,10 @@ pub const STEADY_PCT: f64 = 5.0;
 /// two). A price rise lasts until this many charges are at the new price,
 /// when the merchant is steady again.
 pub const STEADY_CHARGES: usize = 3;
+
+/// A charge this many days after the one before is a year on (GLOSSARY:
+/// Yearly).
+pub const YEARLY_GAP_DAYS: std::ops::RangeInclusive<f64> = 330.0..=400.0;
 
 const DAY: i64 = 86_400;
 
@@ -153,6 +159,31 @@ pub fn price_rise(cadence: StreamCadence, charges: &[Charge]) -> Option<PriceRis
         to_cents: to,
         since: now[0].at,
     })
+}
+
+/// GLOSSARY: Yearly. A 12-month window holds at most one charge of a
+/// yearly merchant, so the detector never sees one; this reads the archive
+/// instead. `charges` (one per day, oldest first) end with the merchant's
+/// latest. Yearly when the latest gaps are each about a year
+/// (`YEARLY_GAP_DAYS`) and, with only one such gap, the two charges are
+/// within `CHANGE_PCT` of each other. Returns the median of those gaps.
+fn yearly_gap(charges: &[Charge]) -> Option<f64> {
+    let mut gaps: Vec<f64> = charges
+        .windows(2)
+        .rev()
+        .map(|w| (w[1].at - w[0].at) as f64 / DAY as f64)
+        .take_while(|g| YEARLY_GAP_DAYS.contains(g))
+        .collect();
+    if let [_] = gaps[..] {
+        let [a, b] = &charges[charges.len() - 2..] else {
+            unreachable!("one gap is two charges")
+        };
+        if pct(b.cents, a.cents as f64).is_none_or(|p| p.abs() > CHANGE_PCT) {
+            return None;
+        }
+    }
+    gaps.sort_by(f64::total_cmp);
+    gaps.get(gaps.len() / 2).copied()
 }
 
 /// One recurring merchant.
@@ -291,19 +322,42 @@ pub(crate) fn build(
     // The view is as of the chosen month's end, or now while it runs.
     let view_end = month_start(last + 1).min(now);
 
-    let rhythms = detect_rhythms(&window);
-    // Every charge each detected merchant ever made (the archive outgrows
-    // the window): the year-on-year totals and the charge-to-charge rules
-    // read these.
-    let wanted: HashSet<&str> = rhythms.iter().map(|g| g.merchant.as_str()).collect();
+    let spending =
+        |t: &&Transaction| t.amount.is_outflow() && t.flag == crate::model::TxnFlag::Spending;
+    // Every charge each merchant ever made (the archive outgrows the
+    // window): yearly detection, the year-on-year totals and the
+    // charge-to-charge rules read these.
     let mut history: HashMap<String, Vec<&Transaction>> = HashMap::new();
-    for t in all
-        .iter()
-        .filter(|t| t.amount.is_outflow() && t.flag == crate::model::TxnFlag::Spending)
-    {
+    for t in all.iter().filter(spending) {
+        history
+            .entry(normalize_payee(t.merchant()))
+            .or_default()
+            .push(t);
+    }
+
+    let mut rhythms = detect_rhythms(&window);
+    // Yearly merchants: the window's other merchants, judged on the archive.
+    let found: HashSet<String> = rhythms.iter().map(|g| g.merchant.clone()).collect();
+    let mut rest: BTreeMap<String, Vec<&Transaction>> = BTreeMap::new();
+    for t in window.iter().filter(spending) {
         let key = normalize_payee(t.merchant());
-        if wanted.contains(key.as_str()) {
-            history.entry(key).or_default().push(t);
+        if !key.is_empty() && !found.contains(&key) {
+            rest.entry(key).or_default().push(t);
+        }
+    }
+    for (merchant, mut items) in rest {
+        let seen: Vec<Charge> = charges_of(&history[&merchant])
+            .into_iter()
+            .filter(|c| month_index(c.at) <= last)
+            .collect();
+        if let Some(med_gap) = yearly_gap(&seen) {
+            items.sort_by_key(|t| t.effective_date());
+            rhythms.push(RhythmGroup {
+                merchant,
+                items,
+                cadence: StreamCadence::Yearly,
+                med_gap,
+            });
         }
     }
 
@@ -432,7 +486,11 @@ fn merchant_row(
     amounts.sort_unstable();
     let median_cents = median(&amounts);
 
-    let monthly_cents = if completed.is_empty() {
+    let monthly_cents = if cadence == StreamCadence::Yearly {
+        // A twelfth of the latest charge, not the months since it.
+        let latest = history.iter().rev().find(|c| month_index(c.at) <= last);
+        (latest.map_or(median_cents, |c| c.cents) as f64 / 12.0).round() as i64
+    } else if completed.is_empty() {
         // Nothing complete yet: median charge times how often it comes.
         (median_cents as f64 * (MONTH_DAYS / med_gap.max(0.5)).min(31.0)).round() as i64
     } else {
@@ -477,8 +535,11 @@ fn merchant_row(
     let allowance = ((med_gap * LATE_FACTOR).round() as i64).max(LATE_MIN_DAYS);
     let late_since = Some(last_seen + allowance * DAY).filter(|at| *at <= view_end);
 
-    // New only when there is history before it to be new against.
-    let is_new = start > last - NEW_MONTHS && earliest.is_some_and(|e| e < start);
+    // New only when there is history before it to be new against. A yearly
+    // merchant is a renewal: its charge a year before sits outside the window.
+    let is_new = cadence != StreamCadence::Yearly
+        && start > last - NEW_MONTHS
+        && earliest.is_some_and(|e| e < start);
     let change = if is_new {
         Change::New
     } else if late_since.is_some() {
@@ -1189,5 +1250,108 @@ mod tests {
             ],
         );
         assert!(findings_of(&late, &HashSet::new()).is_empty());
+    }
+
+    /// One charge a year: [(year, month, day, cents)].
+    fn yearly(merchant: &str, charges: &[(i32, u32, u32, i64)]) -> Vec<Transaction> {
+        charges
+            .iter()
+            .enumerate()
+            .map(|(i, (y, m, d, c))| {
+                charge(&format!("{merchant}{i}"), at(*y, *m, *d), -c, merchant)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_charge_a_year_after_the_last_is_a_yearly_merchant() {
+        let txns = yearly("Sample Cloud", &[(2025, 3, 15, 9900), (2026, 3, 14, 9900)]);
+        let v = build(&txns, &HashSet::new(), day(2026, 10, 31), at(2026, 11, 7));
+        assert_eq!(v.items.len(), 1);
+        let r = &v.items[0];
+        assert_eq!(r.cadence, StreamCadence::Yearly);
+        assert!((360..=366).contains(&r.gap_days));
+        assert_eq!(r.monthly_cents, 825);
+        assert_eq!(v.monthly_total_cents, 825);
+        assert_eq!(r.change, Change::Steady);
+        assert_eq!(r.steady_cents, Some(9900));
+        assert_eq!(r.late_since, None);
+        assert_eq!(r.recent_charges.len(), 2);
+        // Renewed last month: a year of history before it, so not New.
+        let v = build(&txns, &HashSet::new(), day(2026, 4, 30), at(2026, 5, 7));
+        assert_eq!(v.items[0].change, Change::Steady);
+        assert_eq!(v.items[0].monthly_cents, 825);
+    }
+
+    #[test]
+    fn a_yearly_merchant_needs_its_latest_charge_in_the_window() {
+        let txns = yearly("Sample Cloud", &[(2024, 9, 15, 9900), (2025, 9, 14, 9900)]);
+        let v = build(&txns, &HashSet::new(), day(2026, 10, 31), at(2026, 11, 7));
+        assert!(v.items.is_empty());
+    }
+
+    #[test]
+    fn two_unlike_buys_a_year_apart_are_not_yearly() {
+        // Two charges need a like amount (within 25%) and a gap of about a year.
+        let far = yearly(
+            "Sample Hardware",
+            &[(2025, 1, 10, 9900), (2026, 3, 20, 9900)],
+        );
+        let unlike = yearly(
+            "Sample Hardware",
+            &[(2025, 3, 10, 4000), (2026, 3, 10, 9000)],
+        );
+        let near = yearly(
+            "Sample Hardware",
+            &[(2025, 3, 10, 8000), (2026, 3, 10, 9900)],
+        );
+        let n = |t: &[Transaction]| {
+            build(t, &HashSet::new(), day(2026, 10, 31), at(2026, 11, 7))
+                .items
+                .len()
+        };
+        assert_eq!((n(&far), n(&unlike), n(&near)), (0, 0, 1));
+    }
+
+    #[test]
+    fn a_dearer_renewal_after_two_years_is_a_price_rise() {
+        let txns = yearly(
+            "Sample Cloud",
+            &[
+                (2024, 3, 15, 9900),
+                (2025, 3, 15, 9900),
+                (2026, 3, 14, 11_900),
+            ],
+        );
+        let v = build(&txns, &HashSet::new(), day(2026, 10, 31), at(2026, 11, 7));
+        let r = &v.items[0];
+        assert_eq!(r.cadence, StreamCadence::Yearly);
+        // +20%: a price rise (over 5%), though not Up (over 25%).
+        assert_eq!(r.change, Change::Steady);
+        let rise = r.price_rise.unwrap();
+        assert_eq!((rise.from_cents, rise.to_cents), (9900, 11_900));
+        assert_eq!(r.monthly_cents, 992);
+    }
+
+    #[test]
+    fn a_yearly_plan_is_a_subscription_finding_valued_at_a_year() {
+        let mut txns = yearly("Sample Cloud", &[(2025, 3, 15, 9900), (2026, 3, 14, 9900)]);
+        txns.extend(monthly(
+            "Streamflix",
+            &[
+                (2026, 7, 1599),
+                (2026, 8, 1599),
+                (2026, 9, 1599),
+                (2026, 10, 1599),
+            ],
+        ));
+        let f = findings_of(&txns, &HashSet::new());
+        let sub = f
+            .iter()
+            .find(|f| f.key == "subscription::sample-cloud")
+            .unwrap();
+        assert_eq!(sub.est_cents_per_year, 9900);
+        assert!(sub.action.contains("a year"), "{}", sub.action);
+        assert_eq!(f.len(), 2);
     }
 }

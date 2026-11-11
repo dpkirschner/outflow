@@ -68,13 +68,19 @@ product direction behind these terms is in
 - **Recurring merchant**: a merchant (keyed by
   `subscriptions::normalize_payee`) that you buy from on a detectable
   cadence: at least three charges, regularly spaced, within the 12 months
-  ending with the month you're looking at. It shows how often, the usual
-  monthly cost, and what changed. There is one detector
+  ending with the month you're looking at, or **Yearly**. It shows how
+  often, the usual monthly cost, and what changed. There is one detector
   (`subscriptions::detect_rhythms`). A fixed-amount subscription is just a
   recurring merchant with a steady amount.
+- **Yearly**: a merchant whose latest charge falls in the window and comes
+  330 to 400 days after the charge before it, read from the whole archive
+  (a window holds only one yearly charge). With only those two charges, they
+  must be within 25% of each other. Each earlier charge also a year apart
+  counts toward the median gap. A yearly renewal is never New.
 - **Usual monthly cost**: the mean of a recurring merchant's completed
   months since its first charge in the window, with months that had no
-  charge counted as $0.
+  charge counted as $0. For a yearly merchant, a twelfth of its latest
+  charge.
 - **Every few months**: a recurring merchant charged roughly every two to
   nine months (a bimonthly bill, a groomer). Months with no charge are
   normal for it, so it's compared **charge to charge**, never month to month.

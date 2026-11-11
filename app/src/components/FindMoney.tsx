@@ -1039,15 +1039,24 @@ export function FindMoney({
   );
 }
 
-/** One line on what's here: how many, and the largest. */
+/** One line on what's here: how many, their total, and the largest. The
+ *  total is the open Findings only (a price rise already replaces its
+ *  subscription, so nothing is counted twice). */
 function Lead({ r }: { r: FindReport }) {
   const n = r.findings.length;
   if (n === 0) return null;
   const top = r.findings[0];
+  const total = r.findings.reduce((s, f) => s + f.est_value_cents_per_year, 0);
   return (
     <p className="fm-lead">
-      {cap(plural(n, "thing"))} could save or earn money, estimated from these
-      12 months. {n === 1 ? "It's" : "The largest is"} {top.subject}, about{" "}
+      {cap(plural(n, "thing"))} could save or earn money
+      {n > 1 && (
+        <>
+          , about <b>{unsignedCents(total)}</b> a year together
+        </>
+      )}
+      , estimated from these 12 months. {n === 1 ? "It's" : "The largest is"}{" "}
+      {top.subject}, about{" "}
       <b>{unsignedCents(top.est_value_cents_per_year)}</b> a year.
     </p>
   );

@@ -1507,6 +1507,7 @@ button.fl-lane-figure {
      spark · change · last ................ Ignore */
 @media (max-width: 720px) {
   .fl-rc-table,
+  .fl-rc-table thead,
   .fl-rc-table tbody {
     display: block;
   }
@@ -1525,6 +1526,12 @@ button.fl-lane-figure {
   .fl-rc-table thead th.fl-rc-col-act {
     display: none;
   }
+  /* The sort controls sit over what they sort: Merchant over the names,
+     Usual per month at the right edge over the amounts. */
+  .fl-rc-table thead th.fl-rc-col-name { order: 1; }
+  .fl-rc-table thead th.fl-rc-col-change { order: 2; }
+  .fl-rc-table thead th.fl-rc-col-last { order: 3; }
+  .fl-rc-table thead th.fl-rc-col-monthly { order: 4; margin-left: auto; }
   .fl-rc-table tbody tr {
     display: flex;
     flex-wrap: wrap;

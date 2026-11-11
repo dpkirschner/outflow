@@ -458,7 +458,8 @@ pub(crate) fn findings(
         rows.sort_by(|x, y| y.return_bp.cmp(&x.return_bp).then(x.mask.cmp(&y.mask)));
         out.push(Finding {
             kind: FindingKind::CardChoice,
-            key: find::key(FindingKind::CardChoice, &to.card.mask, &subject),
+            // No card: a mark follows the category when the best card changes.
+            key: find::key(FindingKind::CardChoice, "", &subject),
             subject,
             card_mask: Some(to.card.mask.clone()),
             est_cents_per_year: gap,
@@ -605,7 +606,7 @@ mod tests {
 
         let g = by_subject(&f, "Food and drink groceries");
         assert_eq!(g.kind, FindingKind::CardChoice);
-        assert_eq!(g.key, "card_choice:4242:food-and-drink-groceries");
+        assert_eq!(g.key, "card_choice::food-and-drink-groceries");
         assert_eq!(g.card_mask.as_deref(), Some("4242"));
         // $1,500 × (5% − 2%) = $45.
         assert_eq!(g.est_cents_per_year, 4_500);
@@ -628,7 +629,7 @@ mod tests {
         let d = by_subject(&f, "Food and drink");
         assert_eq!(d.est_cents_per_year, 1_400); // $800 × 1.75%
         let s = by_subject(&f, "Everything else");
-        assert_eq!(s.key, "card_choice:5555:everything-else");
+        assert_eq!(s.key, "card_choice::everything-else");
         assert_eq!(s.est_cents_per_year, 300); // $400 × 0.75%, floored later
     }
 

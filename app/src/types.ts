@@ -1688,9 +1688,12 @@ export type Finding = {
   kind: FindingKind,
   /**
    * Stable across requests and syncs: `kind:card:subject`, e.g.
-   * `add_offer:4242:fubo`, `card_choice:4242:food-and-drink-groceries`.
-   * Subscription kinds leave the card out (`subscription::streamflix`),
-   * so a merchant moving cards keeps its key. Dismissed keys off it.
+   * `add_offer:4242:fubo`. Card choice and subscription kinds leave the
+   * card out (`card_choice::food-and-drink-groceries`,
+   * `subscription::streamflix`), so a mark survives a new best card or a
+   * merchant moving cards. A price rise adds the day it began
+   * (`price_rise::streamflix:2026-10-10`), so a later rise is new.
+   * Dismissed keys off it.
    */
   key: string,
   /**

@@ -923,7 +923,7 @@ export const findReport: FindReport = {
   "findings": [
     {
       "kind": "card_choice",
-      "key": "card_choice:0000:food-and-drink-groceries",
+      "key": "card_choice::food-and-drink-groceries",
       "subject": "Food and drink groceries",
       "card_mask": "0000",
       "est_cents_per_year": 4500,
@@ -1079,7 +1079,7 @@ export const findReport: FindReport = {
     },
     {
       "kind": "price_rise",
-      "key": "price_rise::sample-music",
+      "key": "price_rise::sample-music:2026-01-10",
       "subject": "Sample Music",
       "card_mask": "0000",
       "est_cents_per_year": 4800,

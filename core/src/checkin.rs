@@ -2047,7 +2047,10 @@ mod tests {
         s.upsert_transactions(&t).unwrap();
         let c = run(&s, "2026-10");
         let up = find(&c, UnusualKind::RecurringUp, "sample music").expect("up row");
-        assert_eq!(up.finding_key.as_deref(), Some("price_rise::sample-music"));
+        assert_eq!(
+            up.finding_key.as_deref(),
+            Some("price_rise::sample-music:2026-10-05")
+        );
         assert!(!kinds(&c).contains(&UnusualKind::Finding));
     }
 

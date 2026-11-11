@@ -137,7 +137,9 @@ product direction behind these terms is in
   shows. Separate from Ignored, which hides the merchant everywhere.
 - **Dismissed**: the mark on a Finding. It moves the Finding to a list
   you can restore from. The Finding comes back on its own only if its
-  estimate more than doubles.
+  value (cash plus points at the card's rate today) more than doubles. A
+  mark keys on the Finding: card choice on its category whatever the best
+  card, a price rise on the day it began, so a later rise shows.
 
 ## Screens
 

@@ -774,7 +774,7 @@ fn find_report() -> FindReport {
         findings: vec![
             Finding {
                 kind: FindingKind::CardChoice,
-                key: "card_choice:0000:food-and-drink-groceries".into(),
+                key: "card_choice::food-and-drink-groceries".into(),
                 subject: "Food and drink groceries".into(),
                 card_mask: Some("0000".into()),
                 est_cents_per_year: 4_500,
@@ -902,7 +902,17 @@ fn subscription_finding(
     };
     Finding {
         kind,
-        key: format!("{}::{}", kind.as_str(), merchant.replace(' ', "-")),
+        key: format!(
+            "{}::{}{}",
+            kind.as_str(),
+            merchant.replace(' ', "-"),
+            // A price rise's key carries the day it began (T0 - 5 days).
+            if price_rise.is_some() {
+                ":2026-01-10"
+            } else {
+                ""
+            }
+        ),
         subject: name.into(),
         card_mask: Some("0000".into()),
         est_cents_per_year: est,

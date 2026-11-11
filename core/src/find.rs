@@ -77,9 +77,12 @@ impl FindingKind {
 pub struct Finding {
     pub kind: FindingKind,
     /// Stable across requests and syncs: `kind:card:subject`, e.g.
-    /// `add_offer:4242:fubo`, `card_choice:4242:food-and-drink-groceries`.
-    /// Subscription kinds leave the card out (`subscription::streamflix`),
-    /// so a merchant moving cards keeps its key. Dismissed keys off it.
+    /// `add_offer:4242:fubo`. Card choice and subscription kinds leave the
+    /// card out (`card_choice::food-and-drink-groceries`,
+    /// `subscription::streamflix`), so a mark survives a new best card or a
+    /// merchant moving cards. A price rise adds the day it began
+    /// (`price_rise::streamflix:2026-10-10`), so a later rise is new.
+    /// Dismissed keys off it.
     pub key: String,
     /// What it's about, for display: the offer's or subscription's
     /// merchant, or the category for card choice.
@@ -308,20 +311,33 @@ fn live_review<'a>(
 }
 
 /// Move every Finding with a Dismissed mark to `report.dismissed`, unless
-/// its estimate now more than doubles the one it had when dismissed. Cash
-/// and points are summed as stored on the mark (a point as one cent), so a
-/// change in `cents_per_point` doesn't bring a Finding back.
+/// its value now more than doubles the one it had when dismissed. Both are
+/// valued like the floor, the mark's points at the Finding's `cents_per_point`
+/// today, so a change in `cents_per_point` alone doesn't bring it back.
 pub fn apply_dismissed(report: &mut FindReport, marks: &HashMap<String, DismissedMark>) {
     let (dismissed, open) = std::mem::take(&mut report.findings)
         .into_iter()
         .partition(|f| {
-            marks.get(&f.key).is_some_and(|m| {
-                let then = m.est_cents_per_year + m.est_points_per_year;
-                f.est_cents_per_year + f.est_points_per_year <= 2 * then
-            })
+            marks
+                .get(&f.key)
+                .is_some_and(|m| f.est_value_cents_per_year <= 2 * value_then(f, m))
         });
     report.findings = open;
     report.dismissed = dismissed;
+}
+
+/// A Dismissed mark's estimate valued at the Finding's `cents_per_point`
+/// now (its points value over its points; one cent when it has none).
+fn value_then(f: &Finding, m: &DismissedMark) -> i64 {
+    let points = match f.est_points_per_year {
+        0 => i128::from(m.est_points_per_year),
+        p => {
+            i128::from(m.est_points_per_year)
+                * i128::from(f.est_value_cents_per_year - f.est_cents_per_year)
+                / i128::from(p)
+        }
+    };
+    m.est_cents_per_year + points as i64
 }
 
 fn days_left(f: &Finding) -> i64 {
@@ -555,22 +571,40 @@ mod tests {
             0,
             &FindOptions::default(),
         );
+        // Points at 2 cents: value is cash plus twice the points.
+        let at_2c = |key: &str, cents: i64, points: i64| Finding {
+            est_value_cents_per_year: cents + 2 * points,
+            ..finding(key, cents, points)
+        };
         r.findings = vec![
             finding("doubled", 6_000, 0),
             finding("exactly-double", 6_000, 0),
             finding("points", 0, 9_000),
+            at_2c("points-at-2c", 0, 4_000),
+            at_2c("cash-then-points", 0, 4_000),
             finding("open", 5_000, 0),
         ];
         let marks = HashMap::from([
             ("doubled".to_string(), mark(2_999, 0)),
             ("exactly-double".to_string(), mark(3_000, 0)),
             ("points".to_string(), mark(0, 4_500)),
+            // 2,000 points then, 4,000 now, both at 2c: exactly double.
+            ("points-at-2c".to_string(), mark(0, 2_000)),
+            // $30 cash then, $80 of points now: more than double in value,
+            // though 4,000 points counted as cents would not be.
+            ("cash-then-points".to_string(), mark(3_000, 0)),
             ("stale".to_string(), mark(100, 0)),
         ]);
         apply_dismissed(&mut r, &marks);
         let keys = |v: &[Finding]| v.iter().map(|f| f.key.clone()).collect::<Vec<_>>();
-        assert_eq!(keys(&r.findings), vec!["doubled", "open"]);
-        assert_eq!(keys(&r.dismissed), vec!["exactly-double", "points"]);
+        assert_eq!(
+            keys(&r.findings),
+            vec!["doubled", "cash-then-points", "open"]
+        );
+        assert_eq!(
+            keys(&r.dismissed),
+            vec!["exactly-double", "points", "points-at-2c"]
+        );
     }
 
     #[test]
@@ -686,7 +720,10 @@ mod tests {
         let keys = |v: &[Finding]| v.iter().map(|f| f.key.clone()).collect::<Vec<_>>();
         assert_eq!(
             keys(&r.findings),
-            vec!["subscription::demo-gym", "price_rise::sample-music"]
+            vec![
+                "subscription::demo-gym",
+                "price_rise::sample-music:2026-10-10"
+            ]
         );
         assert_eq!(
             keys(&r.reviewed),

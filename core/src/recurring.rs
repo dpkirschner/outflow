@@ -406,6 +406,15 @@ pub(crate) fn build(
     }
 }
 
+/// The local date of an instant, `YYYY-MM-DD`.
+fn local_day(at: i64) -> String {
+    Local
+        .timestamp_opt(at, 0)
+        .single()
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default()
+}
+
 /// Local midnight starting month `idx`, epoch seconds.
 fn month_start(idx: i64) -> i64 {
     let d = month_of(idx).and_hms_opt(0, 0, 0).expect("midnight");
@@ -671,9 +680,18 @@ pub(crate) fn findings(
             .find(|a| a.id == r.account_id)
             .and_then(|a| mask_suffix(&a.name))
             .map(|m| m.trim_matches(['(', ')']).to_string());
+        let key = match r.price_rise {
+            // Dated, so a dismissed rise doesn't hide the next one.
+            Some(p) => format!(
+                "{}:{}",
+                find::key(kind, "", &r.merchant),
+                local_day(p.since)
+            ),
+            None => find::key(kind, "", &r.merchant),
+        };
         out.push(Finding {
             kind,
-            key: find::key(kind, "", &r.merchant),
+            key,
             subject: r.name.clone(),
             card_mask,
             est_cents_per_year: est,
@@ -1218,7 +1236,7 @@ mod tests {
         assert_eq!(sub.est_value_cents_per_year, 12 * 1599);
         assert_eq!(sub.txn_ids.len(), 4);
         assert!(!sub.action.contains("unused"), "{}", sub.action);
-        let rise = by("price_rise::sample-music");
+        let rise = by("price_rise::sample-music:2026-10-10");
         assert_eq!(rise.kind, FindingKind::PriceRise);
         assert_eq!(rise.est_cents_per_year, 12 * 200);
         // Only the charge at the new price is behind the rise.

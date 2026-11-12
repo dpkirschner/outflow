@@ -20,3 +20,6 @@ graphify-out/
 
 # Python bytecode (scripts/leakscan tests)
 __pycache__/
+
+# Claude Code per-project permissions: can hold typed tokens (ho-6qp)
+.claude/settings.local.json

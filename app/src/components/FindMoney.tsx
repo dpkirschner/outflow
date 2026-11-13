@@ -326,22 +326,23 @@ function estimateWords(f: Finding): string {
 
 function Charges({
   f,
+  period,
   accounts,
   id,
 }: {
   f: Finding;
+  period: string | undefined;
   accounts: Account[];
   id: string;
 }) {
   const [page, setPage] = useState<Load<TxnPage>>({ state: "loading" });
-  const ids = f.txn_ids;
+  const key = f.key;
   const load = useCallback(async () => {
     setPage({ state: "loading" });
     try {
       setPage({
         state: "ok",
-        data: await api.transactions({
-          ids,
+        data: await api.findCharges(period, key, {
           sort: "date",
           dir: "desc",
           limit: 200,
@@ -350,7 +351,7 @@ function Charges({
     } catch (err) {
       setPage({ state: "error", error: errMessage(err) });
     }
-  }, [ids]);
+  }, [period, key]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -417,6 +418,7 @@ function merchantOf(f: Finding): string | null {
 
 function FindingRow({
   f,
+  period,
   on,
   accounts,
   busy,
@@ -424,6 +426,7 @@ function FindingRow({
   onReview,
 }: {
   f: Finding;
+  period: string | undefined;
   on: boolean;
   accounts: Account[];
   busy: boolean;
@@ -485,7 +488,7 @@ function FindingRow({
             </button>
           </span>
         </div>
-        {open && <Charges f={f} accounts={accounts} id={chargesId} />}
+        {open && <Charges f={f} period={period} accounts={accounts} id={chargesId} />}
       </div>
       <Estimate f={f} />
     </li>
@@ -963,6 +966,7 @@ export function FindMoney({
                   <FindingRow
                     key={f.key}
                     f={f}
+                    period={period ?? undefined}
                     on={highlight === f.key}
                     accounts={accounts}
                     busy={working}

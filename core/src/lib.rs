@@ -37,8 +37,8 @@ pub use checkin::{
 };
 pub use earn::{CardEarn, EarnEvidence, EarnTable, Rate};
 pub use find::{
-    apply_dismissed, apply_reviewed, find, set_dismissed, set_reviewed, Evidence, FindError,
-    FindOptions, FindReport, Finding, FindingKind, OfferEvidence, SubscriptionEvidence,
+    apply_dismissed, apply_reviewed, find, finding, set_dismissed, set_reviewed, Evidence,
+    FindError, FindOptions, FindReport, Finding, FindingKind, OfferEvidence, SubscriptionEvidence,
     MIN_EST_CENTS_PER_YEAR, REVIEWED_DAYS,
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};

@@ -398,6 +398,27 @@ pub fn report_with(
     Ok(report)
 }
 
+/// The Finding with `key` in the report for these params, open, dismissed
+/// or reviewed: what "Show the charges" resolves on the server, so a client
+/// sends the key rather than every one of its `txn_ids`.
+pub fn finding(
+    store: &Store,
+    offers_path: Option<&Path>,
+    through: NaiveDate,
+    now: i64,
+    opts: &FindOptions,
+    key: &str,
+) -> Result<Finding, FindError> {
+    let report = find(store, offers_path, through, now, opts)?;
+    report
+        .findings
+        .into_iter()
+        .chain(report.dismissed)
+        .chain(report.reviewed)
+        .find(|f| f.key == key)
+        .ok_or_else(|| FindError::NoSuchFinding(key.to_string()))
+}
+
 /// Dismiss the Finding with `key` (it must be in the report for these
 /// params, open or dismissed), or restore it, then return the new report.
 /// Dismissing stores the estimate it has now; dismissing an already

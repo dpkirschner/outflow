@@ -502,6 +502,30 @@ impl TxnQueryParams {
     }
 }
 
+/// The `/transactions` query for exactly `ids`, with the usual sort and
+/// paging params and no date or flag filter: the charges behind a Finding
+/// (`/find/charges`).
+pub(crate) fn ids_query(
+    ids: Vec<String>,
+    sort: Option<String>,
+    dir: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<outflow_core::TxnQuery, ApiError> {
+    TxnQueryParams {
+        sort,
+        dir,
+        offset,
+        limit,
+        ..Default::default()
+    }
+    .into_query()
+    .map(|q| outflow_core::TxnQuery {
+        ids: Some(ids.into_iter().collect()),
+        ..q
+    })
+}
+
 async fn transactions(
     State(state): State<AppState>,
     Query(p): Query<TxnQueryParams>,

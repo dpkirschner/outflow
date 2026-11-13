@@ -7,12 +7,13 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use outflow_core::{
-    find, set_dismissed, set_reviewed, today_local, FindError, FindOptions, FindReport, Period,
+    find, finding, search_transactions, set_dismissed, set_reviewed, today_local, FindError,
+    FindOptions, FindReport, Period, TxnPage,
 };
 use serde::Deserialize;
 use std::path::PathBuf;
 
-use crate::routes::blank;
+use crate::routes::{blank, ids_query};
 use crate::state::{now_secs, with_store, ApiError, ApiResult, AppState};
 
 #[derive(Deserialize)]
@@ -54,6 +55,50 @@ async fn find_money(
     let now = now_secs();
     with_store(&state, move |s| {
         find(s, path.as_deref(), through, now, &opts).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
+struct ChargesParams {
+    /// `Finding::key`.
+    key: String,
+    sort: Option<String>,
+    dir: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+}
+
+/// The charges behind one Finding (its `txn_ids`), as a `/transactions`
+/// page. The Finding is looked up by key in the report for the `GET /find`
+/// params (open, dismissed or reviewed); 404 when it isn't there.
+async fn finding_charges(
+    State(state): State<AppState>,
+    Query(p): Query<FindParams>,
+    Query(c): Query<ChargesParams>,
+) -> ApiResult<TxnPage> {
+    let key = c.key.trim().to_string();
+    if key.is_empty() {
+        return Err(ApiError::bad_request("key is empty"));
+    }
+    let (through, opts) = p.resolve()?;
+    let path: Option<PathBuf> = state.cfg.perks_path.clone().map(PathBuf::from);
+    let now = now_secs();
+    let res = with_store(&state, move |s| {
+        Ok(finding(s, path.as_deref(), through, now, &opts, &key))
+    })
+    .await?;
+    let f = match res {
+        Ok(f) => f,
+        Err(e @ FindError::NoSuchFinding(_)) => {
+            return Err(ApiError(StatusCode::NOT_FOUND, e.to_string()))
+        }
+        Err(e) => return Err(ApiError::internal(e)),
+    };
+    let q = ids_query(f.txn_ids, c.sort, c.dir, c.offset, c.limit)?;
+    with_store(&state, move |s| {
+        search_transactions(s, &q).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -145,6 +190,7 @@ async fn set_merchant_reviewed(
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/find", get(find_money))
+        .route("/find/charges", get(finding_charges))
         .route("/find/dismissed", post(set_finding_dismissed))
         .route("/find/reviewed", post(set_merchant_reviewed))
 }
@@ -397,6 +443,33 @@ offers = [
         let (status, _) = post(app.clone(), "/find/reviewed", review("nobody", true)).await;
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _) = post(app, "/find/reviewed", review(" ", true)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// The charges behind a Finding resolve by key, sorted and paged like
+    /// `/transactions`, also once it's Reviewed; an unknown key is a 404.
+    #[tokio::test]
+    async fn lists_a_findings_charges_by_key() {
+        let app = app_with(None, true);
+        let (_, body) = get(app.clone(), "/find").await;
+        let ids = body["findings"][0]["txn_ids"].as_array().unwrap().clone();
+        let uri = "/find/charges?key=subscription::streamflix&dir=desc&limit=2";
+        let (status, page) = get(app.clone(), uri).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        assert_eq!(page["total"], ids.len());
+        assert_eq!(page["items"].as_array().unwrap().len(), 2);
+        assert_eq!(page["total_cents"], -1599 * ids.len() as i64);
+        assert_eq!(page["items"][0]["id"], "s1", "newest first");
+
+        let review = serde_json::json!({ "merchant": "streamflix", "reviewed": true });
+        post(app.clone(), "/find/reviewed", review).await;
+        let (status, page) = get(app.clone(), uri).await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        assert_eq!(page["total"], ids.len());
+
+        let (status, _) = get(app.clone(), "/find/charges?key=subscription::nobody").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = get(app, "/find/charges?key=%20").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 

@@ -298,6 +298,20 @@ export const api = {
   // `period`'s last month (`YYYY-MM`; omitted = this month).
   find: (period?: string) =>
     get<FindReport>(`/find${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+  // The charges behind one Finding, resolved by key on the server (a long
+  // txn_ids list never goes in the URL); 404 if the key isn't in the report.
+  findCharges: (
+    period: string | undefined,
+    key: string,
+    page?: { sort?: string; dir?: "asc" | "desc"; limit?: number },
+  ) => {
+    const q = new URLSearchParams({ key });
+    if (period) q.set("period", period);
+    if (page?.sort) q.set("sort", page.sort);
+    if (page?.dir) q.set("dir", page.dir);
+    if (page?.limit !== undefined) q.set("limit", String(page.limit));
+    return get<TxnPage>(`/find/charges?${q.toString()}`);
+  },
   // Dismiss a Finding by key, or restore it; returns the report after.
   setFindingDismissed: (period: string | undefined, key: string, dismissed: boolean) =>
     post<FindReport>(

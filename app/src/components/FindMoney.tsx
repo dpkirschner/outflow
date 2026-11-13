@@ -1,5 +1,5 @@
 // Find money: every open Finding, highest estimate first (GLOSSARY: Finding,
-// Dismissed, Reviewed; ADR 0001's 2026-11-09 amendment). Each row says what
+// Dismissed, Reviewed; PRODUCT.md: Find money). Each row says what
 // it is, what it's worth a year, the one thing to do, and the evidence
 // behind it, and can open the charges it was estimated from.
 //

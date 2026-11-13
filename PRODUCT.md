@@ -67,6 +67,10 @@ hidden and never counted as spending or income.
   to an account), or that no offers are set up. A Check-in row for a
   Finding (or a recurring up row that stands in for a price rise) opens
   Find money on that Finding.
+- Find money sees charges, not usage, so it never calls a subscription
+  unused; it lists steady ones to review. Offers files are kept by hand
+  (`OUTFLOW_PERKS`), with no write endpoint, so the read-only token
+  stays read-only.
 - Upkeep (bank connections, card-payment match review, categorize,
   reset) lives in Settings, away from the analysis screens.
 

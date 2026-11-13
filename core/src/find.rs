@@ -1,7 +1,7 @@
 //! Find money: one [`Finding`] type for everything that would save or earn
 //! money, from several sources: card offers ([`crate::perks`]), card
-//! choice ([`crate::earn`]) and subscriptions ([`crate::recurring`]) (ADR
-//! 0001, amendment 2026-11-09).
+//! choice ([`crate::earn`]) and subscriptions ([`crate::recurring`])
+//! (GLOSSARY: Finding).
 //!
 //! Every estimate is in dollars per year, read off the 12 calendar months
 //! ending with the chosen month (the same window as the recurring list).

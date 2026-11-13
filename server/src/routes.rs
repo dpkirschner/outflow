@@ -651,6 +651,9 @@ struct CheckinParams {
     /// A week, month or quarter (`2026-W45`, `2026-11`, `2026-Q4`,
     /// `this-week`...). Default: this month.
     period: Option<String>,
+    /// Offers expiring within this many days are new (default 14); only
+    /// `/checkin` reads it.
+    expiring_days: Option<i64>,
 }
 
 /// The check-in for one period: net worth change, earned - spent and saved,
@@ -666,8 +669,12 @@ async fn checkin(
     };
     let now = now_secs();
     let offers: Option<std::path::PathBuf> = state.cfg.perks_path.clone().map(Into::into);
+    let opts = outflow_core::FindOptions {
+        expiring_days: p.expiring_days.unwrap_or(14).max(0),
+    };
     with_store(&state, move |s| {
-        outflow_core::checkin(s, period, today, now, offers.as_deref()).map_err(|e| e.to_string())
+        outflow_core::checkin(s, period, today, now, offers.as_deref(), &opts)
+            .map_err(|e| e.to_string())
     })
     .await
     .map(Json)

@@ -321,7 +321,7 @@ change`. Visible accounts only.
 
 ### Check-in (`core/src/checkin.rs`)
 
-`checkin(store, period, today, now, offers)` behind `GET /api/checkin` and
+`checkin(store, period, today, now, offers, opts)` behind `GET /api/checkin` and
 `outflow checkin` (`offers` is the `OUTFLOW_PERKS` path, if set). One week, month or quarter; the constants are at the top
 of the module.
 
@@ -359,7 +359,7 @@ of the module.
     the evidence: `wrong_card` has an off-card charge (a `txn_ids` date) in
     the period; `price_rise` has `price_rise.since` in it; `add_offer` and
     `expiring` expire before the period ends or within `expiring_days`
-    (14) of today, or of the period's end for a past period, or start in
+    (default 14, a `/checkin` parameter) of today, or of the period's end for a past period, or start in
     the period (the offer's optional `starts`; `day` = the expiry when
     both hold, else the start);
     `card_choice` has its earliest `txn_ids` date in the period, so a

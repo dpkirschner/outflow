@@ -289,6 +289,9 @@ pub(crate) enum Cmd {
         /// bad file skips those Findings instead of failing.
         #[arg(long, env = "OUTFLOW_PERKS")]
         offers: Option<String>,
+        /// Offers expiring within this many days count as new.
+        #[arg(long, default_value_t = 14)]
+        expiring_days: i64,
     },
     /// Net worth change over a period (default this month), split into
     /// Markets (gain net of contributions on measurable investment accounts)
@@ -1306,13 +1309,17 @@ fn cmd_checkin(
     store: &Store,
     period: Option<&str>,
     offers: Option<&std::path::Path>,
+    expiring_days: i64,
     json: bool,
 ) -> Result<(), String> {
     use outflow_core::{Check, NotCheckedReason, UnusualKind};
     let today = today_local();
     let p = checkin_period(period, today)?;
-    let c =
-        outflow_core::checkin(store, p, today, now_secs(), offers).map_err(|e| format!("{e}"))?;
+    let opts = FindOptions {
+        expiring_days: expiring_days.max(0),
+    };
+    let c = outflow_core::checkin(store, p, today, now_secs(), offers, &opts)
+        .map_err(|e| format!("{e}"))?;
     if json {
         return json_out(&c);
     }
@@ -2045,10 +2052,16 @@ fn run() -> Result<(), String> {
             categories: true,
             ..
         } => cmd_checkin_categories(&store, period.as_deref(), cli.json),
-        Cmd::Checkin { period, offers, .. } => cmd_checkin(
+        Cmd::Checkin {
+            period,
+            offers,
+            expiring_days,
+            ..
+        } => cmd_checkin(
             &store,
             period.as_deref(),
             offers.as_deref().map(std::path::Path::new),
+            expiring_days,
             cli.json,
         ),
         Cmd::Holdings(args) => cmd_holdings(&store, &args, cli.json),

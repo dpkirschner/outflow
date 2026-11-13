@@ -46,7 +46,7 @@
 //!   - wrong card: an off-card charge posted in the period;
 //!   - price rise: the first charge at the new price is in the period;
 //!   - add offer, expiring: the offer expires before the period ends, or
-//!     within `expiring_days` of today (of the period's end, for a past
+//!     within `expiring_days` (an option, default 14) of today (of the period's end, for a past
 //!     period), or it starts in the period (an offer's optional `starts`;
 //!     the row's day is the expiry when both hold);
 //!   - card choice: its first qualifying charge in the window falls in the
@@ -384,13 +384,15 @@ pub struct NotChecked {
 /// The check-in for `period`. `today` decides what's in progress; `now`
 /// (epoch seconds) which months the recurring list treats as complete.
 /// `offers` is the offers file or folder (`OUTFLOW_PERKS`), `None` when not
-/// configured; a bad one never fails the check-in.
+/// configured; a bad one never fails the check-in. `opts` are the Find
+/// options (`expiring_days` decides which offers are new as expiring).
 pub fn checkin(
     store: &Store,
     period: Period,
     today: NaiveDate,
     now: i64,
     offers: Option<&Path>,
+    opts: &FindOptions,
 ) -> rusqlite::Result<CheckIn> {
     let txns = store.all_transactions()?;
     let kind = account_kinds(store)?;
@@ -612,7 +614,6 @@ pub fn checkin(
             None
         }
     };
-    let opts = FindOptions::default();
     let report = find::report_with(
         store,
         cards.as_deref(),
@@ -621,7 +622,7 @@ pub fn checkin(
         &ignored,
         period.last_day().min(today),
         now,
-        &opts,
+        opts,
     )?;
     let has_row: HashSet<String> = unusual.iter().filter_map(|u| u.merchant.clone()).collect();
     let posted: HashMap<&str, i64> = txns
@@ -1364,6 +1365,7 @@ mod tests {
             today(),
             noon(2026, 11, 7),
             None,
+            &FindOptions::default(),
         )
         .unwrap()
     }
@@ -2119,6 +2121,7 @@ mod tests {
             today(),
             noon(2026, 11, 7),
             Some(&bad),
+            &FindOptions::default(),
         )
         .unwrap();
         std::fs::remove_dir_all(&dir).unwrap();

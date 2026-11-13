@@ -295,15 +295,18 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             with_query("/net-worth/change", &[p.to_query()])
         }
         Cmd::Checkin {
-            period, categories, ..
+            period,
+            categories,
+            expiring_days,
+            ..
         } => {
             let p = crate::checkin_period(period.as_deref(), today)?;
-            let path = if *categories {
-                "/checkin/categories"
+            if *categories {
+                with_query("/checkin/categories", &[p.to_query()])
             } else {
-                "/checkin"
-            };
-            with_query(path, &[p.to_query()])
+                let days = format!("expiring_days={}", (*expiring_days).max(0));
+                with_query("/checkin", &[p.to_query(), days])
+            }
         }
         Cmd::Recurring {
             period,
@@ -474,7 +477,7 @@ mod tests {
         );
         assert_eq!(
             ok(&["checkin", "--period", "2026-10"]),
-            "/checkin?period=2026-10"
+            "/checkin?period=2026-10&expiring_days=14"
         );
     }
 

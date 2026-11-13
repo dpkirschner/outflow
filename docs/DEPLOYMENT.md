@@ -209,7 +209,44 @@ scripts/deploy.sh rollback vX --restore-db   # also restore the DB backup
                                        # taken before the live release
 ```
 
-A plain restart (no new release) is still
+`install` and `rollback` also write `releases/<tag>/INSTALLED` (when it
+started, and the log line it started at). `verify` reads it, needs no sudo, and
+prints only what it observed:
+
+```
+scripts/deploy.sh verify                       # live tag, /api/version, checks
+scripts/deploy.sh verify --log 'server up' \
+  --wait-log 'sync done' --timeout 900          # log lines since the install
+```
+
+`--log RE` (repeatable) looks for a line in the log written since the live
+release started; `--wait-log RE` polls for one until `--timeout` seconds
+(default 900), for things that happen later, such as the first sync.
+`--check SCRIPT` works as in `install`. Anything it doesn't find is printed
+as `NOT FOUND`, and `verify` exits 1.
+
+### Changing the plist's environment
+
+The plist is root-owned, so edits go through `deploy.sh env` rather than a
+hand-run PlistBuddy:
+
+```
+scripts/deploy.sh env list
+scripts/deploy.sh env set OUTFLOW_PERKS=/path/to/perks.json  # sudo
+scripts/deploy.sh env unset OUTFLOW_PERKS
+scripts/deploy.sh env restore            # back to the newest backup
+```
+
+`set`, `unset` and `restore` edit a temp copy, lint it, show the diff and
+ask before installing it (root:wheel 644). The live plist is first copied to
+`<data dir>/plist-backups/` (the newest ten are kept). Keys that look like
+secrets (`*TOKEN`, `*SECRET`, `*PASSWORD`, `*KEY`) are refused: point the
+`_FILE` variant at a 0600 file instead. launchd reads the environment when the
+service starts, so a change takes effect at the next `install` or `rollback`,
+or now with `--restart`. A rollback keeps the current environment; if the
+older release can't run with it, `env restore` first.
+
+A plain restart (no new release, no env change) is still
 `sudo launchctl kickstart -k system/com.outflow.server`.
 
 Logs go to the daemon user's `~/Library/Logs`, not `/tmp` — `/tmp` is

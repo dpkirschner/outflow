@@ -13,7 +13,7 @@ import sys
 import tempfile
 import unittest
 
-APP = "outflow"  # the only line that differs from the vitals copy
+APP = "outflow"  # the only line that differs between the outflow and vitals copies
 PREFIX = APP.upper()
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEPLOY = os.path.join(HERE, "deploy.sh")

@@ -16,11 +16,25 @@ reader: `feat(core): …`, `fix: …`, `docs: …`, or an area prefix
 (`core:`, `app:`). `chore:`, `style:`, `build:`, `ci:`, `test:`, merge
 and `release:` commits are left out of the notes.
 
+## Testing a branch
+
+Before merging, run the branch against a copy of the live data:
+
+```
+scripts/deploy.sh try feat/my-change     # no sudo; nothing live changes
+```
+
+It builds the branch with the release features, snapshots the live DB into
+a 0700 scratch dir, starts that build on `127.0.0.1:8091` (`--port P`) with
+bank sync off, runs the same checks as `install` (`--check SCRIPT` adds
+one), and waits. Ctrl-C deletes the snapshot; `try --clean` does it after a
+crash.
+
 ## Cutting a release
 
 ```
 make release-draft      # next version's section at the top of CHANGELOG.md
-$EDITOR CHANGELOG.md    # tidy it; a big release gets a summary paragraph
+$EDITOR CHANGELOG.md    # tidy it (below)
 make release            # make check, leak-scan the notes, commit, tag
 git push --atomic origin main vYYYY.MM.N
 ```
@@ -40,6 +54,17 @@ git push --atomic origin main vYYYY.MM.N
   checks the tag is `vYYYY.MM.N` and on `main`, rescans all history,
   and publishes the GitHub Release from `scripts/release.py notes V`.
 
+Tidying the draft means:
+
+- A big release opens with a short summary paragraph: what changed for the
+  user, in a sentence or three.
+- A fix to code that hasn't been released yet is folded into its feature's
+  line, not listed as a fix: users never saw the bug.
+- A release that bumps the schema says so, and that rolling back needs
+  `scripts/deploy.sh rollback --restore-db`.
+- Lines are written for a reader; drop noise. No personal data (the cut
+  scans for it anyway).
+
 git-cliff is needed for drafting only (`brew install git-cliff`).
 
 ## Deploying
@@ -50,8 +75,14 @@ workflow is green:
 
 ```
 scripts/deploy.sh build vYYYY.MM.N     # no sudo
+scripts/deploy.sh env set KEY=VALUE    # only if the release needs it
 scripts/deploy.sh install vYYYY.MM.N   # sudo, in a terminal
+scripts/deploy.sh verify --log RE      # what the release should log
 ```
+
+A release that needs a new setting changes the plist with `deploy.sh env`
+before `install`, which then starts with it. `verify` reports what it
+observed after the install (see DEPLOYMENT.md).
 
 The build compiles with `OUTFLOW_VERSION=<tag>`, so the server answers
 `GET /api/version` (and `outflow status`) with the tag it was built from.

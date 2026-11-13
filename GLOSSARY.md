@@ -1,8 +1,8 @@
 # Glossary
 
-Domain vocabulary for outflow. Name things the way this file does. The
-product direction behind these terms is in
-[docs/adr/0001-product-direction.md](docs/adr/0001-product-direction.md).
+Domain vocabulary for outflow. Name things the way this file does. What
+the product is for, and its deliberate limits, are in
+[PRODUCT.md](PRODUCT.md).
 
 ## Pillars
 

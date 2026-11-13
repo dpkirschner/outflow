@@ -452,7 +452,7 @@ pub fn in_sources(store: &Store, f: &TxnFilter) -> rusqlite::Result<Vec<InSource
 
 /// Which Flow lane a positive Spending transaction belongs to, from provider
 /// data and account kind only; the user's category never moves a row between
-/// In and Out (ADR 0001, amendment 2026-11-07). In: Plaid says INCOME, or
+/// In and Out (GLOSSARY: In, Out). In: Plaid says INCOME, or
 /// TRANSFER_IN that the user re-flagged as Spending (a deposit they said is not
 /// a move). Refund: any other Plaid category, netted against Out (GLOSSARY: a
 /// refund is not In). With no Plaid category, a cash-side deposit is In so an
@@ -642,7 +642,7 @@ pub struct FlowMonth {
     pub gap_cents: i64,
 }
 
-/// Flow lanes per month (GLOSSARY: Flow lanes; ADR 0001).
+/// Flow lanes per month (GLOSSARY: Flow lanes).
 ///
 /// In and Out read Spending-flagged rows on every visible account. Moved
 /// totals read only the spending-side accounts (checking and credit): the

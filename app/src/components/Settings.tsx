@@ -1,6 +1,6 @@
 // Settings: upkeep that doesn't belong on an analysis screen. Bank
 // connections, card-payment match review, categorize, and the destructive
-// reset all live here (ADR 0001). Reset must never appear on Check-in,
+// reset all live here. Reset must never appear on Check-in,
 // Holdings or Flow.
 //
 // The screen opens with one line saying what needs a look (from core's

@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 outflow is a single-user view of where one person's money is and where it's
 going: **Stock** (balances, holdings, performance), **Flow** (in / out / moved,
-recurring purchases), and **Find money** (card offers, card choice, subscriptions to review). Direction and screen plan:
-`docs/adr/0001-product-direction.md`; vocabulary: `GLOSSARY.md`.
+recurring purchases), and **Find money** (card offers, card choice, subscriptions to review). Product and its limits:
+`PRODUCT.md`; vocabulary: `GLOSSARY.md`.
 A server (an always-on mac-mini over Tailscale) pulls accounts from **Plaid**
 into local SQLite, categorizes transactions (rules + optional LLM), matches
 checking→card payments so nothing double-counts, and serves a web client +

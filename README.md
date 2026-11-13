@@ -7,10 +7,9 @@ exposed over Tailscale) pulls accounts, transactions and investments from
 UI + JSON API built around three pillars: **Stock** (what you have, in what
 form, and how it has performed), **Flow** (money in, out, and moved between
 your own accounts, including recurring purchases), and **Find money** (card
-offers and the like; planned). The API is meant to be read by an agent you
-talk the numbers over with. See
-[docs/adr/0001-product-direction.md](docs/adr/0001-product-direction.md) and
-[GLOSSARY.md](GLOSSARY.md).
+offers, card choice and subscriptions to review). The API is meant to be
+read by an agent you talk the numbers over with. See
+[PRODUCT.md](PRODUCT.md) and [GLOSSARY.md](GLOSSARY.md).
 
 Analysis, not budgeting — no limits or targets, just visibility. Your data
 lives in a local SQLite file and only ever leaves your machine to talk to Plaid

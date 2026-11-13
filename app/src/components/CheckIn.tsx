@@ -1,5 +1,5 @@
 // Check-in, the home screen: one week, month or quarter read against your own
-// history (GLOSSARY: Check-in, Unusual; ADR 0001). It answers "what changed,
+// history (GLOSSARY: Check-in, Unusual). It answers "what changed,
 // and is anything unusual?" in words first, then the three figures behind the
 // answer, then the unusual items, each a link to the rows behind it.
 //

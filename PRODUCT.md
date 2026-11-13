@@ -21,15 +21,14 @@ to the agent rather than the screen.
 ## Product Purpose
 
 Show where the money is and where it's going. Three pillars (see
-`docs/adr/0001-product-direction.md` and `GLOSSARY.md`):
+`GLOSSARY.md`):
 
 - **Stock**: balances, holdings and how they performed (gain net of
   contributions, unrealized gain per position, net worth change).
 - **Flow**: money in, out and moved between own accounts, plus the
   merchants bought from on a cadence.
 - **Find money**: card offers, card choice, and subscriptions worth
-  reviewing, each a Finding with an estimate per year (ADR 0001,
-  2026-11-09 amendment).
+  reviewing, each a Finding with an estimate per year.
 
 Success: a check-in answers "what changed, and is anything unusual?"
 in a few minutes, and every number on screen can also be asked of the
@@ -42,17 +41,19 @@ that grows past the bank aggregator's pull windows, so history is
 permanent. Analysis only: no budgets, limits or targets. Norms the app
 derives itself (usual monthly cost, unusual charges, idle cash) are
 fine. Transfers between own accounts are shown as their own lane, never
-hidden and never counted as spending or income.
+hidden and never counted as spending or income. Moved is classified
+from Plaid's category and the user's flag rules; only card payments are
+paired with their other leg (general two-sided transfer matching is out
+of scope). Performance is gain net of contributions, not a
+time-weighted return.
 
 ## Operating Context
 
 - Served by an always-on home server over a private network, opened in
   a browser. Data arrives from Plaid on a background sync (every few
   hours) or a manual pull.
-- Screens (per ADR 0001): Check-in (home), Holdings, Flow, Find money,
-  Settings. The UI is mid-reshape: Flow has replaced
-  Outflows and the Ledger (Recurring now sits on the Flow screen), and
-  Holdings has replaced Balances.
+- Screens: Check-in (home), Holdings, Flow (with the Recurring list),
+  Find money, Settings.
 - Find money lists every open Finding, highest estimate a year first,
   over the 12 months ending with the selected month (stepped like
   Check-in's weeks). Each row has its kind, the estimate (points beside

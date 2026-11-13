@@ -1,7 +1,6 @@
 //! Check-in: one period (week, month or quarter) summarized for the home
 //! screen and the agent. Net worth change, earned − spent alongside saved,
-//! what's usual for each, and what's unusual (GLOSSARY: Check-in, Unusual;
-//! ADR 0001). Every figure comes from the same core functions Flow and
+//! what's usual for each, and what's unusual (GLOSSARY: Check-in, Unusual). Every figure comes from the same core functions Flow and
 //! Holdings use, so the numbers agree across screens.
 //!
 //! Rules (decided 2026-11-07, ho-2mj.5):

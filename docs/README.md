@@ -9,8 +9,8 @@ at the repo root.
 ## What this project is
 
 A single-user view of where one person's money is and where it's going
-(Stock, Flow, and Find money; see `adr/0001-product-direction.md` and the
-root `GLOSSARY.md`). A server
+(Stock, Flow, and Find money; see the root `PRODUCT.md` and
+`GLOSSARY.md`). A server
 (target: an always-on mac-mini on a tailnet) pulls transactions from **Plaid**
 (checking, savings, credit cards, loans and investments) into local SQLite,
 categorizes them, auto-detects checking→card payments so nothing double-counts,

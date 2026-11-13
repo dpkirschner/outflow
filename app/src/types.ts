@@ -674,7 +674,8 @@ export type Unusual = {
    * `cents` is then its estimated value per year, and `day` the charge
    * that made it new (wrong card, card choice), the first charge at the
    * new price (price rise), or the offer's expiry day (add offer,
-   * expiring). A recurring up row also carries `finding_key` when its
+   * expiring; its start day when it's new for starting in the period).
+   * A recurring up row also carries `finding_key` when its
    * merchant has an open price rise Finding (that row stands in for it).
    */
   finding_kind: FindingKind | null,
@@ -1532,6 +1533,11 @@ export type Offer = {
    * Enrolled on the card. Charges earn nothing on an offer that isn't added.
    */
   added: boolean,
+  /**
+   * Start of the offer's first day, local time (epoch seconds), when the
+   * file gives one. Charges before it never count toward the offer.
+   */
+  starts: number | null,
   /**
    * End of the expiry day, local time (epoch seconds).
    */

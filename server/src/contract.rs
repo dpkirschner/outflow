@@ -735,6 +735,7 @@ fn offer(reward: Reward, cap: Cap) -> Offer {
         single: true,
         per_year: false,
         added: false,
+        starts: Some(T0 - 2 * DAY),
         expires: T0 + 30 * DAY,
         patterns: vec!["SAMPLE OUTFITTERS".into()],
         note: None,

@@ -47,8 +47,8 @@
 //!   - price rise: the first charge at the new price is in the period;
 //!   - add offer, expiring: the offer expires before the period ends, or
 //!     within `expiring_days` of today (of the period's end, for a past
-//!     period). Offers files carry no start date, so "started in the
-//!     period" can't be judged;
+//!     period), or it starts in the period (an offer's optional `starts`;
+//!     the row's day is the expiry when both hold);
 //!   - card choice: its first qualifying charge in the window falls in the
 //!     period, so a standing habit shows once, not every month;
 //!   - subscription: never (a new recurring merchant already has its row).
@@ -306,7 +306,8 @@ pub struct Unusual {
     /// `cents` is then its estimated value per year, and `day` the charge
     /// that made it new (wrong card, card choice), the first charge at the
     /// new price (price rise), or the offer's expiry day (add offer,
-    /// expiring). A recurring up row also carries `finding_key` when its
+    /// expiring; its start day when it's new for starting in the period).
+    /// A recurring up row also carries `finding_key` when its
     /// merchant has an open price rise Finding (that row stands in for it).
     pub finding_kind: Option<FindingKind>,
     pub finding_key: Option<String>,
@@ -921,10 +922,12 @@ fn new_findings(
                 (FindingKind::AddOffer | FindingKind::Expiring, Evidence::Offer(o)) => {
                     let expires = o.offer.expires;
                     let soon = until.min(now) + expiring_days * 86_400;
-                    (
-                        None,
-                        (expires < until || expires <= soon).then_some(expires)?,
-                    )
+                    let day = if expires < until || expires <= soon {
+                        expires
+                    } else {
+                        o.offer.starts.filter(|s| within(*s))?
+                    };
+                    (None, day)
                 }
                 (FindingKind::PriceRise, Evidence::Subscription(e)) => {
                     let since = e.price_rise.as_ref()?.since;
@@ -1882,6 +1885,7 @@ mod tests {
                 single: true,
                 per_year: false,
                 added: true,
+                starts: None,
                 expires,
                 patterns: vec!["sample shop".into()],
                 note: None,
@@ -2005,6 +2009,27 @@ mod tests {
         assert_eq!(days, ["2026-11-18", "2026-11-29"]);
         // A past period reads from its end: nothing live expires near Oct 31.
         assert!(new_of(&fs, oct(), now).is_empty());
+    }
+
+    #[test]
+    fn offers_are_new_the_period_they_start() {
+        let now = noon(2026, 11, 7);
+        let nov = Period::parse("2026-11", today()).unwrap().bounds();
+        let starting = |starts: i64| {
+            let Evidence::Offer(mut o) = offer_ev(noon(2027, 3, 1)) else {
+                unreachable!()
+            };
+            o.offer.starts = Some(starts);
+            Evidence::Offer(o)
+        };
+        let fs = [
+            a_finding(FindingKind::AddOffer, &[], starting(noon(2026, 11, 3))),
+            a_finding(FindingKind::AddOffer, &[], starting(noon(2026, 10, 3))),
+        ];
+        let rows = new_of(&fs, nov, now);
+        let days: Vec<_> = rows.iter().map(|u| u.day.as_deref().unwrap()).collect();
+        assert_eq!(days, ["2026-11-03"]);
+        assert_eq!(new_of(&fs, oct(), now).len(), 1);
     }
 
     #[test]

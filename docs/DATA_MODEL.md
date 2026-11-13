@@ -359,8 +359,9 @@ of the module.
     the evidence: `wrong_card` has an off-card charge (a `txn_ids` date) in
     the period; `price_rise` has `price_rise.since` in it; `add_offer` and
     `expiring` expire before the period ends or within `expiring_days`
-    (14) of today, or of the period's end for a past period (offers files
-    carry no start date, so "started in the period" isn't judged);
+    (14) of today, or of the period's end for a past period, or start in
+    the period (the offer's optional `starts`; `day` = the expiry when
+    both hold, else the start);
     `card_choice` has its earliest `txn_ids` date in the period, so a
     standing habit shows once rather than every month; `subscription`
     never (a new recurring merchant already has its row). A price rise

@@ -539,6 +539,7 @@ mod tests {
                     single: false,
                     per_year: false,
                     added: false,
+                    starts: None,
                     expires: 0,
                     patterns: vec![],
                     note: None,

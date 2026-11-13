@@ -16,6 +16,9 @@
 #   added    = true      the offer has been added (enrolled) on the card. Absent = false:
 #                        it's only available, and charges don't earn it yet.
 #                        None of these sample offers are added.
+#   starts   = 2026-10-20  first day the offer counts (absent = it already has);
+#                        charges before it earn nothing, and Check-in shows the
+#                        offer as new the period it starts.
 #   note     = "..."     terms the matcher can't check (location, new members only, ...)
 #   match    = [...]     normalized-payee patterns (see subscriptions::normalize_payee:
 #                        lowercase alphanumeric tokens joined by spaces).

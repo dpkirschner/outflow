@@ -87,6 +87,9 @@ pub struct Offer {
     pub per_year: bool,
     /// Enrolled on the card. Charges earn nothing on an offer that isn't added.
     pub added: bool,
+    /// Start of the offer's first day, local time (epoch seconds), when the
+    /// file gives one. Charges before it never count toward the offer.
+    pub starts: Option<i64>,
     /// End of the expiry day, local time (epoch seconds).
     pub expires: i64,
     /// Merchant patterns, already run through `normalize_payee`.
@@ -95,6 +98,12 @@ pub struct Offer {
 }
 
 impl Offer {
+    /// When charges start counting toward the offer on `card`: the later of
+    /// the card's capture day and the offer's start day.
+    fn counts_from(&self, card: &CardOffers) -> i64 {
+        self.starts.map_or(card.captured, |s| s.max(card.captured))
+    }
+
     /// Whole-word match of any pattern against a normalized merchant that has
     /// been padded with a space on each side (see `padded`).
     fn matches(&self, padded_merchant: &str) -> bool {
@@ -163,6 +172,7 @@ struct RawOffer {
     per_year: bool,
     #[serde(default)]
     added: bool,
+    starts: Option<toml::value::Datetime>,
     expires: toml::value::Datetime,
     #[serde(default, rename = "match")]
     patterns: Vec<String>,
@@ -242,6 +252,14 @@ fn convert_offer(r: RawOffer) -> Result<Offer, String> {
         return Err("uses: must be at least 1".into());
     }
     let expires = local_epoch(local_date(&r.expires, "expires")?, 23, 59, 59)?;
+    let starts = r
+        .starts
+        .as_ref()
+        .map(|d| local_epoch(local_date(d, "starts")?, 0, 0, 0))
+        .transpose()?;
+    if starts.is_some_and(|s| s > expires) {
+        return Err("starts: after expires".into());
+    }
 
     let mut patterns = Vec::new();
     for p in &r.patterns {
@@ -263,6 +281,7 @@ fn convert_offer(r: RawOffer) -> Result<Offer, String> {
         single: r.single,
         per_year: r.per_year,
         added: r.added,
+        starts,
         expires,
         patterns,
         note: r.note.filter(|n| !n.trim().is_empty()),
@@ -525,7 +544,7 @@ pub(crate) fn findings(
             let live: Vec<&Transaction> = matched
                 .iter()
                 .copied()
-                .filter(|t| (card.captured..=offer.expires).contains(&t.effective_date()))
+                .filter(|t| (offer.counts_from(card)..=offer.expires).contains(&t.effective_date()))
                 .collect();
             let (on_card, off_card): (Vec<&Transaction>, Vec<&Transaction>) =
                 live.iter().partition(|t| &t.account_id == card_account);
@@ -850,6 +869,32 @@ mod tests {
         assert_eq!(f.kind, FindingKind::WrongCard);
         assert_eq!(f.txn_ids, vec!["after".to_string()]);
         assert_eq!(f.est_cents_per_year, 479);
+    }
+
+    #[test]
+    fn charges_before_the_offer_starts_dont_count() {
+        let c = card(
+            r#"{ merchant = "Dropbox", pct = 40, max = "30.00", added = true, starts = 2026-10-22, expires = 2026-11-25, match = ["dropbox"] }"#,
+        );
+        let txns = vec![
+            txn("captured", "visa", day(2026, 10, 20), -1199, "DROPBOX"),
+            txn("started", "visa", day(2026, 10, 23), -1199, "DROPBOX"),
+        ];
+        let r = evaluate(
+            &[c],
+            &accounts(),
+            &txns,
+            day(2026, 10, 25),
+            &PerkOptions::default(),
+        );
+        assert_eq!(r.findings.len(), 1);
+        assert_eq!(r.findings[0].txn_ids, vec!["started".to_string()]);
+    }
+
+    #[test]
+    fn starts_must_not_follow_expires() {
+        assert!(offer_err("pct = 5, starts = 2027-01-01").contains("after expires"));
+        assert!(offer_err("pct = 5, starts = 2026-11-01T09:00:00").contains("plain date"));
     }
 
     #[test]

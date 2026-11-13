@@ -992,6 +992,7 @@ export const findReport: FindReport = {
           "single": true,
           "per_year": false,
           "added": false,
+          "starts": 1768262400,
           "expires": 1771027200,
           "patterns": [
             "SAMPLE OUTFITTERS"
@@ -1037,6 +1038,7 @@ export const findReport: FindReport = {
           "single": true,
           "per_year": false,
           "added": false,
+          "starts": 1768262400,
           "expires": 1771027200,
           "patterns": [
             "SAMPLE OUTFITTERS"

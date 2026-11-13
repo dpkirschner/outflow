@@ -17,20 +17,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{now_secs, with_store, ApiError, ApiResult, AppState};
 
-/// The perks lookback (`3mo`/`6mo`/`12mo`/`all`) → a `since` bound (epoch
-/// secs), with coarse ~30.5-day months.
-const MONTH_SECS: i64 = 2_635_200;
-pub fn window_since(window: &str, now: i64) -> Option<i64> {
-    match window {
-        "all" => None,
-        "3mo" => Some(now - 3 * MONTH_SECS),
-        "12mo" => Some(now - 12 * MONTH_SECS),
-        _ => Some(now - 6 * MONTH_SECS), // default 6mo
-    }
-}
-
 /// `None` for a missing or blank query value.
-fn blank(o: Option<&str>) -> Option<&str> {
+pub(crate) fn blank(o: Option<&str>) -> Option<&str> {
     o.map(str::trim).filter(|s| !s.is_empty())
 }
 
@@ -430,6 +418,8 @@ struct TxnQueryParams {
     lane: Option<String>,
     /// Normalized merchant, e.g. a recurring merchant's key.
     merchant: Option<String>,
+    /// Comma-separated transaction ids, e.g. a Finding's `txn_ids`.
+    ids: Option<String>,
     /// true = only rows with no category.
     uncategorized: Option<bool>,
     /// "out" | "in": the amount's sign.
@@ -493,6 +483,13 @@ impl TxnQueryParams {
             flag: p.flag,
             lane,
             merchant: p.merchant.filter(|s| !s.trim().is_empty()),
+            ids: p.ids.as_deref().map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(String::from)
+                    .collect()
+            }),
             uncategorized: p.uncategorized.unwrap_or(false),
             direction,
             min_cents: p.min_cents,
@@ -503,6 +500,30 @@ impl TxnQueryParams {
             limit: p.limit.unwrap_or(100).min(1000),
         })
     }
+}
+
+/// The `/transactions` query for exactly `ids`, with the usual sort and
+/// paging params and no date or flag filter: the charges behind a Finding
+/// (`/find/charges`).
+pub(crate) fn ids_query(
+    ids: Vec<String>,
+    sort: Option<String>,
+    dir: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<outflow_core::TxnQuery, ApiError> {
+    TxnQueryParams {
+        sort,
+        dir,
+        offset,
+        limit,
+        ..Default::default()
+    }
+    .into_query()
+    .map(|q| outflow_core::TxnQuery {
+        ids: Some(ids.into_iter().collect()),
+        ..q
+    })
 }
 
 async fn transactions(
@@ -619,10 +640,13 @@ struct RecurringParams {
     period: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    /// The Subscriptions filter: only steady merchants (GLOSSARY: Steady).
+    subscriptions: Option<bool>,
 }
 
 /// The recurring list over the 12 months ending with the period's last month
-/// (default: this month). `period=2026-10` is the usual spelling.
+/// (default: this month). `period=2026-10` is the usual spelling;
+/// `subscriptions=true` keeps only steady merchants and totals those.
 async fn recurring(
     State(state): State<AppState>,
     Query(p): Query<RecurringParams>,
@@ -637,8 +661,10 @@ async fn recurring(
     .map_err(ApiError::bad_request)?
     .map_or(today, |period| period.last_day());
     let now = now_secs();
+    let subs = p.subscriptions.unwrap_or(false);
     with_store(&state, move |s| {
-        outflow_core::recurring(s, through, now).map_err(|e| e.to_string())
+        let v = outflow_core::recurring(s, through, now).map_err(|e| e.to_string())?;
+        Ok(if subs { v.subscriptions() } else { v })
     })
     .await
     .map(Json)
@@ -649,6 +675,9 @@ struct CheckinParams {
     /// A week, month or quarter (`2026-W45`, `2026-11`, `2026-Q4`,
     /// `this-week`...). Default: this month.
     period: Option<String>,
+    /// Offers expiring within this many days are new (default 14); only
+    /// `/checkin` reads it.
+    expiring_days: Option<i64>,
 }
 
 /// The check-in for one period: net worth change, earned - spent and saved,
@@ -663,8 +692,13 @@ async fn checkin(
         None => Period::current(outflow_core::PeriodKind::Month, today),
     };
     let now = now_secs();
+    let offers: Option<std::path::PathBuf> = state.cfg.perks_path.clone().map(Into::into);
+    let opts = outflow_core::FindOptions {
+        expiring_days: p.expiring_days.unwrap_or(14).max(0),
+    };
     with_store(&state, move |s| {
-        outflow_core::checkin(s, period, today, now).map_err(|e| e.to_string())
+        outflow_core::checkin(s, period, today, now, offers.as_deref(), &opts)
+            .map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -1875,6 +1909,43 @@ mod tests {
 
         let (status, _) = get_json(app, "/recurring?period=bogus").await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    /// subscriptions=true keeps only steady merchants and totals them.
+    #[tokio::test]
+    async fn recurring_subscriptions_keeps_steady_merchants() {
+        use chrono::{Local, TimeZone};
+        let at = |m: u32| {
+            Local
+                .with_ymd_and_hms(2026, m, 10, 12, 0, 0)
+                .single()
+                .unwrap()
+                .timestamp()
+        };
+        let mut txns = Vec::new();
+        for (m, power) in [(8, -4000), (9, -6500), (10, -9000)] {
+            for (id, cents, desc) in [
+                ("sf", -1599, "STREAMFLIX.COM 1234"),
+                ("pw", power, "CITY POWER"),
+            ] {
+                let mut t = txn(&format!("{id}{m}"), cents, desc);
+                t.posted = at(m);
+                t.transacted_at = Some(at(m));
+                txns.push(t);
+            }
+        }
+        let store = Store::open_in_memory().unwrap();
+        store.upsert_transactions(&txns).unwrap();
+        let app = app_with_store(store);
+
+        let (_, all) = get_json(app.clone(), "/recurring?period=2026-10").await;
+        assert_eq!(all["items"].as_array().unwrap().len(), 2);
+        let (status, body) = get_json(app, "/recurring?period=2026-10&subscriptions=true").await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let items = body["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["merchant"], "streamflix com");
+        assert_eq!(body["monthly_total_cents"], 1599);
     }
 
     // The /merchants handler flattens FilterParams too — same fix, same guard.

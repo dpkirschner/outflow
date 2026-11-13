@@ -28,6 +28,7 @@ import {
 } from "../format";
 import { onLinkClick, pathOf, navigate } from "../route";
 import { MonthStrip, type StripMonth } from "./MonthStrip";
+import { FINDING_NOTE } from "./FindMoney";
 import { monthKey, type Pick } from "./Flow";
 
 export type CheckinView = "week" | "month" | "quarter";
@@ -189,6 +190,7 @@ export function CheckIn({
   nav,
   onNav,
   onDrill,
+  onFinding,
 }: {
   /** Selected month, `YYYY-MM`, shared with Flow and Holdings. */
   month: string | null;
@@ -197,6 +199,8 @@ export function CheckIn({
   onNav: (n: CheckinNav) => void;
   /** Open Flow on `month` with `pick` already applied. */
   onDrill: (pick: Pick, month: string) => void;
+  /** Open Find money on the Finding with this key. */
+  onFinding: (key: string) => void;
 }) {
   // The month strip, and where history starts.
   const [flow, setFlow] = useState<Load<FlowMonth[]>>({ state: "loading" });
@@ -439,6 +443,7 @@ export function CheckIn({
             phrase={d.phrase}
             fallbackMonth={month}
             onDrill={onDrill}
+            onFinding={onFinding}
           />
         </div>
       )}
@@ -615,8 +620,14 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
   // Minor items are folded on the list; the sentence counts the rest.
   const needs = c.unusual.filter((u) => ATTENTION.has(u.kind)).length;
   const odd = c.unusual.filter(
-    (u) => !ATTENTION.has(u.kind) && !u.minor,
+    (u) => !ATTENTION.has(u.kind) && u.kind !== "finding" && !u.minor,
   ).length;
+  // Findings aren't unusual spending: said apart, after the rest.
+  const finds = c.unusual.filter((u) => u.kind === "finding").length;
+  const findTail =
+    finds === 0
+      ? ""
+      : ` ${cap(num(finds))} new ${finds === 1 ? "way" : "ways"} to save.`;
   const unchecked = c.not_checked.length > 0;
   let tail: string;
   if (needs === 0 && odd === 0)
@@ -637,7 +648,10 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
       {lead}, {clauses[0]}
       {clauses.length > 1 && <> and {clauses[1]}</>}
       {because && <>; {because}</>}.{" "}
-      <span className="ci-answer-tail">{tail}</span>
+      <span className="ci-answer-tail">
+        {tail}
+        {findTail}
+      </span>
     </p>
   );
 }
@@ -876,6 +890,8 @@ const NOT_CHECKED: Record<string, string> = {
     "Large charges need 30 charges in the year before to know what's large for you.",
   range:
     "Recurring and large-charge checks cover weeks, months and quarters only.",
+  offers_file:
+    "The card offers file couldn't be read, so offers and card choice weren't checked.",
 };
 
 function notCheckedLines(list: NotChecked[]): string[] {
@@ -907,7 +923,8 @@ interface Row {
   cents: number | null;
   /** The amount is what it usually costs, not what was charged: Text Dim. */
   usual?: boolean;
-  dest: "Flow" | "Settings";
+  /** None: the row has nowhere to open, so its name is plain text. */
+  dest: "Flow" | "Settings" | "Find money" | null;
   href: string;
   go?: () => void;
 }
@@ -943,8 +960,9 @@ function rowOf(
   firstLarge: boolean,
   fallbackMonth: string | null,
   onDrill: (p: Pick, m: string) => void,
+  onFinding: (key: string) => void,
 ): Row {
-  const r = rowBody(u, firstLarge, fallbackMonth, onDrill);
+  const r = rowBody(u, firstLarge, fallbackMonth, onDrill, onFinding);
   return { ...r, key: `row-${i}`, minor: u.minor };
 }
 
@@ -953,6 +971,7 @@ function rowBody(
   firstLarge: boolean,
   fallbackMonth: string | null,
   onDrill: (p: Pick, m: string) => void,
+  onFinding: (key: string) => void,
 ): Omit<Row, "key" | "minor"> {
   const day = u.day ? parseDay(u.day) : null;
   const flowGo = (pick: Pick, m: string | null) =>
@@ -1033,6 +1052,9 @@ function rowBody(
     case "recurring_down": {
       const note = changeNote(u);
       const m = u.month ?? fallbackMonth;
+      // An up row that stands in for a price rise Finding opens it in Find
+      // money, where it can be reviewed or dismissed.
+      const priceRise = u.finding_key ? findingDest(u.finding_key, onFinding) : {};
       if (u.per_charge)
         return {
           note,
@@ -1045,6 +1067,7 @@ function rowBody(
           dest: "Flow",
           href: flowHref,
           go: flowGo(merchantPick(false), m),
+          ...priceRise,
         };
       return {
         note,
@@ -1059,6 +1082,7 @@ function rowBody(
         dest: "Flow",
         href: flowHref,
         go: flowGo(merchantPick(false), m),
+        ...priceRise,
       };
     }
     case "large_charge":
@@ -1077,7 +1101,31 @@ function rowBody(
         href: flowHref,
         go: flowGo(merchantPick(true), u.day?.slice(0, 7) ?? fallbackMonth),
       };
+    case "finding": {
+      const action = u.action ?? "";
+      return {
+        note: FINDING_NOTE[u.finding_kind ?? "subscription"],
+        warn: false,
+        name: u.label,
+        detail: `${/[.?!]$/.test(action) ? action : `${action}.`}${
+          u.cents !== null ? ` About ${unsignedCents(u.cents)} a year.` : ""
+        }`,
+        // An estimate per year, not spend in the period: said in words.
+        cents: null,
+        ...findingDest(u.finding_key, onFinding),
+      };
+    }
   }
+}
+
+/** A row that stands for a Finding opens Find money on it. */
+function findingDest(
+  key: string | null,
+  onFinding: (key: string) => void,
+): { dest: Row["dest"]; href: string; go?: () => void } {
+  return key
+    ? { dest: "Find money", href: pathOf("find"), go: () => onFinding(key) }
+    : { dest: null, href: "" };
 }
 
 function UnusualList({
@@ -1085,15 +1133,17 @@ function UnusualList({
   phrase,
   fallbackMonth,
   onDrill,
+  onFinding,
 }: {
   c: CheckInData;
   phrase: string;
   fallbackMonth: string | null;
   onDrill: (p: Pick, m: string) => void;
+  onFinding: (key: string) => void;
 }) {
   const firstLarge = c.unusual.findIndex((u) => u.kind === "large_charge");
   const all = c.unusual.map((u, i) =>
-    rowOf(u, i, i === firstLarge, fallbackMonth, onDrill),
+    rowOf(u, i, i === firstLarge, fallbackMonth, onDrill, onFinding),
   );
   const rows = all.filter((r) => !r.minor);
   const minor = all.filter((r) => r.minor);
@@ -1166,30 +1216,39 @@ function RowItem({ r }: { r: Row }) {
         {r.note}
       </span>
       <span className="ci-main">
-        <a
-          className="ci-name"
-          href={r.href}
-          data-return={r.key}
-          onClick={(e) => {
-            if (e.defaultPrevented || e.button !== 0) return;
-            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-            e.preventDefault();
-            returnTo = r.key;
-            if (r.go) r.go();
-            else navigate(r.href);
-          }}
-        >
-          {r.name}
-          <span className="lg-sr">
-            , {r.note}
-            {r.cents !== null
-              ? r.usual
-                ? `, usually ${signedCents(r.cents)} a month`
-                : `, ${signedCents(r.cents)}`
-              : ""}
-            . {r.detail} Opens in {r.dest}.
+        {r.dest === null ? (
+          <span className="ci-name ci-name-plain">
+            {r.name}
+            <span className="lg-sr">
+              , {r.note}. {r.detail}
+            </span>
           </span>
-        </a>
+        ) : (
+          <a
+            className="ci-name"
+            href={r.href}
+            data-return={r.key}
+            onClick={(e) => {
+              if (e.defaultPrevented || e.button !== 0) return;
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault();
+              returnTo = r.key;
+              if (r.go) r.go();
+              else navigate(r.href);
+            }}
+          >
+            {r.name}
+            <span className="lg-sr">
+              , {r.note}
+              {r.cents !== null
+                ? r.usual
+                  ? `, usually ${signedCents(r.cents)} a month`
+                  : `, ${signedCents(r.cents)}`
+                : ""}
+              . {r.detail} Opens in {r.dest}.
+            </span>
+          </a>
+        )}
         <span className="ci-detail" aria-hidden="true">
           {r.detail}
         </span>

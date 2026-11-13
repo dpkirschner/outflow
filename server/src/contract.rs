@@ -16,13 +16,17 @@ use outflow_core::balances::{
     AccountBalance, BalancesView, DayTotals, Group, GroupBalance, HoldingRow, PositionPoint,
     PositionRow, Totals,
 };
+use outflow_core::earn::{CardEarn, EarnEvidence, Rate};
+use outflow_core::find::{
+    Evidence, FindReport, Finding, FindingKind, OfferEvidence, SubscriptionEvidence,
+};
 use outflow_core::model::{
     Account, AccountKind, CategorySource, MatchConfidence, MatchStatus, PlaidItem, SyncEntry,
     Transaction, TxnFlag, TxnMatch,
 };
-use outflow_core::perks::{Cap, CardStatus, Finding, FindingKind, Offer, PerksReport, Reward};
+use outflow_core::perks::{Cap, CardStatus, Offer, Reward};
 use outflow_core::query::{CategorySpend, FlowMonth, MerchantSpend, MovedFlow, MovedLane, TxnPage};
-use outflow_core::recurring::{Change, RecurringMerchant, RecurringView};
+use outflow_core::recurring::{Change, PriceRise, RecurringMerchant, RecurringView};
 use outflow_core::stock::{
     AccountChange, ChangeReason, ContributedPoint, ExcludedAccount, GainReason, NetWorthChange,
     PositionChange,
@@ -219,6 +223,8 @@ fn recurring_merchant() -> RecurringMerchant {
         spark_cents: vec![7_100, 7_400, 7_900, 7_600, 10_000, 3_200],
         category: Some("Dining".into()),
         account_id: "acct-demo-card".into(),
+        steady_cents: None,
+        price_rise: None,
     }
 }
 
@@ -230,6 +236,8 @@ fn recurring_view() -> RecurringView {
     ignored.change_pct = None;
     ignored.change_base_cents = None;
     ignored.category = None;
+    ignored.cadence = StreamCadence::Monthly;
+    ignored.steady_cents = Some(2_000);
     let mut slow = recurring_merchant();
     slow.merchant = "sample groomer".into();
     slow.name = "Sample Groomer".into();
@@ -322,6 +330,9 @@ fn checkin() -> outflow_core::CheckIn {
         per_charge: false,
         impact_cents: Some(750),
         minor: true,
+        finding_kind: None,
+        finding_key: None,
+        action: None,
     };
     let mut late = up.clone();
     late.kind = UnusualKind::Late;
@@ -351,6 +362,21 @@ fn checkin() -> outflow_core::CheckIn {
     large.impact_cents = Some(120_000);
     large.minor = false;
     up.account_id = None;
+    let mut found = large.clone();
+    found.kind = UnusualKind::Finding;
+    found.label = "Sample Outfitters".into();
+    found.cents = Some(3_000);
+    found.usual_cents = None;
+    found.merchant = None;
+    found.txn_id = None;
+    found.account_id = None;
+    found.day = Some("2026-10-20".into());
+    found.impact_cents = Some(3_000);
+    found.finding_kind = Some(outflow_core::FindingKind::WrongCard);
+    found.finding_key = Some("wrong_card:0000:sample-outfitters".into());
+    found.action = Some(
+        "Charge Sample Outfitters to the Demo Issuer card ending 0000 until 2027-01-31".into(),
+    );
     let p = outflow_core::Period::parse("2026-10", NaiveDate::from_ymd_opt(2026, 11, 7).unwrap())
         .unwrap();
     CheckIn {
@@ -398,7 +424,7 @@ fn checkin() -> outflow_core::CheckIn {
             in_diff_cents: Some(0),
             contributors: vec![],
         }),
-        unusual: vec![large, late, up],
+        unusual: vec![large, late, found, up],
         not_checked: vec![NotChecked {
             check: Check::LargeCharges,
             reason: NotCheckedReason::ShortHistory,
@@ -709,14 +735,20 @@ fn offer(reward: Reward, cap: Cap) -> Offer {
         single: true,
         per_year: false,
         added: false,
+        starts: Some(T0 - 2 * DAY),
         expires: T0 + 30 * DAY,
         patterns: vec!["SAMPLE OUTFITTERS".into()],
         note: None,
     }
 }
 
-fn perks_report() -> PerksReport {
-    PerksReport {
+fn find_report() -> FindReport {
+    FindReport {
+        window: outflow_core::Period {
+            kind: outflow_core::PeriodKind::Custom,
+            start: chrono::NaiveDate::from_ymd_opt(2025, 2, 1).unwrap(),
+            end: chrono::NaiveDate::from_ymd_opt(2026, 2, 1).unwrap(),
+        },
         cards: vec![
             CardStatus {
                 issuer: "Demo Issuer".into(),
@@ -726,45 +758,183 @@ fn perks_report() -> PerksReport {
                 offers: 2,
                 added: 1,
                 expired: 0,
+                earn: true,
             },
             CardStatus {
                 issuer: "Demo Issuer".into(),
                 mask: "9999".into(),
                 account_id: None,
-                problem: Some("no linked account ends in 9999".into()),
+                problem: Some("no account name ends in (9999)".into()),
                 offers: 0,
                 added: 0,
                 expired: 0,
+                earn: false,
             },
         ],
+        notes: vec!["card choice leaves out cards with no [earn] table: 9999".into()],
         findings: vec![
             Finding {
+                kind: FindingKind::CardChoice,
+                key: "card_choice::food-and-drink-groceries".into(),
+                subject: "Food and drink groceries".into(),
+                card_mask: Some("0000".into()),
+                est_cents_per_year: 4_500,
+                est_points_per_year: 0,
+                est_value_cents_per_year: 4_500,
+                txn_ids: vec!["txn-demo-006".into()],
+                action: "Charge food and drink groceries to the Demo Issuer card ending 0000"
+                    .into(),
+                evidence: Evidence::Earn(EarnEvidence {
+                    category: "FOOD_AND_DRINK_GROCERIES".into(),
+                    cards: vec![
+                        CardEarn {
+                            issuer: "Demo Issuer".into(),
+                            mask: "0000".into(),
+                            spend_cents: 0,
+                            charges: 0,
+                            rate: Rate::from_thousandths(4_000),
+                            cents_per_point: Some(Rate::from_thousandths(1_250)),
+                            return_bp: 500,
+                            cap_left_cents: Some(2_500_000),
+                            earned_cents: 0,
+                        },
+                        CardEarn {
+                            issuer: "Demo Bank".into(),
+                            mask: "1111".into(),
+                            spend_cents: 150_000,
+                            charges: 1,
+                            rate: Rate::from_thousandths(2_000),
+                            cents_per_point: None,
+                            return_bp: 200,
+                            cap_left_cents: None,
+                            earned_cents: 3_000,
+                        },
+                    ],
+                }),
+            },
+            Finding {
                 kind: FindingKind::AddOffer,
-                card_mask: "0000".into(),
-                offer: offer(Reward::Back(m(1_000)), Cap::None),
-                days_left: 30,
-                charges: 2,
-                last_charge: Some(T0 - 10 * DAY),
-                typical_charge_cents: Some(-6_000),
-                est_cash_cents: 1_000,
-                est_points: 0,
+                key: "add_offer:0000:sample-outfitters".into(),
+                subject: "Sample Outfitters".into(),
+                card_mask: Some("0000".into()),
+                est_cents_per_year: 3_000,
+                est_points_per_year: 0,
+                est_value_cents_per_year: 3_000,
                 txn_ids: vec!["txn-demo-004".into(), "txn-demo-005".into()],
-                matched_merchants: vec!["Sample Outfitters".into()],
+                action: "Add the Sample Outfitters offer to the Demo Issuer card ending 0000 \
+                         (expires 2026-02-14)"
+                    .into(),
+                evidence: Evidence::Offer(OfferEvidence {
+                    issuer: "Demo Issuer".into(),
+                    offer: offer(Reward::Back(m(3_000)), Cap::None),
+                    days_left: 30,
+                    charges: 2,
+                    last_charge: Some(T0 - 10 * DAY),
+                    typical_charge_cents: Some(6_000),
+                    matched_merchants: vec!["SAMPLE OUTFITTERS".into()],
+                }),
             },
             Finding {
                 kind: FindingKind::Expiring,
-                card_mask: "0000".into(),
-                offer: offer(Reward::PtsPerDollar(3), Cap::Points(3_000)),
-                days_left: 4,
-                charges: 0,
-                last_charge: None,
-                typical_charge_cents: None,
-                est_cash_cents: 0,
-                est_points: 0,
-                txn_ids: vec![],
-                matched_merchants: vec![],
+                key: "expiring:0000:sample-outfitters".into(),
+                subject: "Sample Outfitters".into(),
+                card_mask: Some("0000".into()),
+                est_cents_per_year: 0,
+                est_points_per_year: 3_000,
+                est_value_cents_per_year: 3_750,
+                txn_ids: vec!["txn-demo-004".into()],
+                action: "Use the Sample Outfitters offer on the Demo Issuer card ending 0000 \
+                         by 2026-01-19"
+                    .into(),
+                evidence: Evidence::Offer(OfferEvidence {
+                    issuer: "Demo Issuer".into(),
+                    offer: offer(Reward::PtsPerDollar(3), Cap::Points(3_000)),
+                    days_left: 4,
+                    charges: 1,
+                    last_charge: Some(T0 - 10 * DAY),
+                    typical_charge_cents: Some(6_000),
+                    matched_merchants: vec!["SAMPLE OUTFITTERS".into()],
+                }),
             },
+            subscription_finding(
+                FindingKind::Subscription,
+                "sample stream",
+                "Sample Stream",
+                1_599,
+                None,
+                None,
+            ),
+            subscription_finding(
+                FindingKind::PriceRise,
+                "sample music",
+                "Sample Music",
+                1_499,
+                Some(PriceRise {
+                    from_cents: 1_099,
+                    to_cents: 1_499,
+                    since: T0 - 5 * DAY,
+                }),
+                None,
+            ),
         ],
+        dismissed: vec![],
+        reviewed: vec![subscription_finding(
+            FindingKind::Subscription,
+            "sample news",
+            "Sample News",
+            1_000,
+            None,
+            Some(T0 - 30 * DAY),
+        )],
+    }
+}
+
+fn subscription_finding(
+    kind: FindingKind,
+    merchant: &str,
+    name: &str,
+    charge_cents: i64,
+    price_rise: Option<PriceRise>,
+    reviewed_at: Option<i64>,
+) -> Finding {
+    let est = match price_rise {
+        Some(p) => 12 * (p.to_cents - p.from_cents),
+        None => 12 * charge_cents,
+    };
+    Finding {
+        kind,
+        key: format!(
+            "{}::{}{}",
+            kind.as_str(),
+            merchant.replace(' ', "-"),
+            // A price rise's key carries the day it began (T0 - 5 days).
+            if price_rise.is_some() {
+                ":2026-01-10"
+            } else {
+                ""
+            }
+        ),
+        subject: name.into(),
+        card_mask: Some("0000".into()),
+        est_cents_per_year: est,
+        est_points_per_year: 0,
+        est_value_cents_per_year: est,
+        txn_ids: vec!["txn-demo-007".into()],
+        action: match price_rise {
+            Some(_) => format!("{name} went up: check the plan is still worth it"),
+            None => format!("Review {name}: still worth it?"),
+        },
+        evidence: Evidence::Subscription(SubscriptionEvidence {
+            merchant: merchant.into(),
+            name: name.into(),
+            cadence: StreamCadence::Monthly,
+            charge_cents,
+            per_year: 12,
+            price_rise,
+            last_charge: T0 - 5 * DAY,
+            account_id: "acct-demo-card".into(),
+            reviewed_at,
+        }),
     }
 }
 
@@ -951,8 +1121,8 @@ fn entries() -> Vec<(&'static str, String)> {
         ("CategorizeResult", j(categorize_result())),
         ("CategoryEdit", j(category_edit())),
         ("GroupEdit", j(group_edit())),
-        // perks_routes.rs
-        ("PerksReport", j(perks_report())),
+        // find_routes.rs
+        ("FindReport", j(find_report())),
         // plaid_routes.rs
         ("PlaidItem", j(plaid_item())),
         ("ExchangeResult", j(exchange_result())),

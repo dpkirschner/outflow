@@ -146,7 +146,7 @@ fn render() -> String {
         decls!(
             &cfg,
             out,
-            [Change, Charge, RecurringMerchant, RecurringView]
+            [Change, Charge, PriceRise, RecurringMerchant, RecurringView]
         );
     }
 
@@ -199,17 +199,28 @@ fn render() -> String {
     // --- core::perks ---
     {
         use outflow_core::perks::*;
+        decls!(&cfg, out, [Reward, Cap, Offer, CardStatus]);
+    }
+
+    // --- core::earn ---
+    {
+        use outflow_core::earn::*;
+        decls!(&cfg, out, [CardEarn, EarnEvidence]);
+    }
+
+    // --- core::find ---
+    {
+        use outflow_core::find::*;
         decls!(
             &cfg,
             out,
             [
-                Reward,
-                Cap,
-                Offer,
                 FindingKind,
+                OfferEvidence,
+                SubscriptionEvidence,
+                Evidence,
                 Finding,
-                CardStatus,
-                PerksReport
+                FindReport
             ]
         );
     }

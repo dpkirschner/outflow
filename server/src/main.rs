@@ -8,8 +8,8 @@
 
 #[cfg(test)]
 mod contract;
+mod find_routes;
 mod match_routes;
-mod perks_routes;
 mod plaid_routes;
 mod routes;
 mod state;
@@ -134,7 +134,7 @@ fn build_app(state: AppState) -> Router {
     let api = routes::api_router()
         .merge(plaid_routes::router())
         .merge(match_routes::router())
-        .merge(perks_routes::router())
+        .merge(find_routes::router())
         // Unknown /api paths must 404 as JSON — never fall through to the SPA
         // shell (a 200 HTML page masquerading as an API response).
         .fallback(|| async {

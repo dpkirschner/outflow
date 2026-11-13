@@ -4,6 +4,8 @@ pub mod balances;
 pub mod build;
 pub mod categorize;
 pub mod checkin;
+pub mod earn;
+pub mod find;
 pub mod llm;
 pub mod model;
 pub mod money;
@@ -33,6 +35,12 @@ pub use checkin::{
     CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual, UnusualKind,
     Usual,
 };
+pub use earn::{CardEarn, EarnEvidence, EarnTable, Rate};
+pub use find::{
+    apply_dismissed, apply_reviewed, find, finding, set_dismissed, set_reviewed, Evidence,
+    FindError, FindOptions, FindReport, Finding, FindingKind, OfferEvidence, SubscriptionEvidence,
+    MIN_EST_CENTS_PER_YEAR, REVIEWED_DAYS,
+};
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
     account_display_label, Account, AccountKind, BalanceSnapshot, CategoryEdit, CategorySource,
@@ -43,8 +51,7 @@ pub use model::{
 pub use money::{Money, MoneyParseError};
 pub use period::{parse_day, today_local, Period, PeriodError, PeriodKind};
 pub use perks::{
-    evaluate as evaluate_perks, load_offers, parse_offers, Cap, CardOffers, CardStatus, Finding,
-    FindingKind, Offer, PerkOptions, PerksError, PerksReport, Reward,
+    load_offers, parse_offers, Cap, CardOffers, CardStatus, Offer, PerksError, Reward,
 };
 pub use plaid::{
     item_has_investments_consent, item_has_product, item_is_investments_only, parse_accounts_get,
@@ -56,13 +63,19 @@ pub use query::{
     top_merchants, CategorySpend, Direction, FlowMonth, InSource, Lane, MerchantSpend, MovedFlow,
     MovedLane, SeriesMonth, SortKey, TxnFilter, TxnPage, TxnQuery, TxnRow,
 };
-pub use recurring::{recurring, Change, RecurringMerchant, RecurringView};
+pub use recurring::{
+    is_subscription_cadence, price_rise, recurring, steady_charge, Change, PriceRise,
+    RecurringMerchant, RecurringView, STEADY_CHARGES, STEADY_PCT,
+};
 pub use reset::{preview as reset_preview, ResetPreview, PLAID_REFETCH_DAYS};
 pub use stock::{
     net_worth_change, position_change, AccountChange, ChangeReason, ContributedPoint,
     ExcludedAccount, GainReason, NetWorthChange, PositionChange, PositionLens,
 };
-pub use store::{CategoryUndone, FlagRule, PlaidBatch, SetKind, Store, Unaccept, UpsertResult};
+pub use store::{
+    CategoryUndone, DismissedMark, FlagRule, PlaidBatch, ReviewedMark, SetKind, Store, Unaccept,
+    UpsertResult,
+};
 pub use subscriptions::{
     detect_rhythms, display_merchant, normalize_payee, RhythmGroup, StreamCadence,
 };

@@ -16,6 +16,9 @@
 #   added    = true      the offer has been added (enrolled) on the card. Absent = false:
 #                        it's only available, and charges don't earn it yet.
 #                        None of these sample offers are added.
+#   starts   = 2026-10-20  first day the offer counts (absent = it already has);
+#                        charges before it earn nothing, and Check-in shows the
+#                        offer as new the period it starts.
 #   note     = "..."     terms the matcher can't check (location, new members only, ...)
 #   match    = [...]     normalized-payee patterns (see subscriptions::normalize_payee:
 #                        lowercase alphanumeric tokens joined by spaces).
@@ -51,3 +54,19 @@ offers = [
   { merchant = "Riverside Cinemas", pct = 20, uses = 2, max = "12.00", expires = 2026-11-30, match = ["riverside cinemas"] },
   { merchant = "Stadium Collection (concessions)", pct = 10, max = "250.00", per_year = true, expires = 2026-12-31, match = [], note = "concessions at partner stadiums; no single merchant descriptor" },
 ]
+
+# What the card earns, for card choice (optional; a card without this table is
+# left out of it). Rates are points per dollar, keyed on Plaid's category:
+# pfc_detailed (FOOD_AND_DRINK_GROCERIES) wins over pfc_primary
+# (FOOD_AND_DRINK), and anything not named earns `default`.
+#   cents_per_point = 1.25   what one point is worth to you. Leave it out for a
+#                            cash back card: its rates are then percent back.
+#   caps = { KEY = "..." }   yearly spend earning that key's rate (decimal
+#                            string); past it the card earns `default`.
+# Rates take up to three decimal places (1.5, "1.25"). Rotating quarterly
+# categories aren't modelled. Rates and values here are invented.
+[earn]
+cents_per_point = 1
+default = 1
+rates = { FOOD_AND_DRINK_RESTAURANT = 4, FOOD_AND_DRINK_GROCERIES = 4, TRAVEL_FLIGHTS = 3 }
+caps = { FOOD_AND_DRINK_GROCERIES = "25000.00" }

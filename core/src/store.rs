@@ -5,6 +5,25 @@ use crate::subscriptions::normalize_payee;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 
+/// A Finding's Dismissed mark: the estimate it had when dismissed, so it can
+/// come back if that more than doubles (`find::apply_dismissed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DismissedMark {
+    pub est_cents_per_year: i64,
+    pub est_points_per_year: i64,
+    /// Unix seconds.
+    pub marked_at: i64,
+}
+
+/// A merchant's Reviewed mark (GLOSSARY: Reviewed): the charge it had and
+/// when, so `find::apply_reviewed` can let it lapse after a year or a rise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReviewedMark {
+    pub charge_cents: i64,
+    /// Unix seconds.
+    pub marked_at: i64,
+}
+
 fn row_to_txn(r: &rusqlite::Row) -> rusqlite::Result<Transaction> {
     Ok(Transaction {
         id: r.get(0)?,
@@ -418,6 +437,18 @@ CREATE TABLE IF NOT EXISTS merchant_overrides (
     pattern TEXT PRIMARY KEY,
     mark TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS finding_marks (
+    key TEXT PRIMARY KEY,
+    mark TEXT NOT NULL,
+    est_cents_per_year INTEGER NOT NULL,
+    est_points_per_year INTEGER NOT NULL,
+    marked_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reviewed_merchants (
+    merchant TEXT PRIMARY KEY,
+    charge_cents INTEGER NOT NULL,
+    marked_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started INTEGER NOT NULL,
@@ -536,7 +567,14 @@ CREATE INDEX IF NOT EXISTS investment_transactions_account_date
 /// restores exactly (pairs accepted earlier have none: best effort).
 /// v15: accounts.kind_override (the owner's account type; `kind` stays the
 /// bank's).
-const SCHEMA_VERSION: i64 = 15;
+/// v16: finding_marks (new table): the Dismissed mark on a Finding, by
+/// `Finding::key`, with the estimate it had when dismissed.
+/// v17: reviewed_merchants (new table): the Reviewed mark on a normalized
+/// merchant, with the charge it had and when. Not merchant_overrides (one
+/// mark per pattern, no time, and a merchant may also be Ignored) and not
+/// finding_marks (keyed by Finding, one mark per key, so it would collide
+/// with Dismissed and miss the price-rise Finding of the same merchant).
+const SCHEMA_VERSION: i64 = 17;
 
 impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
@@ -958,7 +996,7 @@ impl Store {
     }
 
     /// Transactions on visible accounts — the single read behind search,
-    /// spend, recurring and perks, so hiding an account drops its
+    /// spend, recurring and find, so hiding an account drops its
     /// rows from all of them. Rows whose account isn't in `accounts` at all
     /// (e.g. fixture-only ingests) are kept.
     pub fn all_transactions(&self) -> rusqlite::Result<Vec<Transaction>> {
@@ -1801,6 +1839,96 @@ impl Store {
                 params![key],
             )?;
         }
+        Ok(())
+    }
+
+    /// Every Reviewed merchant, normalized (GLOSSARY: Reviewed), lapsed
+    /// marks included (`find::apply_reviewed` decides).
+    pub fn reviewed_merchants(&self) -> rusqlite::Result<HashMap<String, ReviewedMark>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT merchant, charge_cents, marked_at FROM reviewed_merchants")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                ReviewedMark {
+                    charge_cents: r.get(1)?,
+                    marked_at: r.get(2)?,
+                },
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Set (replacing any earlier one) or clear the Reviewed mark on a
+    /// normalized merchant.
+    pub fn set_merchant_reviewed(
+        &self,
+        merchant: &str,
+        mark: Option<ReviewedMark>,
+    ) -> rusqlite::Result<()> {
+        match mark {
+            Some(m) => self.conn.execute(
+                "INSERT INTO reviewed_merchants (merchant, charge_cents, marked_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(merchant) DO UPDATE SET charge_cents = excluded.charge_cents,
+                     marked_at = excluded.marked_at",
+                params![merchant, m.charge_cents, m.marked_at],
+            )?,
+            None => self.conn.execute(
+                "DELETE FROM reviewed_merchants WHERE merchant = ?1",
+                params![merchant],
+            )?,
+        };
+        Ok(())
+    }
+
+    /// Every Dismissed Finding, by `Finding::key` (GLOSSARY: Dismissed).
+    pub fn dismissed_findings(&self) -> rusqlite::Result<HashMap<String, DismissedMark>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT key, est_cents_per_year, est_points_per_year, marked_at
+             FROM finding_marks WHERE mark = 'dismissed'",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                DismissedMark {
+                    est_cents_per_year: r.get(1)?,
+                    est_points_per_year: r.get(2)?,
+                    marked_at: r.get(3)?,
+                },
+            ))
+        })?;
+        rows.collect()
+    }
+
+    /// Set (with the estimate it has now) or clear the Dismissed mark on a
+    /// Finding's key. Setting it again replaces the stored estimate.
+    pub fn set_finding_dismissed(
+        &self,
+        key: &str,
+        mark: Option<DismissedMark>,
+    ) -> rusqlite::Result<()> {
+        match mark {
+            Some(m) => self.conn.execute(
+                "INSERT INTO finding_marks
+                     (key, mark, est_cents_per_year, est_points_per_year, marked_at)
+                 VALUES (?1, 'dismissed', ?2, ?3, ?4)
+                 ON CONFLICT(key) DO UPDATE SET mark = excluded.mark,
+                     est_cents_per_year = excluded.est_cents_per_year,
+                     est_points_per_year = excluded.est_points_per_year,
+                     marked_at = excluded.marked_at",
+                params![
+                    key,
+                    m.est_cents_per_year,
+                    m.est_points_per_year,
+                    m.marked_at
+                ],
+            )?,
+            None => self
+                .conn
+                .execute("DELETE FROM finding_marks WHERE key = ?1", params![key])?,
+        };
         Ok(())
     }
 

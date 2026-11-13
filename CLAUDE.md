@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 outflow is a single-user view of where one person's money is and where it's
 going: **Stock** (balances, holdings, performance), **Flow** (in / out / moved,
-recurring purchases), and **Find money** (planned). Direction and screen plan:
+recurring purchases), and **Find money** (card offers, card choice, subscriptions to review). Direction and screen plan:
 `docs/adr/0001-product-direction.md`; vocabulary: `GLOSSARY.md`.
 A server (an always-on mac-mini over Tailscale) pulls accounts from **Plaid**
 into local SQLite, categorizes transactions (rules + optional LLM), matches
@@ -67,7 +67,7 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
 
 **Styling:** plain CSS in one file, `app/src/ledger.css` (tokens are the
 `--lg-*` properties on `:root`; no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
-`ci-*` = Check-in (home), `fl-*` = Flow tab (`fl-rc-*` its recurring list), `hd-*` = Holdings tab, `lg-*` = shell and shared (incl. the `lg-strip` month strip), `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
+`ci-*` = Check-in (home), `fl-*` = Flow tab (`fl-rc-*` its recurring list), `hd-*` = Holdings tab, `fm-*` = Find money, `lg-*` = shell and shared (incl. the `lg-strip` month strip), `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
 match review. For styling/visual questions, trace
 `className` → rule with `rtk grep` in `ledger.css` (graphify doesn't index CSS).
 

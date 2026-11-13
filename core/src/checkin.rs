@@ -39,15 +39,35 @@
 //!   named (`VERSUS_MAX_CONTRIBUTORS`).
 //! - **Month marks** (ho-bv6.31): a month check-in also judges every
 //!   finished month with a usual by the versus rule, for the month strip.
-//! - Order: attention, then other items by money (`impact_cents`), minor
-//!   last. One row per merchant: a merchant late and changed in the same
+//! - **Findings** (decided 2026-11-09, ho-2mj.18): an open Finding (not
+//!   Dismissed or Reviewed, at or above the floor) is one more unusual item
+//!   when it is new this period. Nothing records when a Finding was first
+//!   seen; "new" is read off its evidence ([`new_findings`]):
+//!   - wrong card: an off-card charge posted in the period;
+//!   - price rise: the first charge at the new price is in the period;
+//!   - add offer, expiring: the offer expires before the period ends, or
+//!     within `expiring_days` (an option, default 14) of today (of the period's end, for a past
+//!     period), or it starts in the period (an offer's optional `starts`;
+//!     the row's day is the expiry when both hold);
+//!   - card choice: its first qualifying charge in the window falls in the
+//!     period, so a standing habit shows once, not every month;
+//!   - subscription: never (a new recurring merchant already has its row).
+//!
+//!   One row per merchant: a price rise whose merchant already has a row
+//!   (up, new, late) adds none. An offers file that can't be read skips the
+//!   offer and card choice Findings and is listed in `not_checked`; no
+//!   offers file configured skips them silently.
+//! - Order: attention, then other items by money (`impact_cents`), then
+//!   Findings by their yearly estimate, minor last. One row per merchant: a merchant late and changed in the same
 //!   period shows once, as late, carrying the change.
 //!
 //! A check that can't run is listed in `not_checked` with its reason, so the
 //! screen says why instead of showing nothing.
 
+use crate::find::{self, Evidence, FindOptions, Finding, FindingKind};
 use crate::model::Transaction;
 use crate::period::{Period, PeriodKind};
+use crate::perks;
 use crate::query::{account_kinds, category_spend, flow_over, lane_of, Lane, TxnFilter};
 use crate::recurring::{self, Change, RecurringView};
 use crate::stock::{net_worth_change, ChangeReason, NetWorthChange};
@@ -57,6 +77,7 @@ use crate::upkeep;
 use chrono::{Datelike, Days, Local, Months, NaiveDate, TimeZone};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
 /// How many earlier periods the usual is taken over.
 pub const USUAL_PERIODS: usize = 12;
@@ -235,6 +256,9 @@ pub enum UnusualKind {
     /// A recurring merchant with no charge for 1.5x its usual gap (at least
     /// a month), as of the period's end: skipped, moved or stopped.
     Late,
+    /// A Finding (Find money) that is new this period; `finding_kind`,
+    /// `finding_key` and `action` say which.
+    Finding,
 }
 
 /// One unusual item. Which fields are set depends on `kind`; each item
@@ -276,8 +300,18 @@ pub struct Unusual {
     pub per_charge: bool,
     /// Money at stake, positive, for ordering: the charge (large), the
     /// difference from the usual (up / down), the usual monthly cost (new,
-    /// late). None for attention items.
+    /// late), the yearly estimate (Finding). None for attention items.
     pub impact_cents: Option<i64>,
+    /// Finding: its kind, its `Finding::key`, and its one suggested action.
+    /// `cents` is then its estimated value per year, and `day` the charge
+    /// that made it new (wrong card, card choice), the first charge at the
+    /// new price (price rise), or the offer's expiry day (add offer,
+    /// expiring; its start day when it's new for starting in the period).
+    /// A recurring up row also carries `finding_key` when its
+    /// merchant has an open price rise Finding (that row stands in for it).
+    pub finding_kind: Option<FindingKind>,
+    pub finding_key: Option<String>,
+    pub action: Option<String>,
     /// A small or frequent-merchant item (see the module docs); the screen
     /// folds these into one row.
     pub minor: bool,
@@ -303,6 +337,9 @@ impl Unusual {
             per_charge: false,
             impact_cents: None,
             minor: false,
+            finding_kind: None,
+            finding_key: None,
+            action: None,
         }
     }
 }
@@ -316,6 +353,8 @@ pub enum Check {
     /// New recurring merchants.
     NewRecurring,
     LargeCharges,
+    /// Card offer and card choice Findings.
+    CardOffers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -330,6 +369,9 @@ pub enum NotCheckedReason {
     ShortHistory,
     /// A custom or yearly range: check-in covers weeks, months, quarters.
     Range,
+    /// The offers file (`OUTFLOW_PERKS`) couldn't be read; Find money says
+    /// why.
+    OffersFile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -341,11 +383,16 @@ pub struct NotChecked {
 
 /// The check-in for `period`. `today` decides what's in progress; `now`
 /// (epoch seconds) which months the recurring list treats as complete.
+/// `offers` is the offers file or folder (`OUTFLOW_PERKS`), `None` when not
+/// configured; a bad one never fails the check-in. `opts` are the Find
+/// options (`expiring_days` decides which offers are new as expiring).
 pub fn checkin(
     store: &Store,
     period: Period,
     today: NaiveDate,
     now: i64,
+    offers: Option<&Path>,
+    opts: &FindOptions,
 ) -> rusqlite::Result<CheckIn> {
     let txns = store.all_transactions()?;
     let kind = account_kinds(store)?;
@@ -556,16 +603,73 @@ pub fn checkin(
         unusual.extend(late(&last_view, since, until));
     }
 
+    // Findings new this period, from the archive already loaded.
+    let cards = match offers.map(perks::load_offers).transpose() {
+        Ok(c) => c,
+        Err(_) => {
+            not_checked.push(NotChecked {
+                check: Check::CardOffers,
+                reason: NotCheckedReason::OffersFile,
+            });
+            None
+        }
+    };
+    let report = find::report_with(
+        store,
+        cards.as_deref(),
+        &accounts,
+        &txns,
+        &ignored,
+        period.last_day().min(today),
+        now,
+        opts,
+    )?;
+    let has_row: HashSet<String> = unusual.iter().filter_map(|u| u.merchant.clone()).collect();
+    let posted: HashMap<&str, i64> = txns
+        .iter()
+        .map(|t| (t.id.as_str(), t.effective_date()))
+        .collect();
+    unusual.extend(new_findings(
+        &report.findings,
+        |id| posted.get(id).copied(),
+        (since, until),
+        now,
+        opts.expiring_days,
+        &has_row,
+    ));
+    // An up row whose merchant has an open price rise stands in for that
+    // Finding (new_findings skips it): point the row at it.
+    let rises: HashMap<&str, &str> = report
+        .findings
+        .iter()
+        .filter_map(|f| match (&f.kind, &f.evidence) {
+            (FindingKind::PriceRise, Evidence::Subscription(e)) => {
+                Some((e.merchant.as_str(), f.key.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    for u in unusual
+        .iter_mut()
+        .filter(|u| u.kind == UnusualKind::RecurringUp)
+    {
+        if let Some(key) = u.merchant.as_deref().and_then(|m| rises.get(m)) {
+            u.finding_key = Some((*key).to_string());
+        }
+    }
+
     for u in &mut unusual {
         mark_minor(u);
     }
-    // Attention first (already first, kept in order), then by money, minor
-    // last. Stable, so equal items keep the order they were found in.
+    // Attention first (already first, kept in order), then by money,
+    // Findings, minor last. Stable, so equal items keep the order they were
+    // found in.
     unusual.sort_by_key(|u| {
         let attention = matches!(u.kind, UnusualKind::Connection | UnusualKind::MatchReview);
         (
             !attention,
             u.minor,
+            u.kind == UnusualKind::Finding,
             std::cmp::Reverse(u.impact_cents.unwrap_or(0)),
         )
     });
@@ -787,6 +891,65 @@ fn attention(store: &Store) -> rusqlite::Result<Vec<Unusual>> {
         out.push(u);
     }
     Ok(out)
+}
+
+/// The open Findings that are new in `period` (`[since, until)`, epoch
+/// seconds), one row each, by the rules in the module docs. `posted` gives a
+/// transaction's behavioral date by id; `has_row` holds the merchants that
+/// already have an unusual row.
+fn new_findings(
+    findings: &[Finding],
+    posted: impl Fn(&str) -> Option<i64>,
+    period: (i64, i64),
+    now: i64,
+    expiring_days: i64,
+    has_row: &HashSet<String>,
+) -> Vec<Unusual> {
+    let (since, until) = period;
+    let within = |ts: i64| (since..until).contains(&ts);
+    let dates =
+        |f: &Finding| -> Vec<i64> { f.txn_ids.iter().filter_map(|id| posted(id)).collect() };
+    findings
+        .iter()
+        .filter_map(|f| {
+            let (merchant, day) = match (&f.kind, &f.evidence) {
+                (FindingKind::WrongCard, _) => {
+                    (None, dates(f).into_iter().filter(|t| within(*t)).max()?)
+                }
+                (FindingKind::CardChoice, _) => {
+                    let first = dates(f).into_iter().min()?;
+                    (None, within(first).then_some(first)?)
+                }
+                (FindingKind::AddOffer | FindingKind::Expiring, Evidence::Offer(o)) => {
+                    let expires = o.offer.expires;
+                    let soon = until.min(now) + expiring_days * 86_400;
+                    let day = if expires < until || expires <= soon {
+                        expires
+                    } else {
+                        o.offer.starts.filter(|s| within(*s))?
+                    };
+                    (None, day)
+                }
+                (FindingKind::PriceRise, Evidence::Subscription(e)) => {
+                    let since = e.price_rise.as_ref()?.since;
+                    if !within(since) || has_row.contains(&e.merchant) {
+                        return None;
+                    }
+                    (Some(e.merchant.clone()), since)
+                }
+                _ => return None,
+            };
+            let mut u = Unusual::new(UnusualKind::Finding, f.subject.clone());
+            u.cents = Some(f.est_value_cents_per_year);
+            u.impact_cents = Some(f.est_value_cents_per_year);
+            u.merchant = merchant;
+            u.day = local_day(day).map(|d| d.to_string());
+            u.finding_kind = Some(f.kind);
+            u.finding_key = Some(f.key.clone());
+            u.action = Some(f.action.clone());
+            Some(u)
+        })
+        .collect()
 }
 
 /// Recurring merchants whose first charge falls in `[since, until)`.
@@ -1201,6 +1364,8 @@ mod tests {
             Period::parse(p, today()).unwrap(),
             today(),
             noon(2026, 11, 7),
+            None,
+            &FindOptions::default(),
         )
         .unwrap()
     }
@@ -1408,7 +1573,10 @@ mod tests {
                 reason: NotCheckedReason::Week,
             }));
         }
-        assert!(kinds(&c).is_empty());
+        // Streamflix's new price starts Oct 9: no up row on a week, so its
+        // price rise Finding is the one item.
+        assert_eq!(kinds(&c), [UnusualKind::Finding]);
+        assert_eq!(c.unusual[0].merchant.as_deref(), Some("streamflix"));
         let w = run(&s, "2026-W42"); // Oct 12 - 18: the furniture
         assert_eq!(kinds(&w), [UnusualKind::LargeCharge]);
     }
@@ -1687,5 +1855,283 @@ mod tests {
         d.impact_cents = Some(MINOR_CHANGE_CENTS - 1);
         mark_minor(&mut d);
         assert!(d.minor);
+    }
+
+    // ── Findings as unusual items (ho-2mj.18) ──────────────────────────────
+
+    fn a_finding(kind: FindingKind, txn_ids: &[&str], evidence: Evidence) -> Finding {
+        Finding {
+            kind,
+            key: format!("{}:0000:sample", kind.as_str()),
+            subject: "Sample Shop".into(),
+            card_mask: Some("0000".into()),
+            est_cents_per_year: 40_00,
+            est_points_per_year: 0,
+            est_value_cents_per_year: 40_00,
+            txn_ids: txn_ids.iter().map(|s| s.to_string()).collect(),
+            action: "Do the thing".into(),
+            evidence,
+        }
+    }
+
+    fn offer_ev(expires: i64) -> Evidence {
+        use crate::perks::{Cap, Offer, Reward};
+        Evidence::Offer(find::OfferEvidence {
+            issuer: "Demo Issuer".into(),
+            offer: Offer {
+                merchant: "Sample Shop".into(),
+                reward: Reward::Back(Money::from_cents(40_00)),
+                min: None,
+                uses: None,
+                cap: Cap::None,
+                single: true,
+                per_year: false,
+                added: true,
+                starts: None,
+                expires,
+                patterns: vec!["sample shop".into()],
+                note: None,
+            },
+            days_left: 0,
+            charges: 1,
+            last_charge: None,
+            typical_charge_cents: None,
+            matched_merchants: vec![],
+        })
+    }
+
+    fn earn_ev() -> Evidence {
+        Evidence::Earn(crate::earn::EarnEvidence {
+            category: "FOOD_AND_DRINK".into(),
+            cards: vec![],
+        })
+    }
+
+    fn sub_ev(merchant: &str, since: Option<i64>) -> Evidence {
+        Evidence::Subscription(find::SubscriptionEvidence {
+            merchant: merchant.into(),
+            name: "Sample Music".into(),
+            cadence: crate::subscriptions::StreamCadence::Monthly,
+            charge_cents: 23_00,
+            per_year: 12,
+            price_rise: since.map(|since| recurring::PriceRise {
+                from_cents: 20_00,
+                to_cents: 23_00,
+                since,
+            }),
+            last_charge: 0,
+            account_id: "chk".into(),
+            reviewed_at: None,
+        })
+    }
+
+    /// October 2026 bounds, and dates by id: `sep` before it, `oct` in it.
+    fn oct() -> (i64, i64) {
+        Period::parse("2026-10", today()).unwrap().bounds()
+    }
+
+    fn posted(id: &str) -> Option<i64> {
+        match id {
+            "aug" => Some(noon(2026, 8, 20)),
+            "sep" => Some(noon(2026, 9, 20)),
+            "oct" => Some(noon(2026, 10, 20)),
+            _ => None,
+        }
+    }
+
+    fn new_of(fs: &[Finding], period: (i64, i64), now: i64) -> Vec<Unusual> {
+        new_findings(fs, posted, period, now, 14, &HashSet::new())
+    }
+
+    #[test]
+    fn wrong_card_is_new_with_an_off_card_charge_in_the_period() {
+        let now = noon(2026, 11, 7);
+        let ev = || offer_ev(noon(2027, 3, 1));
+        let hit = a_finding(FindingKind::WrongCard, &["sep", "oct"], ev());
+        let old = a_finding(FindingKind::WrongCard, &["aug", "sep"], ev());
+        let rows = new_of(&[hit, old], oct(), now);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let u = &rows[0];
+        assert_eq!(u.kind, UnusualKind::Finding);
+        assert_eq!(u.finding_kind, Some(FindingKind::WrongCard));
+        assert_eq!(u.finding_key.as_deref(), Some("wrong_card:0000:sample"));
+        assert_eq!(u.action.as_deref(), Some("Do the thing"));
+        assert_eq!(u.cents, Some(40_00));
+        assert_eq!(u.day.as_deref(), Some("2026-10-20"));
+    }
+
+    #[test]
+    fn price_rise_is_new_when_the_new_price_starts_in_the_period() {
+        let now = noon(2026, 11, 7);
+        let fs = [
+            a_finding(
+                FindingKind::PriceRise,
+                &[],
+                sub_ev("sample music", Some(noon(2026, 10, 3))),
+            ),
+            a_finding(
+                FindingKind::PriceRise,
+                &[],
+                sub_ev("sample radio", Some(noon(2026, 9, 3))),
+            ),
+            // A subscription to review is never new on its own.
+            a_finding(
+                FindingKind::Subscription,
+                &["oct"],
+                sub_ev("sample news", None),
+            ),
+        ];
+        let rows = new_of(&fs, oct(), now);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].merchant.as_deref(), Some("sample music"));
+        assert_eq!(rows[0].day.as_deref(), Some("2026-10-03"));
+        // One row per merchant: an up / new / late row already says it.
+        let taken: HashSet<String> = ["sample music".to_string()].into();
+        assert!(new_findings(&fs, posted, oct(), now, 14, &taken).is_empty());
+    }
+
+    #[test]
+    fn offers_are_new_when_they_expire_soon() {
+        let now = noon(2026, 11, 7);
+        let nov = Period::parse("2026-11", today()).unwrap().bounds();
+        let fs = [
+            // Within 14 days of today.
+            a_finding(FindingKind::Expiring, &[], offer_ev(noon(2026, 11, 18))),
+            // Later this month: before the period ends.
+            a_finding(
+                FindingKind::AddOffer,
+                &["oct"],
+                offer_ev(noon(2026, 11, 29)),
+            ),
+            // Next year: not new, whatever the charges.
+            a_finding(FindingKind::AddOffer, &["oct"], offer_ev(noon(2027, 3, 1))),
+        ];
+        let rows = new_of(&fs, nov, now);
+        let days: Vec<_> = rows.iter().map(|u| u.day.as_deref().unwrap()).collect();
+        assert_eq!(days, ["2026-11-18", "2026-11-29"]);
+        // A past period reads from its end: nothing live expires near Oct 31.
+        assert!(new_of(&fs, oct(), now).is_empty());
+    }
+
+    #[test]
+    fn offers_are_new_the_period_they_start() {
+        let now = noon(2026, 11, 7);
+        let nov = Period::parse("2026-11", today()).unwrap().bounds();
+        let starting = |starts: i64| {
+            let Evidence::Offer(mut o) = offer_ev(noon(2027, 3, 1)) else {
+                unreachable!()
+            };
+            o.offer.starts = Some(starts);
+            Evidence::Offer(o)
+        };
+        let fs = [
+            a_finding(FindingKind::AddOffer, &[], starting(noon(2026, 11, 3))),
+            a_finding(FindingKind::AddOffer, &[], starting(noon(2026, 10, 3))),
+        ];
+        let rows = new_of(&fs, nov, now);
+        let days: Vec<_> = rows.iter().map(|u| u.day.as_deref().unwrap()).collect();
+        assert_eq!(days, ["2026-11-03"]);
+        assert_eq!(new_of(&fs, oct(), now).len(), 1);
+    }
+
+    #[test]
+    fn card_choice_is_new_only_the_period_it_starts() {
+        let now = noon(2026, 11, 7);
+        let fresh = a_finding(FindingKind::CardChoice, &["oct"], earn_ev());
+        let habit = a_finding(FindingKind::CardChoice, &["aug", "sep", "oct"], earn_ev());
+        let rows = new_of(&[fresh, habit], oct(), now);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0].day.as_deref(), Some("2026-10-20"));
+    }
+
+    /// Jan-Oct 2026 synthetic: a monthly music plan at $20 that rises 15% in
+    /// October (a price rise, not a 25% recurring up).
+    fn seed_rise() -> Store {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[chk()]).unwrap();
+        let t: Vec<Transaction> = (1..=10u32)
+            .map(|m| {
+                let c = if m == 10 { -23_00 } else { -20_00 };
+                txn(&format!("m{m}"), noon(2026, m, 5), c, "Sample Music")
+            })
+            .collect();
+        s.upsert_transactions(&t).unwrap();
+        s
+    }
+
+    #[test]
+    fn up_row_carries_its_price_rise_finding_key() {
+        // Jan-Oct 2026 synthetic: $20 a month rising to $30 in October is
+        // both a recurring up and a price rise; the up row stands in.
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_accounts(&[chk()]).unwrap();
+        let t: Vec<Transaction> = (1..=10u32)
+            .map(|m| {
+                let c = if m == 10 { -30_00 } else { -20_00 };
+                txn(&format!("m{m}"), noon(2026, m, 5), c, "Sample Music")
+            })
+            .collect();
+        s.upsert_transactions(&t).unwrap();
+        let c = run(&s, "2026-10");
+        let up = find(&c, UnusualKind::RecurringUp, "sample music").expect("up row");
+        assert_eq!(
+            up.finding_key.as_deref(),
+            Some("price_rise::sample-music:2026-10-05")
+        );
+        assert!(!kinds(&c).contains(&UnusualKind::Finding));
+    }
+
+    #[test]
+    fn checkin_lists_new_findings_without_offers_configured() {
+        let s = seed_rise();
+        let c = run(&s, "2026-10");
+        let f: Vec<_> = c
+            .unusual
+            .iter()
+            .filter(|u| u.kind == UnusualKind::Finding)
+            .collect();
+        assert_eq!(f.len(), 1, "{:?}", c.unusual);
+        assert_eq!(f[0].finding_kind, Some(FindingKind::PriceRise));
+        assert_eq!(f[0].cents, Some(12 * 3_00));
+        assert!(!kinds(&c).contains(&UnusualKind::RecurringUp));
+        assert!(c.not_checked.iter().all(|n| n.check != Check::CardOffers));
+        // Dismissed, it's gone from check-in too.
+        s.set_finding_dismissed(
+            f[0].finding_key.as_deref().unwrap(),
+            Some(crate::store::DismissedMark {
+                est_cents_per_year: 36_00,
+                est_points_per_year: 0,
+                marked_at: noon(2026, 11, 1),
+            }),
+        )
+        .unwrap();
+        assert!(!kinds(&run(&s, "2026-10")).contains(&UnusualKind::Finding));
+    }
+
+    #[test]
+    fn a_bad_offers_file_skips_offer_findings_only() {
+        let s = seed_rise();
+        let dir = std::env::temp_dir().join(format!("outflow-ci-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bad = dir.join("bad.toml");
+        std::fs::write(&bad, "not = [valid").unwrap();
+        let c = checkin(
+            &s,
+            Period::parse("2026-10", today()).unwrap(),
+            today(),
+            noon(2026, 11, 7),
+            Some(&bad),
+            &FindOptions::default(),
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(c.not_checked.contains(&NotChecked {
+            check: Check::CardOffers,
+            reason: NotCheckedReason::OffersFile,
+        }));
+        assert!(
+            kinds(&c).contains(&UnusualKind::Finding),
+            "price rise still"
+        );
     }
 }

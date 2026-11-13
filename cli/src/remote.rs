@@ -9,7 +9,7 @@
 //! it is just a bearer token with fewer rights, so read-only callers (agents,
 //! scripts) get 403 on any mutating subcommand.
 
-use crate::{history_period, By, Cmd, MatchCmd};
+use crate::{history_period, By, Cmd, MatchCmd, PeriodArgs};
 use chrono::NaiveDate;
 use outflow_core::{today_local, Period};
 
@@ -132,15 +132,39 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
                 "{{\"version\":{version},\"upkeep\":{up},\"sync_log\":{log}}}"
             ))
         }
-        // The server evaluates its own OUTFLOW_PERKS file; --file is local-only.
-        Cmd::Perks {
-            lookback,
+        // Dismiss, restore, review or unreview: the same params, so the
+        // server finds the Finding in the same report.
+        Cmd::Find {
+            period,
             expiring_days,
+            dismiss,
+            restore,
+            review,
+            unreview,
             ..
-        } => remote.get(&format!(
-            "/perks?lookback={}&expiring_days={expiring_days}",
-            enc(lookback)
-        )),
+        } => {
+            let (route, body) = match (dismiss, restore, review, unreview) {
+                (Some(k), ..) => (
+                    "/find/dismissed",
+                    serde_json::json!({ "key": k, "dismissed": true }),
+                ),
+                (_, Some(k), ..) => (
+                    "/find/dismissed",
+                    serde_json::json!({ "key": k, "dismissed": false }),
+                ),
+                (_, _, Some(m), _) => (
+                    "/find/reviewed",
+                    serde_json::json!({ "merchant": m, "reviewed": true }),
+                ),
+                (.., Some(m)) => (
+                    "/find/reviewed",
+                    serde_json::json!({ "merchant": m, "reviewed": false }),
+                ),
+                _ => unreachable!("handled by read_path"),
+            };
+            let path = find_path(route, period, *expiring_days, today_local())?;
+            remote.post(&path, Some(body))
+        }
         Cmd::Report { .. }
         | Cmd::Balances { .. }
         | Cmd::Change { .. }
@@ -161,6 +185,26 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
     }
 }
 
+/// Append a period's wire spelling, if there is one.
+fn period_q(p: Option<Period>, q: &mut Vec<String>) {
+    if let Some(p) = p {
+        q.push(p.to_query());
+    }
+}
+
+/// `/find` or `/find/dismissed` with the period and `expiring_days`.
+fn find_path(
+    path: &str,
+    period: &PeriodArgs,
+    expiring_days: i64,
+    today: NaiveDate,
+) -> Result<String, String> {
+    let mut q = Vec::new();
+    period_q(period.resolve_at(today)?, &mut q);
+    q.push(format!("expiring_days={expiring_days}"));
+    Ok(with_query(path, &q))
+}
+
 /// `path?q1&q2...`, or the bare path when there are no parameters.
 fn with_query(path: &str, q: &[String]) -> String {
     if q.is_empty() {
@@ -175,11 +219,6 @@ fn with_query(path: &str, q: &[String]) -> String {
 /// period goes over the wire in its own spelling (`Period::to_query`), so the
 /// server resolves the same local-time days the CLI would.
 fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
-    let period_q = |p: Option<Period>, q: &mut Vec<String>| {
-        if let Some(p) = p {
-            q.push(p.to_query());
-        }
-    };
     let path = match cmd {
         Cmd::Report {
             by,
@@ -255,20 +294,42 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             let p = crate::change_period(period, today)?;
             with_query("/net-worth/change", &[p.to_query()])
         }
-        Cmd::Checkin { period, categories } => {
+        Cmd::Checkin {
+            period,
+            categories,
+            expiring_days,
+            ..
+        } => {
             let p = crate::checkin_period(period.as_deref(), today)?;
-            let path = if *categories {
-                "/checkin/categories"
+            if *categories {
+                with_query("/checkin/categories", &[p.to_query()])
             } else {
-                "/checkin"
-            };
-            with_query(path, &[p.to_query()])
+                let days = format!("expiring_days={}", (*expiring_days).max(0));
+                with_query("/checkin", &[p.to_query(), days])
+            }
         }
-        Cmd::Recurring { period, .. } => {
+        Cmd::Recurring {
+            period,
+            subscriptions,
+            ..
+        } => {
             let mut q = Vec::new();
             period_q(period.resolve_at(today)?, &mut q);
+            if *subscriptions {
+                q.push("subscriptions=true".into());
+            }
             with_query("/recurring", &q)
         }
+        // The server reads its own OUTFLOW_PERKS; --file is local-only.
+        Cmd::Find {
+            period,
+            expiring_days,
+            dismiss: None,
+            restore: None,
+            review: None,
+            unreview: None,
+            ..
+        } => find_path("/find", period, *expiring_days, today)?,
         Cmd::Txns(a) => {
             let mut q = Vec::new();
             let mut push = |k: &str, v: String| q.push(format!("{k}={v}"));
@@ -289,6 +350,9 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
             }
             if let Some(l) = &a.lane {
                 push("lane", l.to_lane().as_str().into());
+            }
+            if !a.ids.is_empty() {
+                push("ids", enc(&a.ids.join(",")));
             }
             if let Some(m) = &a.merchant {
                 push("merchant", enc(m));
@@ -351,7 +415,32 @@ mod tests {
             ok(&["recurring", "--period", "last-month"]),
             "/recurring?period=2026-10"
         );
+        assert_eq!(
+            ok(&["recurring", "--period", "2026-10", "--subscriptions"]),
+            "/recurring?period=2026-10&subscriptions=true"
+        );
         assert!(ok(&["txns", "--merchant", "streamflix com"]).contains("merchant=streamflix%20com"));
+    }
+
+    #[test]
+    fn find_reads_but_dismiss_and_restore_post() {
+        assert_eq!(ok(&["find"]), "/find?expiring_days=14");
+        assert_eq!(
+            path(&["find", "--dismiss", "add_offer:4242:fubo"]),
+            Ok(None)
+        );
+        assert_eq!(
+            path(&["find", "--restore", "add_offer:4242:fubo"]),
+            Ok(None)
+        );
+        assert_eq!(
+            find_path("/find/dismissed", &PeriodArgs::default(), 7, today()),
+            Ok("/find/dismissed?expiring_days=7".to_string())
+        );
+        assert_eq!(path(&["find", "--review", "streamflix"]), Ok(None));
+        assert_eq!(path(&["find", "--unreview", "streamflix"]), Ok(None));
+        let both = Cli::try_parse_from(["outflow", "find", "--review", "a", "--dismiss", "b"]);
+        assert!(both.is_err(), "one mark at a time");
     }
 
     #[test]
@@ -388,7 +477,7 @@ mod tests {
         );
         assert_eq!(
             ok(&["checkin", "--period", "2026-10"]),
-            "/checkin?period=2026-10"
+            "/checkin?period=2026-10&expiring_days=14"
         );
     }
 

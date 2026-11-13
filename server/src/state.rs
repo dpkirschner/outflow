@@ -26,7 +26,7 @@ pub struct Config {
     pub api_token_ro: Option<String>,
     pub sync_interval_secs: u64,
     /// Card-offers TOML file, or a directory of them (`OUTFLOW_PERKS`). Not a
-    /// secret. `None` = `/api/perks` answers 400.
+    /// secret. `None` = `/api/find` has no offer Findings, and says so.
     pub perks_path: Option<String>,
 }
 

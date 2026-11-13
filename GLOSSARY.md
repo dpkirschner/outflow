@@ -68,13 +68,19 @@ product direction behind these terms is in
 - **Recurring merchant**: a merchant (keyed by
   `subscriptions::normalize_payee`) that you buy from on a detectable
   cadence: at least three charges, regularly spaced, within the 12 months
-  ending with the month you're looking at. It shows how often, the usual
-  monthly cost, and what changed. There is one detector
+  ending with the month you're looking at, or **Yearly**. It shows how
+  often, the usual monthly cost, and what changed. There is one detector
   (`subscriptions::detect_rhythms`). A fixed-amount subscription is just a
   recurring merchant with a steady amount.
+- **Yearly**: a merchant whose latest charge falls in the window and comes
+  330 to 400 days after the charge before it, read from the whole archive
+  (a window holds only one yearly charge). With only those two charges, they
+  must be within 25% of each other. Each earlier charge also a year apart
+  counts toward the median gap. A yearly renewal is never New.
 - **Usual monthly cost**: the mean of a recurring merchant's completed
   months since its first charge in the window, with months that had no
-  charge counted as $0.
+  charge counted as $0. For a yearly merchant, a twelfth of its latest
+  charge.
 - **Every few months**: a recurring merchant charged roughly every two to
   nine months (a bimonthly bill, a groomer). Months with no charge are
   normal for it, so it's compared **charge to charge**, never month to month.
@@ -105,21 +111,35 @@ product direction behind these terms is in
   - **Expiring**: an added offer about to expire before it has paid out.
   - **Card choice**: a category charged to a card that earns less on it
     than another card you hold.
-  - **Subscription**: a steady recurring merchant to review, or one whose
-    price rose.
+  - **Subscription**: a steady recurring merchant to review, valued at a
+    year of its charge. outflow sees charges, not usage, so it never says
+    unused.
+  - **Price rise**: a steady merchant whose price just rose, valued at a
+    year of the rise. It stands in for the merchant's subscription
+    Finding while it lasts.
 - **Offers file**: a hand-kept TOML file per card, listing its offers
   and its earn table. `OUTFLOW_PERKS` names the file or folder.
 - **Earn table**: what a card pays per Plaid category (detailed category
   first, then primary, then `default`), with a cents-per-point value and
   optional yearly caps. A card without one is left out of card choice.
+  Its cents-per-point value also prices that card's offer points; a
+  card without one counts a point as one cent.
 - **Steady**: a recurring merchant on a monthly or yearly cadence whose
-  recent charges are within 5% of their median. A steady merchant is
-  what the Subscriptions filter shows.
+  recent charges (the last three) are within 5% of their median. A steady
+  merchant is what the Subscriptions filter on the Recurring list shows
+  (its total is then the steady merchants' usual cost; ignored merchants
+  stay listed as ignored). Its price rises when its latest charges sit
+  more than 5% above a steady run before them; that lasts until three
+  charges are at the new price.
 - **Reviewed**: a mark on a steady merchant. It hides the subscription
-  Finding for 12 months, or until the merchant goes Up.
+  Finding for 12 months, or until the merchant goes Up: its charge is
+  more than 5% above the one reviewed. A price rise after a review always
+  shows. Separate from Ignored, which hides the merchant everywhere.
 - **Dismissed**: the mark on a Finding. It moves the Finding to a list
   you can restore from. The Finding comes back on its own only if its
-  estimate more than doubles.
+  value (cash plus points at the card's rate today) more than doubles. A
+  mark keys on the Finding: card choice on its category whatever the best
+  card, a price rise on the day it began, so a later rise shows.
 
 ## Screens
 
@@ -130,7 +150,9 @@ product direction behind these terms is in
   whose monthly cost (or, every few months, its latest charge) is more
   than 25% away from its usual; a recurring merchant that went late; a one-off
   charge that is large compared with your own spending (around your 95th
-  percentile); or a connection or match review that needs attention.
+  percentile); a connection or match review that needs attention; or a
+  **Finding** that is new this period (a wrong-card charge or price rise
+  in it, an offer about to expire, a card choice that started in it).
   The thresholds are constants in `core`. Items about a place you visit
   every few weeks, or changes under $20 a month, are **minor**: still
   listed, folded at the end.
@@ -150,7 +172,8 @@ product direction behind these terms is in
   categorized.
 - **Holdings**: the Stock screen.
 - **Find money**: every open Finding, ranked by estimated dollars per
-  year, with a dismissed list.
+  year, with its evidence and the charges behind it, plus a dismissed
+  list and a reviewed list.
 - **Flow**: the In / Out / Moved screen, with the transaction table and
   the recurring list.
 - **Settings**: upkeep. Bank connections, card-payment match review,

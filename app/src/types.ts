@@ -602,7 +602,7 @@ export type MonthMark = {
   worse: boolean,
 };
 
-export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late";
+export type UnusualKind = "connection" | "match_review" | "new_recurring" | "recurring_up" | "recurring_down" | "large_charge" | "late" | "finding";
 
 /**
  * One unusual item. Which fields are set depends on `kind`; each item
@@ -666,9 +666,21 @@ export type Unusual = {
   /**
    * Money at stake, positive, for ordering: the charge (large), the
    * difference from the usual (up / down), the usual monthly cost (new,
-   * late). None for attention items.
+   * late), the yearly estimate (Finding). None for attention items.
    */
   impact_cents: number | null,
+  /**
+   * Finding: its kind, its `Finding::key`, and its one suggested action.
+   * `cents` is then its estimated value per year, and `day` the charge
+   * that made it new (wrong card, card choice), the first charge at the
+   * new price (price rise), or the offer's expiry day (add offer,
+   * expiring; its start day when it's new for starting in the period).
+   * A recurring up row also carries `finding_key` when its
+   * merchant has an open price rise Finding (that row stands in for it).
+   */
+  finding_kind: FindingKind | null,
+  finding_key: string | null,
+  action: string | null,
   /**
    * A small or frequent-merchant item (see the module docs); the screen
    * folds these into one row.
@@ -676,9 +688,9 @@ export type Unusual = {
   minor: boolean,
 };
 
-export type Check = "recurring_changes" | "new_recurring" | "large_charges";
+export type Check = "recurring_changes" | "new_recurring" | "large_charges" | "card_offers";
 
-export type NotCheckedReason = "week" | "in_progress" | "short_history" | "range";
+export type NotCheckedReason = "week" | "in_progress" | "short_history" | "range" | "offers_file";
 
 export type NotChecked = {
   check: Check,
@@ -865,6 +877,26 @@ export type Charge = {
 };
 
 /**
+ * A steady subscription's price went up (GLOSSARY: Steady): the charges
+ * before were steady at `from_cents` and the latest ones are more than
+ * `STEADY_PCT` above it.
+ */
+export type PriceRise = {
+  /**
+   * The steady charge before the rise (median of up to `STEADY_CHARGES`).
+   */
+  from_cents: number,
+  /**
+   * The charge now (median of the charges at the new price).
+   */
+  to_cents: number,
+  /**
+   * The first charge at the new price, epoch seconds.
+   */
+  since: number,
+};
+
+/**
  * One recurring merchant.
  */
 export type RecurringMerchant = {
@@ -948,6 +980,15 @@ export type RecurringMerchant = {
    * The account most charges land on.
    */
   account_id: string,
+  /**
+   * GLOSSARY: Steady. The usual charge when steady ([`steady_charge`]),
+   * else None. The Subscriptions filter is `steady_cents != null`.
+   */
+  steady_cents: number | null,
+  /**
+   * Set while a steady price has just gone up ([`price_rise`]).
+   */
+  price_rise: PriceRise | null,
 };
 
 /**
@@ -969,7 +1010,8 @@ export type RecurringView = {
    */
   in_progress: boolean,
   /**
-   * Sum of `monthly_cents` over `items`.
+   * Sum of `monthly_cents` over `items` (so, filtered, over the
+   * subscriptions only).
    */
   monthly_total_cents: number,
   /**
@@ -1492,6 +1534,11 @@ export type Offer = {
    */
   added: boolean,
   /**
+   * Start of the offer's first day, local time (epoch seconds), when the
+   * file gives one. Charges before it never count toward the offer.
+   */
+  starts: number | null,
+  /**
    * End of the expiry day, local time (epoch seconds).
    */
   expires: number,
@@ -1502,36 +1549,9 @@ export type Offer = {
   note: string | null,
 };
 
-export type FindingKind = "add_offer" | "wrong_card" | "expiring";
-
-export type Finding = {
-  kind: FindingKind,
-  card_mask: string,
-  offer: Offer,
-  /**
-   * Whole days until expiry (0 on the last day).
-   */
-  days_left: number,
-  /**
-   * The charges behind this finding: lookback history for `AddOffer` and
-   * `Expiring`, the off-card charges for `WrongCard`.
-   */
-  charges: number,
-  last_charge: number | null,
-  typical_charge_cents: number | null,
-  /**
-   * What the offer would have paid on those charges (`WrongCard`: what it
-   * would have added beyond what the card already earned).
-   */
-  est_cash_cents: number,
-  est_points: number,
-  txn_ids: Array<string>,
-  /**
-   * Distinct raw merchant strings the patterns caught — for checking them.
-   */
-  matched_merchants: Array<string>,
-};
-
+/**
+ * One card from the offers files, and whether it tied to an account.
+ */
 export type CardStatus = {
   issuer: string,
   mask: string,
@@ -1544,14 +1564,208 @@ export type CardStatus = {
   offers: number,
   added: number,
   expired: number,
+  /**
+   * The file has an `[earn]` table (else the card is left out of card
+   * choice).
+   */
+  earn: boolean,
 };
 
-export type PerksReport = {
+/**
+ * One card's side of a card choice Finding.
+ */
+export type CardEarn = {
+  issuer: string,
+  mask: string,
+  /**
+   * The window's Out in this category on this card.
+   */
+  spend_cents: number,
+  charges: number,
+  /**
+   * Points per dollar here (percent for a cash back card).
+   */
+  rate: string,
+  /**
+   * `None` = cash back.
+   */
+  cents_per_point: string | null,
+  /**
+   * What a dollar earns here at `rate`, in hundredths of a percent.
+   */
+  return_bp: number,
+  /**
+   * Yearly spend left at `rate` for this category, when it is capped
+   * (the cap less this card's spend in other categories sharing it).
+   */
+  cap_left_cents: number | null,
+  /**
+   * What this card earned on its own spend here, in cents.
+   */
+  earned_cents: number,
+};
+
+export type EarnEvidence = {
+  /**
+   * The Plaid category the cards' rates were read for (detailed or
+   * primary, the finest any card names), or `default` for spending no
+   * card names.
+   */
+  category: string,
+  /**
+   * Every card with an earn table, highest `return_bp` first.
+   */
+  cards: Array<CardEarn>,
+};
+
+export type FindingKind = "add_offer" | "wrong_card" | "expiring" | "card_choice" | "subscription" | "price_rise";
+
+export type OfferEvidence = {
+  issuer: string,
+  offer: Offer,
+  /**
+   * Whole days until expiry (0 on the last day).
+   */
+  days_left: number,
+  /**
+   * Charges behind the estimate: window history for `AddOffer` and
+   * `Expiring`, the off-card charges for `WrongCard`.
+   */
+  charges: number,
+  last_charge: number | null,
+  typical_charge_cents: number | null,
+  /**
+   * Distinct raw merchant strings the patterns caught, for checking them.
+   */
+  matched_merchants: Array<string>,
+};
+
+/**
+ * Behind a subscription or price rise Finding: the recurring merchant.
+ */
+export type SubscriptionEvidence = {
+  /**
+   * Normalized merchant (`RecurringMerchant::merchant`): what the
+   * Reviewed and Ignored marks key on.
+   */
+  merchant: string,
+  /**
+   * Display name.
+   */
+  name: string,
+  /**
+   * Monthly or yearly.
+   */
+  cadence: StreamCadence,
+  /**
+   * The charge now: the steady charge, or the new price after a rise.
+   */
+  charge_cents: number,
+  /**
+   * Charges a year at this cadence (12 or 1); the estimate is the charge
+   * (or the rise) times this.
+   */
+  per_year: number,
+  price_rise: PriceRise | null,
+  /**
+   * Behavioral date of the last charge in the window, epoch seconds.
+   */
+  last_charge: number,
+  /**
+   * The account most charges land on.
+   */
+  account_id: string,
+  /**
+   * When the merchant was marked Reviewed; set only on
+   * `FindReport.reviewed`.
+   */
+  reviewed_at: number | null,
+};
+
+/**
+ * The source-specific detail behind a Finding.
+ */
+export type Evidence = { "source": "offer" } & OfferEvidence | { "source": "earn" } & EarnEvidence | { "source": "subscription" } & SubscriptionEvidence;
+
+/**
+ * One thing that would save or earn money.
+ */
+export type Finding = {
+  kind: FindingKind,
+  /**
+   * Stable across requests and syncs: `kind:card:subject`, e.g.
+   * `add_offer:4242:fubo`. Card choice and subscription kinds leave the
+   * card out (`card_choice::food-and-drink-groceries`,
+   * `subscription::streamflix`), so a mark survives a new best card or a
+   * merchant moving cards. A price rise adds the day it began
+   * (`price_rise::streamflix:2026-10-10`), so a later rise is new.
+   * Dismissed keys off it.
+   */
+  key: string,
+  /**
+   * What it's about, for display: the offer's or subscription's
+   * merchant, or the category for card choice.
+   */
+  subject: string,
+  /**
+   * The card the action is on, by its last digits (for a subscription,
+   * the card most charges land on, when its name ends in one).
+   */
+  card_mask: string | null,
+  /**
+   * Estimated cash per year, in cents. Card choice compares cards in
+   * different currencies, so its whole estimate is here, points already
+   * valued at each card's `cents_per_point`.
+   */
+  est_cents_per_year: number,
+  /**
+   * Estimated points per year, kept apart from cash (offers only).
+   */
+  est_points_per_year: number,
+  /**
+   * Cash plus points valued at the card's `cents_per_point` (one cent
+   * without an earn table). The floor and the ranking read this.
+   */
+  est_value_cents_per_year: number,
+  /**
+   * The transactions behind the estimate.
+   */
+  txn_ids: Array<string>,
+  /**
+   * The one thing to do about it.
+   */
+  action: string,
+  evidence: Evidence,
+};
+
+export type FindReport = {
+  /**
+   * The months the estimates read.
+   */
+  window: Period,
+  /**
+   * Every offers file's card, whether it tied to an account, and whether
+   * it has an earn table.
+   */
   cards: Array<CardStatus>,
   /**
-   * Highest estimated cash first, then soonest expiry.
+   * Sources that couldn't run, in words (e.g. no offers configured).
+   */
+  notes: Array<string>,
+  /**
+   * Open Findings, highest estimate first.
    */
   findings: Array<Finding>,
+  /**
+   * Findings marked Dismissed, in the same order. Restoring one clears
+   * the mark.
+   */
+  dismissed: Array<Finding>,
+  /**
+   * Subscription and price rise Findings whose merchant is marked
+   * Reviewed, in the same order. Unreviewing one clears the mark.
+   */
+  reviewed: Array<Finding>,
 };
 
 /**

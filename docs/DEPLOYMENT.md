@@ -337,7 +337,7 @@ token — being on the box is not authorization.
 mode and prints the same JSON shapes as local `--json`, except `pull
 --from-file`, which reads a local file. The reads (`checkin`, `change`,
 `txns`, `report`, `recurring`, `accounts`, `balances`, `holdings`,
-`activity`, `perks`, `matches list`, `status`) need only the RO token;
+`activity`, `find`, `matches list`, `status`) need only the RO token;
 `categorize`, `pull`, `fix` and `matches accept|reject|unaccept` mutate and
 need the full token.)
 

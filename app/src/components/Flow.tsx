@@ -344,11 +344,17 @@ export function Flow({
     onMonth(monthKey(last.year, last.month));
   }, [months, selected, onMonth]);
 
+  // Each load numbers its request and drops a reply that a newer one (another
+  // month, the Subscriptions toggle) has overtaken.
+  const catsSeq = useRef(0);
   const loadCats = useCallback(async () => {
     if (!month) return;
+    const mine = ++catsSeq.current;
     try {
-      setCats((await api.checkinCategories(month)).items);
+      const items = (await api.checkinCategories(month)).items;
+      if (mine === catsSeq.current) setCats(items);
     } catch (err) {
+      if (mine !== catsSeq.current) return;
       setCats(null);
       notify({ kind: "err", text: `Couldn't load categories: ${errMessage(err)}` });
     }
@@ -359,11 +365,15 @@ export function Flow({
     void loadCats();
   }, [loadCats]);
 
+  const sourcesSeq = useRef(0);
   const loadSources = useCallback(async () => {
     if (!month) return;
+    const mine = ++sourcesSeq.current;
     try {
-      setSources(await api.inSources({ period: month }));
+      const s = await api.inSources({ period: month });
+      if (mine === sourcesSeq.current) setSources(s);
     } catch (err) {
+      if (mine !== sourcesSeq.current) return;
       setSources(null);
       notify({ kind: "err", text: `Couldn't load In sources: ${errMessage(err)}` });
     }
@@ -375,14 +385,19 @@ export function Flow({
   }, [loadSources]);
 
   const [recurring, setRecurring] = useState<Load<RecurringView>>({ state: "loading" });
+  // The Subscriptions filter: core narrows the list and its total.
+  const [subscriptions, setSubscriptions] = useState(false);
+  const recurringSeq = useRef(0);
   const loadRecurring = useCallback(async () => {
     if (!month) return;
+    const mine = ++recurringSeq.current;
     try {
-      setRecurring({ state: "ok", data: await api.recurring(month) });
+      const data = await api.recurring(month, subscriptions);
+      if (mine === recurringSeq.current) setRecurring({ state: "ok", data });
     } catch (err) {
-      setRecurring({ state: "error", error: errMessage(err) });
+      if (mine === recurringSeq.current) setRecurring({ state: "error", error: errMessage(err) });
     }
-  }, [month]);
+  }, [month, subscriptions]);
 
   useEffect(() => {
     void loadRecurring();
@@ -575,6 +590,8 @@ export function Flow({
       <RecurringSection
         load={recurring}
         onRetry={() => void loadRecurring()}
+        subscriptions={subscriptions}
+        onSubscriptions={setSubscriptions}
         pick={pick}
         onPick={onPick}
         onIgnore={setIgnored}

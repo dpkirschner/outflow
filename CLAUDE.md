@@ -1,7 +1,5 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## What this is
 
 outflow is a single-user view of where one person's money is and where it's
@@ -35,15 +33,12 @@ Look these up instead of guessing (grep the heading, read that range):
 
 - CLI subcommands, the shared date flags, `--server`/`--json`:
   `docs/DEVELOPMENT.md` § CLI (`outflow <cmd> --help` is authoritative).
-  Dates everywhere go through `core::period`: `--period 2026-11 | 2026-W45 |
-  2026-Q4 | 2026 | this-/last-week|month|quarter|year`, or `--since`/`--until`
-  (inclusive, local days), never both.
+  Dates everywhere go through `core::period` (`--period` or
+  `--since`/`--until`, never both).
 - HTTP API: `docs/API.md`.
 - Server env vars and secrets files: the config table in
   `docs/ARCHITECTURE.md`; launchd setup in `docs/DEPLOYMENT.md`. Setting
-  either API token (`OUTFLOW_API_TOKEN[_FILE]`, read-only
-  `OUTFLOW_API_TOKEN_RO[_FILE]`) flips `/api/*` to deny-by-default; every
-  `_FILE` is 0600-enforced and fatal if unreadable.
+  either API token makes `/api/*` deny-by-default.
 
 ## Architecture
 
@@ -58,52 +53,31 @@ Ports-and-adapters over a pure core. One Cargo workspace, members
   tokens file, `anthropic` (`Prompter`).
 - **`cli/`** — headless `outflow` binary; clap subcommands map to core calls
   (direct DB) or to the server API (`--server`, for agents/scripts).
-- **`server/`** — axum + tokio. `Arc<Mutex<Store>>` bridged with
-  `spawn_blocking` (rusqlite `Connection` isn't `Sync`); thin handlers over
-  core (`routes.rs`), Plaid Link lifecycle (`plaid_routes.rs`), and the sync
-  engine (`sync.rs`: per-item cursor loops, 6h background interval, sync_log).
-  Serves the SPA from `app/dist` with an index.html fallback (OAuth resumption
-  at `/oauth-return`). Frontend in `app/src/` (React + Vite + TS).
+- **`server/`** — axum + tokio, `Arc<Mutex<Store>>` via `spawn_blocking`;
+  thin handlers over core (`routes.rs`, `plaid_routes.rs`), the sync engine
+  (`sync.rs`), and the SPA from `app/dist`. Frontend in `app/src/` (React +
+  Vite + TS).
 
 **Styling:** plain CSS in one file, `app/src/ledger.css` (tokens are the
-`--lg-*` properties on `:root`; no Tailwind/styled-components/CSS-modules). Classes are namespaced by feature:
-`ci-*` = Check-in (home), `fl-*` = Flow tab (`fl-rc-*` its recurring list), `hd-*` = Holdings tab, `fm-*` = Find money, `lg-*` = shell and shared (incl. the `lg-strip` month strip), `cx-*` = Connections (Settings), `st-*` = Settings, `mr-*` =
-match review. For styling/visual questions, trace
-`className` → rule with `rtk grep` in `ledger.css` (graphify doesn't index CSS).
+`--lg-*` properties on `:root`). Class prefixes by feature: `ci-` Check-in,
+`fl-` Flow (`fl-rc-` recurring), `hd-` Holdings, `fm-` Find money, `lg-` shell
+and shared, `cx-` Connections, `st-` Settings, `mr-` match review. Trace
+`className` → rule with `rtk grep` in `ledger.css`.
 
-**Swappable ports:** the transaction source is a free-function pipeline —
-fetch JSON in `net`, parse pure in `core`
-(`plaid::parse_sync_page`/`parse_accounts_get`/`parse_fixture`) — plus
+**Ports:** fetch JSON in `net`, parse pure in `core` (`plaid::parse_*`);
 `categorize::Categorizer` / `llm::Prompter` (rules today, LLM tail).
 
 Analysis (`query`, `recurring`) loads all transactions and
 **aggregates in memory in Rust**, not SQL. The durable SQLite archive grows
 past the providers' pull windows — it's the permanent history.
 
-## Releases and branches (see docs/RELEASING.md)
+## Releases and branches
 
-The user relies on Claude to drive releases and repo mechanics. Every deploy
-is a release, versioned `vYYYY.MM.N` (N from 0 each month); notes live in
-`CHANGELOG.md`.
-
-- Work on a feature branch; merge into `main` locally when the change is whole
-  (no PRs). Release from `main` only.
-- Releases and deploys follow the `/release` skill, which sets the order:
-  `scripts/deploy.sh try` on the branch, merge, `make release-draft`, tidy,
-  `make release`, **show the user the notes and ask once** (that yes covers
-  `git push --atomic origin main V`), confirm the workflows went green,
-  `scripts/deploy.sh build V`, hand the user the sudo steps (`env set` if the
-  release needs a setting, then `install V`) as one script, then
-  `scripts/deploy.sh verify` and report only what it printed.
-- Rollback: `scripts/deploy.sh rollback [V] [--restore-db]`, plus
-  `env restore` if the plist changed. launchd runs
-  `<data dir>/releases/current`, never this checkout, so building here doesn't
-  touch the live server (docs/DEPLOYMENT.md).
-- Never move or delete a pushed tag (a ruleset blocks it); fix forward with the
-  next N. `main` blocks force-push; only for a history rewrite the user has
-  approved does the ruleset get switched off, then back on.
-- Pre-push leak scan: see the shared CLAUDE.md (dollar figures need the
-  user's OK before `LEAKSCAN_ACK=1`).
+Claude drives releases: every deploy is a release (`vYYYY.MM.N`, notes in
+`CHANGELOG.md`), cut from `main` after a local merge of a whole feature
+branch (no PRs). Follow the `/release` skill for the order and the one
+question to ask; depth and rollback in `docs/RELEASING.md`. Never move or
+delete a pushed tag; fix forward with the next N.
 
 ## Agent access
 
@@ -150,22 +124,13 @@ Violating these breaks data integrity or the domain contract:
 
 ## Traps that have already cost time (see docs/GOTCHAS.md)
 
-- **The wire format is snake_case** (serde field names straight over HTTP).
-  The old Tauri camelCase translation is gone; `app/src/api.ts` is the single
-  client and sends Rust field names (`txn_id`, `public_token`).
+- **The wire format is snake_case** (serde field names straight over HTTP);
+  `app/src/api.ts` is the single client and sends Rust field names.
 - **`app/src/types.ts` is generated** from the Rust DTOs: change the struct,
   then `make types`. `make check` fails when it or the API contract snapshot
   is stale.
 - **`None` filter must mean "everything"** (`TxnFilter::all()`). A derived
-  `Default` would set `include_pending = false` and silently drop pending rows
-  — `FilterParams::to_filter` defaults pending=true explicitly.
-- **Headless server ≠ interactive session.** launchd services get no keychain
-  and no shell env — configure via a plist env block + 0600 files
-  (`OUTFLOW_PLAID_SECRET_FILE`, `OUTFLOW_DB_KEY_FILE`).
-- **Plaintext and encrypted DBs are not interchangeable** — switching a path's
-  mode requires deleting the file first.
-- **Don't stage the DB or secrets in `/tmp`** — macOS purges it and the app
-  silently recreates an empty DB. Use `$HOME/...` or the app-data dir.
-- **OAuth banks need the exact registered redirect URI** — `tailscale serve`
-  HTTPS + `/oauth-return`, matching the Plaid dashboard byte-for-byte, and the
-  SPA fallback must serve it with a 200.
+  `Default` would set `include_pending = false` and silently drop pending rows.
+- Also in GOTCHAS: launchd has no keychain or shell env, plaintext and
+  encrypted DBs aren't interchangeable, `/tmp` gets purged, OAuth banks need
+  the exact redirect URI.

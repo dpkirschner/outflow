@@ -469,6 +469,34 @@ fn is_refund(t: &Transaction, kind: AccountKind) -> bool {
     }
 }
 
+/// The Holdings hero for `[since, until)` (None = open): net worth change
+/// with the flow split applied, so Markets + Earned − spent + Other ==
+/// change. Earned − spent is Flow's for the same range, pending included;
+/// an open start begins at the first transaction.
+pub fn stock_change(
+    store: &Store,
+    since: Option<i64>,
+    until: Option<i64>,
+) -> rusqlite::Result<crate::stock::NetWorthChange> {
+    let mut c = crate::stock::net_worth_change(
+        &store.accounts()?,
+        &store.securities()?,
+        &store.balance_snapshots(None, until)?,
+        &store.holding_snapshots(None, None)?,
+        &store.investment_txns()?,
+        since,
+        until,
+    );
+    let txns = store.all_transactions()?;
+    let kind = account_kinds(store)?;
+    let from = since.unwrap_or_else(|| txns.iter().map(|t| t.effective_date()).min().unwrap_or(0));
+    let flow = flow_over(&txns, &kind, from, until.unwrap_or(i64::MAX));
+    c.split_flow(crate::money::Money::from_cents(
+        flow.earned_minus_spent_cents,
+    ));
+    Ok(c)
+}
+
 /// Account kind by id; an unknown account reads as `Other`.
 pub(crate) fn account_kinds(store: &Store) -> rusqlite::Result<impl Fn(&str) -> AccountKind> {
     let kinds: HashMap<String, AccountKind> = store

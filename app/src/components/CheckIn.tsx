@@ -772,18 +772,18 @@ function Figures({
           {nw.change_cents === null ? (
             <dd className="ci-sub">{nwWhy}</dd>
           ) : (
-            // No market moves (say, no investment accounts): nothing to split.
-            !!nw.markets_cents &&
-            nw.added_cents !== null && (
+            nw.markets_cents !== null &&
+            nw.earned_minus_spent_cents !== null &&
+            nw.other_cents !== null && (
               <dd className="ci-sub">
-                Markets {signedCents(nw.markets_cents)} · Added{" "}
-                {signedCents(nw.added_cents)}
+                Markets {signedCents(nw.markets_cents)} · Earned − spent{" "}
+                {signedCents(nw.earned_minus_spent_cents)} · Other {signedCents(nw.other_cents)}
               </dd>
             )
           )}
           {nw.excluded.length > 0 && (
             <dd className="ci-sub">
-              Added includes all of {nw.excluded.join(", ")}: no gain known
+              Other includes all of {nw.excluded.join(", ")}: no gain known
             </dd>
           )}
           {nw.partial_start && (

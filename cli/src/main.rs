@@ -1,11 +1,11 @@
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use outflow_core::{
-    account_display_label, activity, balance_history, find, flow_lanes, net_worth_change,
-    parse_fixture, position_change, position_history, positions, search_transactions,
-    spend_by_category, summarize_balances, today_local, top_merchants, ActivityFilter, Cap,
-    CategorySource, Direction, Evidence, FindOptions, Lane, MatchStatus, Money, Offer, Period,
-    PositionFilter, PositionLens, Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
+    account_display_label, activity, balance_history, find, flow_lanes, parse_fixture,
+    position_change, position_history, positions, search_transactions, spend_by_category,
+    summarize_balances, today_local, top_merchants, ActivityFilter, Cap, CategorySource, Direction,
+    Evidence, FindOptions, Lane, MatchStatus, Money, Offer, Period, PositionFilter, PositionLens,
+    Reward, SortKey, Store, TxnFilter, TxnFlag, TxnQuery,
 };
 use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
@@ -1343,20 +1343,23 @@ fn cmd_checkin(
     let n = &c.net_worth;
     match n.change_cents {
         Some(ch) => println!(
-            "net worth change  {}{}   markets {}   added {}{}",
+            "net worth change  {}{}   markets {}   earned - spent {}   other {}{}",
             signed(ch),
             n.change_bp
                 .map(|bp| format!(" ({})", signed_pct(bp)))
                 .unwrap_or_default(),
             n.markets_cents.map(signed).unwrap_or_else(|| "-".into()),
-            n.added_cents.map(signed).unwrap_or_else(|| "-".into()),
+            n.earned_minus_spent_cents
+                .map(signed)
+                .unwrap_or_else(|| "-".into()),
+            n.other_cents.map(signed).unwrap_or_else(|| "-".into()),
             usual(c.usual.net_worth_change_cents)
         ),
         None => println!("net worth change  -  (fewer than two snapshots in the period)"),
     }
     if !n.excluded.is_empty() {
         println!(
-            "  added includes unmeasured accounts: {}",
+            "  other includes unmeasured accounts: {}",
             n.excluded.join(", ")
         );
     }
@@ -1530,24 +1533,8 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
     use outflow_core::{ChangeReason, GainReason};
     let p = change_period(period, today_local())?;
     let (since, until) = p.bounds();
-    let accounts = store.accounts().map_err(|e| format!("{e}"))?;
-    let securities = store.securities().map_err(|e| format!("{e}"))?;
-    let balances = store
-        .balance_snapshots(None, Some(until))
-        .map_err(|e| format!("{e}"))?;
-    let holdings = store
-        .holding_snapshots(None, None)
-        .map_err(|e| format!("{e}"))?;
-    let activity = store.investment_txns().map_err(|e| format!("{e}"))?;
-    let c = net_worth_change(
-        &accounts,
-        &securities,
-        &balances,
-        &holdings,
-        &activity,
-        Some(since),
-        Some(until),
-    );
+    let c =
+        outflow_core::stock_change(store, Some(since), Some(until)).map_err(|e| format!("{e}"))?;
     if json {
         return json_out(&c);
     }
@@ -1574,18 +1561,23 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
             ""
         }
     );
-    if let (Some(m), Some(a)) = (c.markets, c.added) {
+    if let (Some(m), Some(e), Some(o)) = (c.markets, c.earned_minus_spent, c.other) {
         println!(
-            "  markets {}   added {}",
+            "  markets {}   earned - spent {}   other {}",
             signed(m.cents()),
-            signed(a.cents())
+            signed(e.cents()),
+            signed(o.cents())
         );
     }
-    if c.added_includes_unmeasured {
-        let names: Vec<&str> = c.excluded.iter().map(|x| x.account.as_str()).collect();
+    for x in &c.excluded {
+        let why = match x.reason {
+            GainReason::BalanceMismatch => "holdings don't match the balance",
+            _ => "contributions unknown",
+        };
         println!(
-            "  added includes the change in unmeasured accounts (contributions unknown): {}",
-            names.join(", ")
+            "  other includes {} {} ({why})",
+            x.account,
+            signed(x.change.cents())
         );
     }
     println!(
@@ -1601,6 +1593,7 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
             (Some(g), _) => signed(g.cents()),
             (None, Some(GainReason::Cash)) => "cash".into(),
             (None, Some(GainReason::ContributionsUnknown)) => "unknown".into(),
+            (None, Some(GainReason::BalanceMismatch)) => "mismatch".into(),
             (None, None) => String::new(),
         };
         println!(

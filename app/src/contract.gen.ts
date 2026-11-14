@@ -189,7 +189,8 @@ export const checkIn: CheckIn = {
     "change_bp": 691,
     "reason": null,
     "markets_cents": 713884,
-    "added_cents": 469193,
+    "earned_minus_spent_cents": 300000,
+    "other_cents": 169193,
     "excluded": [
       "Demo 401(k)"
     ],
@@ -635,15 +636,16 @@ export const netWorthChange: NetWorthChange = {
   "change_bp": 365,
   "reason": null,
   "markets": 3750,
-  "added": 10155,
+  "earned_minus_spent": 8000,
+  "other": 2155,
   "excluded": [
     {
       "account_id": "k401",
       "account": "Demo k401 (0000)",
-      "change": 0
+      "change": 0,
+      "reason": "balance_mismatch"
     }
   ],
-  "added_includes_unmeasured": true,
   "accounts": [
     {
       "account_id": "brk",

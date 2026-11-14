@@ -487,13 +487,14 @@ export type NetWorthSummary = {
   change_bp: number | null,
   reason: ChangeReason | null,
   /**
-   * Markets + Added == change, exactly.
+   * Markets + Earned − spent + Other == change, exactly.
    */
   markets_cents: number | null,
-  added_cents: number | null,
+  earned_minus_spent_cents: number | null,
+  other_cents: number | null,
   /**
    * Investment accounts whose gain is unknown: their whole change is in
-   * Added.
+   * Other.
    */
   excluded: Array<string>,
   partial_start: boolean,
@@ -1292,7 +1293,7 @@ export type ChangeReason = "no_snapshots" | "one_snapshot";
 /**
  * Why an investment account has no gain.
  */
-export type GainReason = "cash" | "contributions_unknown";
+export type GainReason = "cash" | "contributions_unknown" | "balance_mismatch";
 
 export type AccountChange = {
   account_id: string,
@@ -1337,12 +1338,16 @@ export type AccountChange = {
 };
 
 /**
- * An investment account left out of Markets; its change lands in Added.
+ * An investment account left out of Markets; its change lands in Other.
  */
 export type ExcludedAccount = {
   account_id: string,
   account: string,
   change: number,
+  /**
+   * `contributions_unknown` or `balance_mismatch`.
+   */
+  reason: GainReason,
 };
 
 /**
@@ -1394,19 +1399,20 @@ export type NetWorthChange = {
    */
   markets: number | null,
   /**
-   * `change - markets`, exactly: saved from income minus spending, plus
-   * every unmeasured account's change.
+   * Flow's In − Out over the period; set by `split_flow`, None before.
    */
-  added: number | null,
+  earned_minus_spent: number | null,
   /**
-   * Investment accounts whose gain is unknown, named.
+   * `change - markets - earned_minus_spent`, exactly: every balance move
+   * neither explains (unmeasured accounts, share transfers, card and bank
+   * timing). Set by `split_flow`.
+   */
+  other: number | null,
+  /**
+   * Investment accounts whose gain is unknown, named; their whole change
+   * is in Other.
    */
   excluded: Array<ExcludedAccount>,
-  /**
-   * True when `excluded` is non-empty: Added then includes their market
-   * move, and the hero must say so.
-   */
-  added_includes_unmeasured: boolean,
   /**
    * Accounts with at least one snapshot, in input order.
    */

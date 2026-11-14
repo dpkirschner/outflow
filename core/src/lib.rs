@@ -60,8 +60,9 @@ pub use plaid::{
 };
 pub use query::{
     flow_lanes, in_sources, lane_of, pick_series, search_transactions, spend_by_category,
-    top_merchants, CategorySpend, Direction, FlowMonth, InSource, Lane, MerchantSpend, MovedFlow,
-    MovedLane, SeriesMonth, SortKey, TxnFilter, TxnPage, TxnQuery, TxnRow,
+    stock_change, top_merchants, CategorySpend, Direction, FlowMonth, InSource, Lane,
+    MerchantSpend, MovedFlow, MovedLane, SeriesMonth, SortKey, TxnFilter, TxnPage, TxnQuery,
+    TxnRow,
 };
 pub use recurring::{
     is_subscription_cadence, price_rise, recurring, steady_charge, Change, PriceRise,

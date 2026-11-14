@@ -2581,6 +2581,18 @@ button.fl-lane-figure {
     bottom: 16px;
     max-width: none;
   }
+  /* The text takes its own row; the buttons sit under it, right-aligned,
+     so up to three of them don't squeeze the message to a sliver. */
+  .toast {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .toast-text {
+    flex-basis: 100%;
+  }
+  .toast-text + button {
+    margin-left: auto;
+  }
 }
 
 /* token prompt (AuthGate) */

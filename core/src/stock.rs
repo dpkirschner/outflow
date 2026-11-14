@@ -1,5 +1,6 @@
 //! Stock change over a period: net worth change, per-account change, gain
-//! net of contributions, and the hero split Markets + Added. Pure — the store
+//! net of contributions, and the hero split Markets + Moved in + Earned −
+//! spent + Other. Pure — the store
 //! hands in the visible accounts and every snapshot and activity row.
 //!
 //! Measurement rules (ho-2mj.4.4; also docs/DATA_MODEL.md):
@@ -22,13 +23,6 @@
 //!   withdrawal, transfer with cash. A `buy/contribution` (payroll buying
 //!   shares directly) counts its full cost. Dividends, reinvestment, interest
 //!   and fees are performance. Cancelled rows are skipped.
-//! - **F. A share transfer needs holdings that match the balance.** Rule D
-//!   values a share transfer from holdings, so when the window has one, the
-//!   holdings (cash included) must be within `MISMATCH_BP` of the balance at
-//!   the start and end. Otherwise the institution lists shares its balance
-//!   doesn't count yet, and the contribution would show as a market loss:
-//!   no gain (`GainReason::BalanceMismatch`). Without a share transfer
-//!   nothing is valued from holdings, so a stale holdings price is fine.
 //!
 //! Activity counts when its date is after the start snapshot's local day, up
 //! to and including the end snapshot's day.
@@ -47,9 +41,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 const QTY_SCALE: i128 = 100_000_000;
 /// A quantity gap up to 0.001 share is rounding, not an unexplained trade.
 pub const QTY_TOLERANCE: i128 = 100_000;
-/// Holdings may differ from the balance by up to 0.5% (basis points); the
-/// steady gap seen live is 0.1-0.3%.
-pub const MISMATCH_BP: i128 = 50;
 
 /// Why a change is missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -72,8 +63,6 @@ pub enum GainReason {
     /// Positions moved in ways the activity doesn't explain, or a share
     /// transfer has no recorded price.
     ContributionsUnknown,
-    /// The holdings don't add up to the balance at the start or end (rule F).
-    BalanceMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -111,7 +100,7 @@ pub struct ExcludedAccount {
     pub account_id: String,
     pub account: String,
     pub change: Money,
-    /// `contributions_unknown` or `balance_mismatch`.
+    /// Always `contributions_unknown`.
     pub reason: GainReason,
 }
 
@@ -147,11 +136,17 @@ pub struct NetWorthChange {
     pub reason: Option<ChangeReason>,
     /// Sum of measurable investment accounts' gain.
     pub markets: Option<Money>,
+    /// Net value of shares transferred in (rule D) across the accounts
+    /// Markets measures: assets that arrived from outside the tracked
+    /// accounts. Transfers between two tracked accounts cancel. Cash
+    /// contributions are left out: from a tracked account they net to zero
+    /// in Other already.
+    pub moved_in: Option<Money>,
     /// Flow's In − Out over the period; set by `split_flow`, None before.
     pub earned_minus_spent: Option<Money>,
-    /// `change - markets - earned_minus_spent`, exactly: every balance move
-    /// neither explains (unmeasured accounts, share transfers, card and bank
-    /// timing). Set by `split_flow`.
+    /// `change - markets - moved_in - earned_minus_spent`, exactly: every
+    /// balance move none of them explains (unmeasured accounts, outside cash
+    /// contributions, card and bank timing). Set by `split_flow`.
     pub other: Option<Money>,
     /// Investment accounts whose gain is unknown, named; their whole change
     /// is in Other.
@@ -194,6 +189,7 @@ pub fn net_worth_change(
         change_bp: None,
         reason: None,
         markets: None,
+        moved_in: None,
         earned_minus_spent: None,
         other: None,
         excluded: Vec::new(),
@@ -203,6 +199,7 @@ pub fn net_worth_change(
     };
     let mut any_change = false;
     let mut markets = 0i64;
+    let mut moved_in = 0i64;
     // Snapshots that feed the chart, and dated contributions for it.
     let mut series_snaps: Vec<BalanceSnapshot> = Vec::new();
     let mut series_kinds = std::collections::HashMap::new();
@@ -253,8 +250,8 @@ pub fn net_worth_change(
             if group == Group::Investments {
                 let m = measure(
                     &a.id,
-                    (start.taken_at, start.balance.cents()),
-                    (end.taken_at, end.balance.cents()),
+                    start.taken_at,
+                    end.taken_at,
                     holdings,
                     &cash_secs,
                     &live,
@@ -269,15 +266,13 @@ pub fn net_worth_change(
                         Some(c) => {
                             row.gain = Some(Money::from_cents(change - c));
                             markets += change - c;
+                            moved_in += m.shares;
                         }
                         None => row.gain_reason = Some(GainReason::ContributionsUnknown),
                     },
                     Err(r) => row.gain_reason = Some(r),
                 }
-                if let Some(
-                    reason @ (GainReason::ContributionsUnknown | GainReason::BalanceMismatch),
-                ) = row.gain_reason
-                {
+                if let Some(reason @ GainReason::ContributionsUnknown) = row.gain_reason {
                     out.excluded.push(ExcludedAccount {
                         account_id: a.id.clone(),
                         account: label,
@@ -311,6 +306,7 @@ pub fn net_worth_change(
     let base = out.start.net_worth.cents();
     out.change_bp = (base > 0).then(|| ((change as i128 * 10_000) / base as i128) as i64);
     out.markets = Some(Money::from_cents(markets));
+    out.moved_in = Some(Money::from_cents(moved_in));
     if !out.excluded.is_empty() {
         out.contributed_complete = false;
     }
@@ -342,12 +338,15 @@ impl NetWorthChange {
     /// the same period and Other, so Markets + Earned − spent + Other ==
     /// change exactly. No-op without a change.
     pub fn split_flow(&mut self, earned_minus_spent: Money) {
-        let (Some(change), Some(markets)) = (self.change, self.markets) else {
+        let (Some(change), Some(markets), Some(moved)) = (self.change, self.markets, self.moved_in)
+        else {
             return;
         };
         let ems = earned_minus_spent.cents();
         self.earned_minus_spent = Some(earned_minus_spent);
-        self.other = Some(Money::from_cents(change.cents() - markets.cents() - ems));
+        self.other = Some(Money::from_cents(
+            change.cents() - markets.cents() - moved.cents() - ems,
+        ));
     }
 }
 
@@ -366,6 +365,8 @@ fn live_activity(activity: &[InvestmentTxn]) -> Vec<&InvestmentTxn> {
 struct Measured {
     /// Net contributions in the window; None when one couldn't be valued.
     contributions: Option<i64>,
+    /// The share-transfer part of `contributions` (rule D).
+    shares: i64,
     /// Each valued contribution with its date (for the chart).
     dated: Vec<(NaiveDate, i64)>,
     /// How many contribution rows the window has (valued or not).
@@ -396,28 +397,10 @@ fn positions_at<'a>(
     Some(Some(m))
 }
 
-/// Sum of every holding (cash included) in this account's snapshot at or
-/// before `ts`; None when there is none.
-fn holdings_value_at(mine: &[&HoldingSnapshot], ts: i64) -> Option<i64> {
-    let at = mine.iter().map(|h| h.taken_at).filter(|t| *t <= ts).max()?;
-    Some(
-        mine.iter()
-            .filter(|h| h.taken_at == at)
-            .map(|h| h.value.cents())
-            .sum(),
-    )
-}
-
-/// Rule F: holdings within `MISMATCH_BP` of the balance.
-fn agrees(holdings: i64, balance: i64) -> bool {
-    let gap = (holdings as i128 - balance as i128).abs();
-    gap * 10_000 <= MISMATCH_BP * (balance as i128).abs()
-}
-
 fn measure(
     account_id: &str,
-    (start_at, start_bal): (i64, i64),
-    (end_at, end_bal): (i64, i64),
+    start_at: i64,
+    end_at: i64,
     holdings: &[HoldingSnapshot],
     cash_secs: &HashSet<&str>,
     live: &[&InvestmentTxn],
@@ -430,6 +413,7 @@ fn measure(
     let (Some(sd), Some(ed)) = (local_day(start_at), local_day(end_at)) else {
         return Measured {
             contributions: None,
+            shares: 0,
             dated: Vec::new(),
             rows: 0,
             outcome: Err(GainReason::ContributionsUnknown),
@@ -448,13 +432,13 @@ fn measure(
     let mut total = Some(0i64);
     let mut dated = Vec::new();
     let mut rows = 0;
-    let mut shares = false;
+    let mut shares = 0i64;
     for (t, d) in &window {
         match contribution(t, *d, &mine) {
             Contribution::None => {}
             Contribution::Shares(c) => {
                 rows += 1;
-                shares = true;
+                shares += c;
                 total = total.map(|x| x + c);
                 dated.push((*d, c));
             }
@@ -511,19 +495,11 @@ fn measure(
                 return unknown;
             }
         }
-        // Rule F: a share transfer is valued from holdings, so they must
-        // describe the balance at both ends.
-        if shares {
-            for (ts, bal) in [(start_at, start_bal), (end_at, end_bal)] {
-                if !holdings_value_at(&mine, ts).is_some_and(|v| agrees(v, bal)) {
-                    return Err(GainReason::BalanceMismatch);
-                }
-            }
-        }
         Ok(())
     })();
     Measured {
         contributions: total,
+        shares,
         dated,
         rows,
         outcome,
@@ -934,12 +910,12 @@ mod tests {
         assert_eq!(cents(brk.gain), Some(3_852_00 - 3_764_40));
     }
 
-    /// The live case behind ho-2mj.25: the institution lists transferred
-    /// shares in holdings but leaves them out of the balance. Counting them
-    /// as a contribution would book their value as a market loss, so the
-    /// account has no gain and its change goes to Other (rule F).
+    /// The live case behind ho-2mj.25: shares transferred in show in the
+    /// holdings before the balance counts them (the two are pulled apart).
+    /// The transfer still counts as Moved in, and Markets takes the drop
+    /// until the balance catches up; nothing is excluded.
     #[test]
-    fn share_transfer_missing_from_balance_is_a_mismatch() {
+    fn share_transfer_is_moved_in_even_while_the_balance_lags() {
         let accounts = [
             acct("brk", AccountKind::Investment),
             acct("ira", AccountKind::Investment),
@@ -948,9 +924,8 @@ mod tests {
         let balances = [
             bal(s, "brk", 1_000_00, 0),
             bal(s, "ira", 2_000_00, 0),
-            // Balance never counts the 120 shares.
             bal(mid, "brk", 1_000_00, 0),
-            bal(e, "brk", 990_00, 0),
+            bal(e, "brk", 4_842_00, 0),
             bal(e, "ira", 2_040_00, 0),
         ];
         let holdings = [
@@ -983,21 +958,77 @@ mod tests {
             until,
         );
         c.split_flow(Money::from_cents(-25_00));
+        assert!(c.excluded.is_empty());
+        // 120 x 31.37 = 3,764.40.
+        assert_eq!(cents(c.moved_in), Some(3_764_40));
         let brk = find(&c, "brk");
-        assert_eq!(brk.gain, None);
-        assert_eq!(brk.gain_reason, Some(GainReason::BalanceMismatch));
-        assert_eq!(c.excluded.len(), 1);
-        assert_eq!(c.excluded[0].reason, GainReason::BalanceMismatch);
-        assert_eq!(c.excluded[0].change.cents(), -10_00);
-        // Only the IRA is measured; no invented loss.
-        assert_eq!(cents(c.markets), Some(40_00));
-        assert_eq!(cents(c.change), Some(30_00));
-        assert_eq!(cents(c.other), Some(30_00 - 40_00 + 25_00));
+        assert_eq!(cents(brk.gain), Some(3_842_00 - 3_764_40));
+        assert_eq!(cents(c.markets), Some(3_842_00 - 3_764_40 + 40_00));
+        assert_eq!(cents(c.change), Some(3_882_00));
+        // No bank or card account moved, so Other is just minus Earned − spent.
+        assert_eq!(cents(c.other), Some(25_00));
     }
 
-    /// Holdings within 0.5% of the balance still measure a share transfer.
+    /// Shares moved between two tracked accounts cancel in Moved in.
     #[test]
-    fn small_balance_gap_still_measures_a_share_transfer() {
+    fn share_transfer_between_tracked_accounts_nets_to_zero() {
+        let accounts = [
+            acct("a", AccountKind::Investment),
+            acct("b", AccountKind::Investment),
+        ];
+        let (s, e) = (at(10, 31), at(11, 30));
+        let balances = [
+            bal(s, "a", 1_000_00, 0),
+            bal(s, "b", 0, 0),
+            bal(e, "a", 0, 0),
+            bal(e, "b", 1_000_00, 0),
+        ];
+        let holdings = [
+            pos(s, "a", "vti", "4", "250"),
+            pos(s, "b", "vti", "0", "250"),
+            pos(e, "a", "vti", "0", "250"),
+            pos(e, "b", "vti", "4", "250"),
+        ];
+        let activity = [
+            txn(
+                "t1",
+                "a",
+                Some("vti"),
+                "2026-11-05",
+                "transfer",
+                "transfer",
+                "-4",
+                0,
+            ),
+            txn(
+                "t2",
+                "b",
+                Some("vti"),
+                "2026-11-05",
+                "transfer",
+                "transfer",
+                "4",
+                0,
+            ),
+        ];
+        let (since, until) = nov();
+        let c = net_worth_change(
+            &accounts,
+            &secs(),
+            &balances,
+            &holdings,
+            &activity,
+            since,
+            until,
+        );
+        assert!(c.excluded.is_empty());
+        assert_eq!(cents(c.moved_in), Some(0));
+        assert_eq!(cents(c.markets), Some(0));
+    }
+
+    /// Holdings that differ from the balance still measure a share transfer.
+    #[test]
+    fn balance_gap_still_measures_a_share_transfer() {
         let accounts = [acct("brk", AccountKind::Investment)];
         let (s, e) = (at(10, 31), at(11, 30));
         // Holdings 1,000 / 4,852; balances 0.3% off.

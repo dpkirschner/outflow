@@ -71,8 +71,9 @@ money            i64-cents type, decimal parse, display
           │                plus a synthetic uninvested-cash row)
           ├ activity       investment transactions → filtered, flat rows
           ├ stock          net worth change over a period: per-account change,
-          │                gain net of contributions, Markets / Earned − spent /
-          │                Other split (query::stock_change applies the flow);
+          │                gain net of contributions, Markets / Moved in /
+          │                Earned − spent / Other split (query::stock_change
+          │                applies the flow);
           │                position_change (per position, By position lens)
           ├ checkin        checkin() → CheckIn: one week/month/quarter — net
           │                worth change, earned − spent, saved, each with its
@@ -147,7 +148,7 @@ fixture file (pull --from-file) ──▶ core::plaid::parse_fixture ──▶ S
   (`components/Recurring.tsx`) and the month's transaction table; each
   figure and each recurring merchant is a button that drills the table into
   its rows via the core `lane` / `merchant` filters, `components/Flow.tsx`),
-  `/holdings` (net worth change as Markets + Earned − spent + Other over the shared month or
+  `/holdings` (net worth change as Markets + Moved in + Earned − spent + Other over the shared month or
   a 3M / YTD / 1Y / All range, the signed breakdown, net worth and invested
   vs contributed charts, accounts by type or combined positions;
   `components/Holdings.tsx`), and `/settings` (Connections, card-payment

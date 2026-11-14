@@ -481,6 +481,12 @@ function Hero({
           <dt>Markets</dt>
           <dd>{signedCents(c.markets ?? 0)}</dd>
         </div>
+        {!!c.moved_in && (
+          <div className="hd-eq-term" data-op="+">
+            <dt>Moved in</dt>
+            <dd>{signedCents(c.moved_in)}</dd>
+          </div>
+        )}
         <div className="hd-eq-term" data-op="+">
           <dt>Earned − spent</dt>
           <dd>{signedCents(c.earned_minus_spent ?? 0)}</dd>
@@ -495,12 +501,14 @@ function Hero({
         <b>{formatCents(c.end.net_worth)}</b> on {end}.
       </p>
       <details className="hd-defs hd-note">
-        <summary>What the three parts mean</summary>
+        <summary>What the parts mean</summary>
         <p className="hd-quiet">
-          Markets: what investments earned beyond the money put in. Earned − spent: income less
-          spending in {phrase}, the same figure as Flow. Other: every balance move neither
-          explains, such as shares moved in from another brokerage, accounts whose gain isn't
-          known, and card balances that haven't caught up with their charges.
+          Markets: what investments earned beyond the money put in. Moved in: shares transferred
+          in from an account outside Outflow, at their value on arrival (shown only when there
+          are some). Earned − spent: income less spending in {phrase}, the same figure as Flow.
+          Other: every balance move none of these explains, such as accounts whose gain isn't
+          known, cash put in from outside Outflow, and card balances that haven't caught up
+          with their charges.
         </p>
       </details>
       {c.excluded.length > 0 && (
@@ -509,11 +517,7 @@ function Hero({
           {c.excluded.map((x, i) => (
             <span key={x.account_id}>
               {i > 0 && " "}
-              {x.account}{" "}
-              {x.reason === "balance_mismatch"
-                ? "lists shares its balance doesn't count yet"
-                : "doesn't report its contributions"}
-              , so its whole change, {signedCents(x.change)}, is in Other.
+              {x.account} doesn't report its contributions, so its whole change, {signedCents(x.change)}, is in Other.
             </span>
           ))}
         </p>

@@ -777,7 +777,13 @@ function Figures({
             nw.other_cents !== null && (
               <dd className="ci-sub">
                 Markets{" "}
-                <span className="ci-nowrap">{signedCents(nw.markets_cents)}</span> ·
+                <span className="ci-nowrap">{signedCents(nw.markets_cents)}</span> ·{" "}
+                {!!nw.moved_in_cents && (
+                  <>
+                    Moved in{" "}
+                    <span className="ci-nowrap">{signedCents(nw.moved_in_cents)}</span> ·{" "}
+                  </>
+                )}
                 Earned − spent{" "}
                 <span className="ci-nowrap">
                   {signedCents(nw.earned_minus_spent_cents)}

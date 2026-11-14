@@ -332,7 +332,8 @@ async fn balances_history(
     .map(Json)
 }
 
-/// Net worth change over a period, split Markets + Added, with per-account
+/// Net worth change over a period, split Markets + Earned − spent + Other,
+/// with per-account
 /// change and gain net of contributions (`core::stock`). `period` or
 /// `since`/`until`; omit both for all of history. Visible accounts only.
 async fn net_worth_change(
@@ -342,22 +343,7 @@ async fn net_worth_change(
     let (since, until) =
         resolve_range(p.period.as_deref(), p.since.as_deref(), p.until.as_deref())?;
     with_store(&state, move |s| {
-        let accounts = s.accounts().map_err(|e| e.to_string())?;
-        let securities = s.securities().map_err(|e| e.to_string())?;
-        let balances = s
-            .balance_snapshots(None, until)
-            .map_err(|e| e.to_string())?;
-        let holdings = s.holding_snapshots(None, None).map_err(|e| e.to_string())?;
-        let activity = s.investment_txns().map_err(|e| e.to_string())?;
-        Ok(outflow_core::net_worth_change(
-            &accounts,
-            &securities,
-            &balances,
-            &holdings,
-            &activity,
-            since,
-            until,
-        ))
+        outflow_core::stock_change(s, since, until).map_err(|e| e.to_string())
     })
     .await
     .map(Json)
@@ -1610,7 +1596,11 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(c["change"], 0);
         assert_eq!(c["markets"], 0);
-        assert_eq!(c["added"], 0);
+        // Markets + Earned − spent + Other == change, exactly.
+        assert_eq!(
+            c["earned_minus_spent"].as_i64().unwrap() + c["other"].as_i64().unwrap(),
+            0
+        );
         assert_eq!(c["partial_start"], true);
         assert_eq!(c["end"]["net_worth"], 14_910_00);
         let row = |id: &str| {

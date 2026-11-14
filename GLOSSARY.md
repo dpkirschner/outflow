@@ -55,10 +55,15 @@ the product is for, and its deliberate limits, are in
   for me?" in dollars.
 - **Markets**: the part of net worth change the market made: gain net of
   contributions summed over the investment accounts that can be measured.
-- **Added**: net worth change minus Markets. Money saved from income minus
-  spending, plus the whole change of any investment account that can't be
-  measured (it then says so). Contributions and loan paydown move money
-  between your own accounts, so they are not part of the change.
+- **Earned − spent** (on the Holdings hero): Flow's In minus Out for the
+  same period, the same figure Flow shows.
+- **Other**: net worth change minus Markets minus Earned − spent. Every
+  balance move neither explains: shares moved in from another brokerage,
+  the whole change of an investment account that can't be measured (named
+  on the hero), and card or bank balances that lag their transactions.
+  Contributions and loan paydown move money between your own accounts, so
+  they are not part of the change. Replaced "Added", which was this
+  leftover plus Earned − spent and read as money deposited.
 - **Unrealized gain**: current value minus cost basis for a position.
 - **Idle cash**: an investment account holding at least $1,000 and at
   least 5% of its value in cash.

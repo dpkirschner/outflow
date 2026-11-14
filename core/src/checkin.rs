@@ -65,6 +65,7 @@
 
 use crate::find::{self, Evidence, FindOptions, Finding, FindingKind};
 use crate::model::Transaction;
+use crate::money::Money;
 use crate::period::{Period, PeriodKind};
 use crate::perks;
 use crate::query::{account_kinds, category_spend, flow_over, lane_of, Lane, TxnFilter};
@@ -151,11 +152,12 @@ pub struct NetWorthSummary {
     pub change_cents: Option<i64>,
     pub change_bp: Option<i64>,
     pub reason: Option<ChangeReason>,
-    /// Markets + Added == change, exactly.
+    /// Markets + Earned − spent + Other == change, exactly.
     pub markets_cents: Option<i64>,
-    pub added_cents: Option<i64>,
+    pub earned_minus_spent_cents: Option<i64>,
+    pub other_cents: Option<i64>,
     /// Investment accounts whose gain is unknown: their whole change is in
-    /// Added.
+    /// Other.
     pub excluded: Vec<String>,
     pub partial_start: bool,
 }
@@ -686,7 +688,8 @@ pub fn checkin(
     } else {
         Vec::new()
     };
-    let change = nw(&period);
+    let mut change = nw(&period);
+    change.split_flow(Money::from_cents(flow.earned_minus_spent_cents));
     Ok(CheckIn {
         label: period.to_string(),
         period,
@@ -864,7 +867,8 @@ fn summary(c: &NetWorthChange) -> NetWorthSummary {
         change_bp: c.change_bp,
         reason: c.reason,
         markets_cents: c.markets.map(|m| m.cents()),
-        added_cents: c.added.map(|m| m.cents()),
+        earned_minus_spent_cents: c.earned_minus_spent.map(|m| m.cents()),
+        other_cents: c.other.map(|m| m.cents()),
         excluded: c.excluded.iter().map(|x| x.account.clone()).collect(),
         partial_start: c.partial_start,
     }

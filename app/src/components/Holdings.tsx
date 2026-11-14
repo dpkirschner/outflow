@@ -431,7 +431,7 @@ export function Holdings({
   );
 }
 
-// ── Hero: Change = Markets + Added, and the answer in words ─────────────────
+// ── Hero: Change = Markets + Earned − spent + Other, in words ──────────────
 function Hero({
   c,
   phrase,
@@ -476,14 +476,18 @@ function Hero({
           </dd>
         </div>
         {/* Each operator is drawn with the term after it (CSS), so a narrow
-            screen wraps "= Markets" and "+ Added" whole. */}
+            screen wraps "= Markets" and "+ Other" whole. */}
         <div className="hd-eq-term" data-op="=">
           <dt>Markets</dt>
           <dd>{signedCents(c.markets ?? 0)}</dd>
         </div>
         <div className="hd-eq-term" data-op="+">
-          <dt>Added</dt>
-          <dd>{signedCents(c.added ?? 0)}</dd>
+          <dt>Earned − spent</dt>
+          <dd>{signedCents(c.earned_minus_spent ?? 0)}</dd>
+        </div>
+        <div className="hd-eq-term" data-op="+">
+          <dt>Other</dt>
+          <dd>{signedCents(c.other ?? 0)}</dd>
         </div>
       </dl>
       <p className="hd-say">
@@ -491,19 +495,27 @@ function Hero({
         <b>{formatCents(c.end.net_worth)}</b> on {end}.
       </p>
       <details className="hd-defs hd-note">
-        <summary>What Markets and Added mean</summary>
+        <summary>What the three parts mean</summary>
         <p className="hd-quiet">
-          Markets: what investments earned beyond the money put in. Added: saved from income, less
-          spending.
+          Markets: what investments earned beyond the money put in. Earned − spent: income less
+          spending in {phrase}, the same figure as Flow. Other: every balance move neither
+          explains, such as shares moved in from another brokerage, accounts whose gain isn't
+          known, and card balances that haven't caught up with their charges.
         </p>
       </details>
-      {c.added_includes_unmeasured && (
+      {c.excluded.length > 0 && (
         <p className="hd-note">
           Markets covers {measured} of {invest.length} investment accounts.{" "}
-          {listAnd(c.excluded.map((x) => x.account))}{" "}
-          {c.excluded.length === 1 ? "doesn't report its" : "don't report their"} contributions, so{" "}
-          {c.excluded.length === 1 ? "its" : "their"} whole change,{" "}
-          {listAnd(c.excluded.map((x) => signedCents(x.change)))}, is counted in Added.
+          {c.excluded.map((x, i) => (
+            <span key={x.account_id}>
+              {i > 0 && " "}
+              {x.account}{" "}
+              {x.reason === "balance_mismatch"
+                ? "lists shares its balance doesn't count yet"
+                : "doesn't report its contributions"}
+              , so its whole change, {signedCents(x.change)}, is in Other.
+            </span>
+          ))}
         </p>
       )}
       {c.partial_start && (
@@ -514,11 +526,6 @@ function Hero({
       )}
     </section>
   );
-}
-
-/** "a", "a and b", "a, b and c". */
-function listAnd(xs: string[]): string {
-  return xs.length < 2 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
 }
 
 // ── Breakdown: one signed line that sums to net worth ──────────────────────

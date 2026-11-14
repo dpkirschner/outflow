@@ -276,7 +276,7 @@ change`. Visible accounts only.
   balance differ by ~0.1–0.3%, and one custodian's price never moves).
 - **Gain net of contributions** (investment accounts) = change −
   contributions. No non-cash positions at start and end → `gain_reason:
-  cash` (all of its change is Added). Measurable only if every non-cash
+  cash` (all of its change is in Other). Measurable only if every non-cash
   position's quantity change equals the activity quantity for it, within
   0.001 share (`QTY_TOLERANCE`; quantities are compared as 1e-8 integer
   units, never floats); otherwise `contributions_unknown` and the account
@@ -287,9 +287,18 @@ change`. Visible accounts only.
   quantity × the first recorded snapshot price on or after the transfer
   date (no price → unknown). Dividends, reinvestment, interest and fees are
   performance. `cancel` rows and the rows they cancel are skipped.
-- **Markets** = sum of measurable gains; **Added** = change − markets,
-  exactly. `added_includes_unmeasured` is set when `excluded` is non-empty:
-  their market move is then inside Added, and the UI must say so.
+- **Balance mismatch** (rule F): a share transfer is valued from holdings,
+  so when the window has one, the holdings (cash included) must be within
+  0.5% of the balance at the start and end (`MISMATCH_BP`). Otherwise the
+  institution lists shares its balance doesn't count yet, and counting them
+  as a contribution would read as a market loss: `balance_mismatch`, listed
+  in `excluded` with its reason. Without a share transfer nothing is valued
+  from holdings, so a frozen holdings price is fine.
+- **Markets** = sum of measurable gains. `split_flow` then adds
+  **Earned − spent** (Flow's In − Out over the same period, via
+  `query::stock_change`) and **Other** = change − markets − earned − spent,
+  exactly. Each `excluded` account's whole change is inside Other, and the
+  UI names it with its reason.
 - **Contributed series**: per day, `invested` (investment balances) and
   `contributed` = invested on the first day + net contributions through
   that day. `contributed_complete` is false when an account is excluded or
@@ -325,7 +334,7 @@ change`. Visible accounts only.
 `outflow checkin` (`offers` is the `OUTFLOW_PERKS` path, if set). One week, month or quarter; the constants are at the top
 of the module.
 
-- **Figures**: net worth change, Markets and Added (as `/net-worth/change`);
+- **Figures**: net worth change, Markets, Earned − spent and Other (as `/net-worth/change`);
   in, out, earned − spent, saved and the gap over the whole period (Flow's
   lane rules via `query::flow_over`; a card payment takes the larger side
   over the period).

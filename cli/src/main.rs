@@ -298,7 +298,8 @@ pub(crate) enum Cmd {
     },
     /// Net worth change over a period (default this month), split into
     /// Markets (gain net of contributions on measurable investment accounts)
-    /// + Added (everything else), with per-account change and gain.
+    /// + Moved in (shares transferred in) + Earned - spent (Flow's In - Out)
+    /// + Other (everything else), with per-account change and gain.
     Change {
         #[command(flatten)]
         period: PeriodArgs,

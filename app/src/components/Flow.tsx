@@ -136,7 +136,12 @@ function stripMonths(months: FlowMonth[], plot: StripPlot): StripMonth[] {
       label: monthLabel(m.year, m.month),
       short: monthLabelShort(m.year, m.month),
       figure: formatCentsShort(cents).replace("-", "\u2212"),
-      spoken: p === OUT_PLOT ? `${signedCents(cents)} out` : `${noun} ${signedCents(cents)}`,
+      spoken:
+        p !== OUT_PLOT
+          ? `${noun} ${signedCents(cents)}`
+          : cents > 0
+            ? `${unsignedCents(cents)} refunded` // net refunds: not "+$50 out"
+            : `${signedCents(cents)} out`,
       bar: Math.max(0, figs[i]) / max,
       sofar: isCurrentMonth(m),
     };

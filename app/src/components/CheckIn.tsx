@@ -776,8 +776,13 @@ function Figures({
             nw.earned_minus_spent_cents !== null &&
             nw.other_cents !== null && (
               <dd className="ci-sub">
-                Markets {signedCents(nw.markets_cents)} · Earned − spent{" "}
-                {signedCents(nw.earned_minus_spent_cents)} · Other {signedCents(nw.other_cents)}
+                Markets{" "}
+                <span className="ci-nowrap">{signedCents(nw.markets_cents)}</span> ·
+                Earned − spent{" "}
+                <span className="ci-nowrap">
+                  {signedCents(nw.earned_minus_spent_cents)}
+                </span>{" "}
+                · Other <span className="ci-nowrap">{signedCents(nw.other_cents)}</span>
               </dd>
             )
           )}

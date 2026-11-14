@@ -5,6 +5,20 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.4 (2026-11-13)
+
+The Holdings and Check-in hero no longer lumps everything that isn't a
+market move into one "Added" figure that read like deposits. Net worth
+change now splits into Markets, Moved in (shares transferred between
+accounts), Earned - spent (from Flow) and Other, so the hero never
+claims money was added when it wasn't. The CLI's `--json` output now
+follows the agent-wrapper conventions.
+
+### Features
+
+- holdings: Split the hero into Markets, Moved in, Earned - spent and Other; share transfers show as Moved in instead of a market loss (rule F dropped), and each amount stays on one line with its label and sign (ho-2mj.25) ([272ac80](https://github.com/dpkirschner/outflow/commit/272ac80), [b200fd9](https://github.com/dpkirschner/outflow/commit/b200fd9))
+- cli: Agent-wrapper conventions: `--json` before or after the subcommand prints one `{ok, ...}` or `{ok: false, error: {code, message}}` object, with typed exit codes (2 usage, 3 not found, ...) (ho-8ti) ([4f1a09e](https://github.com/dpkirschner/outflow/commit/4f1a09e))
+
 ## v2026.11.3 (2026-11-12)
 
 Find money arrives: a new screen (and `GET /find`, `outflow find`) that

@@ -30,6 +30,8 @@ import type {
   ResetPreview,
   CategoryEdit,
   CategoryUndo,
+  PastEdit,
+  PastUndo,
   GroupEdit,
   GroupUndo,
   AccountKind,
@@ -264,6 +266,12 @@ export const api = {
   // returned. 409 = something changed since; nothing was touched.
   undoCategory: (txnId: string, undo: CategoryUndo) =>
     post<void>(`/txn/${encodeURIComponent(txnId)}/category/undo`, undo),
+  // Give the merchant's other rows this category now (the offer after a
+  // learned edit; rows set by hand keep theirs), and reverse that.
+  recategorizePast: (txnId: string, category: string) =>
+    post<PastEdit>(`/txn/${encodeURIComponent(txnId)}/category/past`, { category }),
+  undoRecategorizePast: (txnId: string, undo: PastUndo) =>
+    post<number>(`/txn/${encodeURIComponent(txnId)}/category/past/undo`, undo),
   // flag is the serde variant name, e.g. "Transfer" | "CardPayment" | "Spending".
   setFlag: (txnId: string, flag: TxnFlag, learn: boolean) =>
     post<number | null>(`/txn/${encodeURIComponent(txnId)}/flag`, { flag, learn }),

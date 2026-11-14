@@ -799,6 +799,49 @@ async fn undo_category(
 }
 
 #[derive(Deserialize)]
+struct PastBody {
+    category: String,
+}
+
+/// Give the merchant's other rows this category now (`Store::recategorize_past`):
+/// the offer after a learned category edit. Rows set by hand keep theirs.
+/// 404 for an unknown row.
+async fn recategorize_past(
+    State(state): State<AppState>,
+    Path(txn_id): Path<String>,
+    Json(body): Json<PastBody>,
+) -> ApiResult<outflow_core::PastEdit> {
+    if body.category.trim().is_empty() {
+        return Err(ApiError::bad_request("category is empty"));
+    }
+    let id = txn_id.clone();
+    let edit = with_store(&state, move |s| {
+        s.recategorize_past(&id, body.category.trim())
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    edit.map(Json).ok_or_else(|| {
+        ApiError(
+            axum::http::StatusCode::NOT_FOUND,
+            format!("no transaction {txn_id}"),
+        )
+    })
+}
+
+/// Reverse a past recategorize with the token it returned; returns the rows
+/// put back (rows changed since keep their category).
+async fn undo_recategorize_past(
+    State(state): State<AppState>,
+    Json(undo): Json<outflow_core::PastUndo>,
+) -> ApiResult<usize> {
+    with_store(&state, move |s| {
+        s.undo_recategorize_past(&undo).map_err(|e| e.to_string())
+    })
+    .await
+    .map(Json)
+}
+
+#[derive(Deserialize)]
 struct FlagBody {
     /// Serde variant name: "Spending" | "Transfer" | "CardPayment" | "Invest"
     /// | "Save" | "LoanPaydown".
@@ -1074,6 +1117,11 @@ pub fn api_router() -> Router<AppState> {
         .route("/categorize_llm", post(categorize_llm))
         .route("/txn/{txn_id}/category", post(set_category))
         .route("/txn/{txn_id}/category/undo", post(undo_category))
+        .route("/txn/{txn_id}/category/past", post(recategorize_past))
+        .route(
+            "/txn/{txn_id}/category/past/undo",
+            post(undo_recategorize_past),
+        )
         .route("/txn/{txn_id}/flag", post(set_flag))
         .route("/account/{account_id}/nickname", post(set_account_nickname))
         .route("/account/{account_id}/hidden", post(set_account_hidden))
@@ -1329,6 +1377,47 @@ mod tests {
         let (st, _) = post_json(app.clone(), "/txn/t1/category/undo", edit["undo"].clone()).await;
         assert_eq!(st, StatusCode::CONFLICT, "already undone");
         let (st, _) = post_json(app, "/txn/nope/category/undo", edit["undo"].clone()).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn past_rows_take_the_category_on_request_and_undo() {
+        let app = app_with_txns(&[
+            txn("t1", -500, "Blue Bottle"),
+            txn("t2", -650, "Blue Bottle"),
+            txn("t3", -900, "Sample Parking"),
+        ]);
+        let (st, edit) = post_json(
+            app.clone(),
+            "/txn/t1/category",
+            serde_json::json!({ "category": "Coffee", "learn": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(edit["past"], 1, "t2 only: same merchant");
+        let (st, past) = post_json(
+            app.clone(),
+            "/txn/t1/category/past",
+            serde_json::json!({ "category": "Coffee" }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(past["changed"], 1);
+        assert_eq!(past["undo"]["rows"][0]["txn_id"], "t2");
+        let (st, n) = post_json(
+            app.clone(),
+            "/txn/t1/category/past/undo",
+            past["undo"].clone(),
+        )
+        .await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(n, 1);
+        let (st, _) = post_json(
+            app,
+            "/txn/nope/category/past",
+            serde_json::json!({ "category": "Coffee" }),
+        )
+        .await;
         assert_eq!(st, StatusCode::NOT_FOUND);
     }
 

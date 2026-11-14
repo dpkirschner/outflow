@@ -146,10 +146,24 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, Fail> {
             txn_id,
             category,
             no_learn,
-        } => remote.post(
-            &format!("/txn/{}/category", enc(txn_id)),
-            Some(serde_json::json!({ "category": category, "learn": !no_learn })),
-        ),
+            past,
+        } => {
+            let edit = remote.post(
+                &format!("/txn/{}/category", enc(txn_id)),
+                Some(serde_json::json!({ "category": category, "learn": !no_learn })),
+            )?;
+            if !*past {
+                return Ok(edit);
+            }
+            // One object, as local `fix --past --json` prints: the
+            // CategoryEdit with the PastEdit under "applied".
+            let applied = remote.post(
+                &format!("/txn/{}/category/past", enc(txn_id)),
+                Some(serde_json::json!({ "category": category })),
+            )?;
+            let head = edit.trim().trim_end_matches('}');
+            Ok(format!("{head},\"applied\":{}}}", applied.trim()))
+        }
         Cmd::Accounts { all } => remote.get(&format!("/accounts?include_hidden={all}")),
         // Same shape as local `status --json`: {"version": ..., "upkeep": ...,
         // "sync_log": [...]}, with the server's version. A server older than

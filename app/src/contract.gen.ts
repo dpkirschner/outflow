@@ -23,6 +23,7 @@ import type {
   MatchView,
   MerchantSpend,
   NetWorthChange,
+  PastEdit,
   PlaidItem,
   PositionChange,
   PositionPoint,
@@ -863,6 +864,7 @@ export const categorizeResult: CategorizeResult = {
 
 export const categoryEdit: CategoryEdit = {
   "rule_id": 12,
+  "past": 14,
   "undo": {
     "category": "Coffee",
     "prev_category": "Dining",
@@ -871,6 +873,20 @@ export const categoryEdit: CategoryEdit = {
       "id": 12,
       "prev_category": null
     }
+  }
+};
+
+export const pastEdit: PastEdit = {
+  "changed": 1,
+  "undo": {
+    "category": "Coffee",
+    "rows": [
+      {
+        "txn_id": "txn-demo-002",
+        "category": "Dining",
+        "source": "Plaid"
+      }
+    ]
   }
 };
 

@@ -254,6 +254,10 @@ pub(crate) enum Cmd {
         /// Fix this row only; don't learn a rule.
         #[arg(long)]
         no_learn: bool,
+        /// Also give the merchant's past rows this category now (rows set by
+        /// hand keep theirs). JSON adds them as `applied`.
+        #[arg(long, conflicts_with = "no_learn")]
+        past: bool,
     },
     /// Search/sort/filter the transaction list.
     Txns(TxnsArgs),
@@ -941,6 +945,7 @@ fn cmd_fix(
     txn_id: String,
     category: String,
     no_learn: bool,
+    past: bool,
     json: bool,
 ) -> CliResult {
     if store
@@ -953,12 +958,31 @@ fn cmd_fix(
     let edit = store
         .set_manual_category(&txn_id, &category, !no_learn)
         .map_err(|e| format!("{e}"))?;
+    let applied = if past {
+        store
+            .recategorize_past(&txn_id, &category)
+            .map_err(|e| format!("{e}"))?
+    } else {
+        None
+    };
     if json {
-        return json_out(&edit);
+        let mut v = serde_json::to_value(&edit).map_err(|e| format!("serialize: {e}"))?;
+        if let Some(a) = &applied {
+            v["applied"] = serde_json::to_value(a).map_err(|e| format!("serialize: {e}"))?;
+        }
+        return json_out(&v);
     }
     match edit.rule_id {
         Some(id) => println!("set {txn_id} = {category}; learned rule #{id}"),
         None => println!("set {txn_id} = {category}"),
+    }
+    match &applied {
+        Some(a) => println!("{} past rows of this merchant = {category} too", a.changed),
+        None if edit.past > 0 => println!(
+            "{} past rows of this merchant match; --past gives them {category} too",
+            edit.past
+        ),
+        None => {}
     }
     Ok(())
 }
@@ -2097,7 +2121,8 @@ fn run(cli: Cli) -> CliResult {
             txn_id,
             category,
             no_learn,
-        } => cmd_fix(&store, txn_id, category, no_learn, cli.json),
+            past,
+        } => cmd_fix(&store, txn_id, category, no_learn, past, cli.json),
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),

@@ -47,7 +47,7 @@ Subcommands (`outflow <cmd> --help` is the authoritative list of flags):
 |---|---|
 | `pull --from-file P` | offline fixture ingest; live syncs are the server's job (`--server URL pull` triggers one) |
 | `categorize [--llm]` | rule pass over uncategorized rows, then optionally the LLM tail |
-| `fix <id> <category> [--no-learn]` | manual category; also points the merchant's rule at it unless `--no-learn` |
+| `fix <id> <category> [--no-learn \| --past]` | manual category; also points the merchant's rule at it unless `--no-learn`; `--past` gives the merchant's past rows it too (not those set by hand) |
 | `report --by category\|merchant\|source\|monthly [--top N --posted-only]` | spending by category or merchant, In by source (payee), or Flow lanes per month (in / out / earned − spent / saved / Moved groups); no period = all history |
 | `recurring [--ignored] [--subscriptions]` | recurring merchants over the 12 months ending with the period's last month (default this month): cadence, usual monthly cost, new / late / up / down >25%, year on year. `--subscriptions` keeps only Steady merchants and totals those (the ignored list stays whole) |
 | `checkin [--offers F --expiring-days N]` | one week, month or quarter (default this month): net worth change, earned − spent, saved, each against its usual, and what's unusual, including Findings new this period (`find money  <subject>: <action> (about $N a year)  [key]`; offers from `--offers` / `OUTFLOW_PERKS`, a bad file skips them); `--categories` lists Out per category against each one's usual instead |
@@ -90,7 +90,7 @@ JSON object on stdout:
 - **Success:** `{"ok":true, ...}`. An object payload's fields sit at the top
   level beside `ok`, in the API's serde shape. A list goes under `items`
   (`outflow accounts --json` → `{"ok":true,"items":[...]}`). Writes return
-  what the API returns: `fix` its `CategoryEdit`, `categorize`
+  what the API returns: `fix` its `CategoryEdit` (with `--past`, the `PastEdit` under `applied`), `categorize`
   `{rule, remaining, llm?}`, `matches accept|reject|unaccept` `{id}`.
 - **Failure:** `{"ok":false,"error":{"code":N,"message":"..."}}`, where
   `code` is the exit code.

@@ -433,5 +433,6 @@ categories only; manual fixes overwrite anything).
   generated from these structs (`server/src/ts_types.rs`), so it matches; the HTTP API carries these shapes verbatim (there is no
   camelCase translation layer — that died with Tauri).
 - `Money` and all `*_cents: i64` fields cross as JS **numbers** (cents).
-- CLI `--json` emits the same serde shapes, so local and `--server` output are
+- CLI `--json` emits the same serde shapes inside its `{"ok":true,...}`
+  envelope (lists under `items`), so local and `--server` output are
   interchangeable for consumers.

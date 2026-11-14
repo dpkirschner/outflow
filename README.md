@@ -101,7 +101,8 @@ cargo run -p outflow-cli -- --db "$HOME/outflow.db" balances
 
 Every subcommand lists its flags under `--help`; the full set is in
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#cli). Add `--json` for
-machine-readable output.
+machine-readable output: one `{"ok":...}` object, with typed exit codes
+([JSON output and exit codes](docs/DEVELOPMENT.md#json-output-and-exit-codes)).
 
 The database path also reads from `OUTFLOW_DB`.
 

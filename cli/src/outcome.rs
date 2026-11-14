@@ -15,14 +15,16 @@ pub const NOT_FOUND: u8 = 3;
 /// Already done, or the state changed under it.
 pub const CONFLICT: u8 = 4;
 /// A service is down, slow or rate-limited.
+#[cfg_attr(not(any(feature = "client", feature = "net")), allow(dead_code))]
 pub const UNREACHABLE: u8 = 5;
 /// Credentials refused or unreadable.
 pub const DENIED: u8 = 6;
 /// A guard said no (e.g. a read-only token on a write).
+#[cfg_attr(not(feature = "client"), allow(dead_code))]
 pub const REFUSED: u8 = 7;
 
 /// A failed run: the exit code and what to tell the caller.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Fail {
     pub code: u8,
     pub message: String,
@@ -34,6 +36,12 @@ impl Fail {
             code,
             message: message.into(),
         }
+    }
+}
+
+impl std::fmt::Display for Fail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
     }
 }
 
@@ -92,9 +100,11 @@ pub fn json_out<T: serde::Serialize>(v: &T) -> CliResult {
 /// Report a failure (JSON on stdout, or text on stderr) and give its exit code.
 pub fn fail_exit(json: bool, f: &Fail) -> ExitCode {
     if json {
+        // Built by hand so "ok" leads, as on success (json! sorts keys).
+        let message = serde_json::Value::from(f.message.as_str());
         println!(
-            "{}",
-            serde_json::json!({ "ok": false, "error": { "code": f.code, "message": f.message } })
+            "{{\"ok\":false,\"error\":{{\"code\":{},\"message\":{message}}}}}",
+            f.code
         );
     } else {
         eprintln!("error: {}", f.message);

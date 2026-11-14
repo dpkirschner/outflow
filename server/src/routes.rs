@@ -751,12 +751,23 @@ async fn set_category(
     Path(txn_id): Path<String>,
     Json(body): Json<CategoryBody>,
 ) -> ApiResult<outflow_core::CategoryEdit> {
+    // None: no such transaction (404), rather than a silent no-op edit.
     with_store(&state, move |s| {
+        if s.transaction(&txn_id).map_err(|e| e.to_string())?.is_none() {
+            return Ok(None);
+        }
         s.set_manual_category(&txn_id, &body.category, body.learn)
+            .map(Some)
             .map_err(|e| e.to_string())
     })
-    .await
+    .await?
     .map(Json)
+    .ok_or_else(|| {
+        ApiError(
+            axum::http::StatusCode::NOT_FOUND,
+            "no such transaction".into(),
+        )
+    })
 }
 
 /// Reverse one category edit: the body is the `undo` its response carried.
@@ -1319,6 +1330,19 @@ mod tests {
         assert_eq!(st, StatusCode::CONFLICT, "already undone");
         let (st, _) = post_json(app, "/txn/nope/category/undo", edit["undo"].clone()).await;
         assert_eq!(st, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn category_edit_on_an_unknown_txn_is_404_not_a_silent_write() {
+        let app = app_with_txns(&[txn("t1", -1500, "Blue Bottle")]);
+        let (st, body) = post_json(
+            app,
+            "/txn/nope/category",
+            serde_json::json!({ "category": "Coffee", "learn": true }),
+        )
+        .await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        assert_eq!(body["error"], "no such transaction");
     }
 
     #[tokio::test]

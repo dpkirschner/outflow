@@ -1343,12 +1343,13 @@ fn cmd_checkin(
     let n = &c.net_worth;
     match n.change_cents {
         Some(ch) => println!(
-            "net worth change  {}{}   markets {}   earned - spent {}   other {}{}",
+            "net worth change  {}{}   markets {}   moved in {}   earned - spent {}   other {}{}",
             signed(ch),
             n.change_bp
                 .map(|bp| format!(" ({})", signed_pct(bp)))
                 .unwrap_or_default(),
             n.markets_cents.map(signed).unwrap_or_else(|| "-".into()),
+            n.moved_in_cents.map(signed).unwrap_or_else(|| "-".into()),
             n.earned_minus_spent_cents
                 .map(signed)
                 .unwrap_or_else(|| "-".into()),
@@ -1561,21 +1562,20 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
             ""
         }
     );
-    if let (Some(m), Some(e), Some(o)) = (c.markets, c.earned_minus_spent, c.other) {
+    if let (Some(m), Some(v), Some(e), Some(o)) =
+        (c.markets, c.moved_in, c.earned_minus_spent, c.other)
+    {
         println!(
-            "  markets {}   earned - spent {}   other {}",
+            "  markets {}   moved in {}   earned - spent {}   other {}",
             signed(m.cents()),
+            signed(v.cents()),
             signed(e.cents()),
             signed(o.cents())
         );
     }
     for x in &c.excluded {
-        let why = match x.reason {
-            GainReason::BalanceMismatch => "holdings don't match the balance",
-            _ => "contributions unknown",
-        };
         println!(
-            "  other includes {} {} ({why})",
+            "  other includes {} {} (contributions unknown)",
             x.account,
             signed(x.change.cents())
         );
@@ -1593,7 +1593,6 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
             (Some(g), _) => signed(g.cents()),
             (None, Some(GainReason::Cash)) => "cash".into(),
             (None, Some(GainReason::ContributionsUnknown)) => "unknown".into(),
-            (None, Some(GainReason::BalanceMismatch)) => "mismatch".into(),
             (None, None) => String::new(),
         };
         println!(

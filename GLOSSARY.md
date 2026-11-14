@@ -55,11 +55,15 @@ the product is for, and its deliberate limits, are in
   for me?" in dollars.
 - **Markets**: the part of net worth change the market made: gain net of
   contributions summed over the investment accounts that can be measured.
+- **Moved in**: on the Holdings hero, the value of shares transferred in
+  from an account outside Outflow (another brokerage), at their price on
+  arrival; shares moved out count negative. Shown only when not zero. Cash
+  put in is not part of it.
 - **Earned − spent** (on the Holdings hero): Flow's In minus Out for the
   same period, the same figure Flow shows.
-- **Other**: net worth change minus Markets minus Earned − spent. Every
-  balance move neither explains: shares moved in from another brokerage,
-  the whole change of an investment account that can't be measured (named
+- **Other**: net worth change minus Markets, Moved in and Earned − spent.
+  Every balance move none of them explains: cash put in from outside
+  Outflow, the whole change of an investment account that can't be measured (named
   on the hero), and card or bank balances that lag their transactions.
   Contributions and loan paydown move money between your own accounts, so
   they are not part of the change. Replaced "Added", which was this

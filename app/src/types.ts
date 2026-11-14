@@ -487,9 +487,13 @@ export type NetWorthSummary = {
   change_bp: number | null,
   reason: ChangeReason | null,
   /**
-   * Markets + Earned − spent + Other == change, exactly.
+   * Markets + Moved in + Earned − spent + Other == change, exactly.
    */
   markets_cents: number | null,
+  /**
+   * Shares transferred in from outside the tracked accounts.
+   */
+  moved_in_cents: number | null,
   earned_minus_spent_cents: number | null,
   other_cents: number | null,
   /**
@@ -1293,7 +1297,7 @@ export type ChangeReason = "no_snapshots" | "one_snapshot";
 /**
  * Why an investment account has no gain.
  */
-export type GainReason = "cash" | "contributions_unknown" | "balance_mismatch";
+export type GainReason = "cash" | "contributions_unknown";
 
 export type AccountChange = {
   account_id: string,
@@ -1345,7 +1349,7 @@ export type ExcludedAccount = {
   account: string,
   change: number,
   /**
-   * `contributions_unknown` or `balance_mismatch`.
+   * Always `contributions_unknown`.
    */
   reason: GainReason,
 };
@@ -1399,13 +1403,21 @@ export type NetWorthChange = {
    */
   markets: number | null,
   /**
+   * Net value of shares transferred in (rule D) across the accounts
+   * Markets measures: assets that arrived from outside the tracked
+   * accounts. Transfers between two tracked accounts cancel. Cash
+   * contributions are left out: from a tracked account they net to zero
+   * in Other already.
+   */
+  moved_in: number | null,
+  /**
    * Flow's In − Out over the period; set by `split_flow`, None before.
    */
   earned_minus_spent: number | null,
   /**
-   * `change - markets - earned_minus_spent`, exactly: every balance move
-   * neither explains (unmeasured accounts, share transfers, card and bank
-   * timing). Set by `split_flow`.
+   * `change - markets - moved_in - earned_minus_spent`, exactly: every
+   * balance move none of them explains (unmeasured accounts, outside cash
+   * contributions, card and bank timing). Set by `split_flow`.
    */
   other: number | null,
   /**

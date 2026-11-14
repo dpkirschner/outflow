@@ -1596,7 +1596,8 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(c["change"], 0);
         assert_eq!(c["markets"], 0);
-        // Markets + Earned − spent + Other == change, exactly.
+        assert_eq!(c["moved_in"], 0);
+        // Markets + Moved in + Earned − spent + Other == change, exactly.
         assert_eq!(
             c["earned_minus_spent"].as_i64().unwrap() + c["other"].as_i64().unwrap(),
             0

@@ -392,6 +392,7 @@ fn checkin() -> outflow_core::CheckIn {
             change_bp: Some(691),
             reason: None,
             markets_cents: Some(713_884),
+            moved_in_cents: Some(0),
             earned_minus_spent_cents: Some(300_000),
             other_cents: Some(169_193),
             excluded: vec!["Demo 401(k)".into()],
@@ -568,13 +569,14 @@ fn net_worth_change() -> NetWorthChange {
         change_bp: Some(365),
         reason: None,
         markets: Some(m(3_750)),
+        moved_in: Some(m(1_000)),
         earned_minus_spent: Some(m(8_000)),
-        other: Some(m(2_155)),
+        other: Some(m(1_155)),
         excluded: vec![ExcludedAccount {
             account_id: "k401".into(),
             account: "Demo k401 (0000)".into(),
             change: m(0),
-            reason: GainReason::BalanceMismatch,
+            reason: GainReason::ContributionsUnknown,
         }],
         accounts: vec![
             row(

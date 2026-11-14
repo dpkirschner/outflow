@@ -152,8 +152,10 @@ pub struct NetWorthSummary {
     pub change_cents: Option<i64>,
     pub change_bp: Option<i64>,
     pub reason: Option<ChangeReason>,
-    /// Markets + Earned − spent + Other == change, exactly.
+    /// Markets + Moved in + Earned − spent + Other == change, exactly.
     pub markets_cents: Option<i64>,
+    /// Shares transferred in from outside the tracked accounts.
+    pub moved_in_cents: Option<i64>,
     pub earned_minus_spent_cents: Option<i64>,
     pub other_cents: Option<i64>,
     /// Investment accounts whose gain is unknown: their whole change is in
@@ -867,6 +869,7 @@ fn summary(c: &NetWorthChange) -> NetWorthSummary {
         change_bp: c.change_bp,
         reason: c.reason,
         markets_cents: c.markets.map(|m| m.cents()),
+        moved_in_cents: c.moved_in.map(|m| m.cents()),
         earned_minus_spent_cents: c.earned_minus_spent.map(|m| m.cents()),
         other_cents: c.other.map(|m| m.cents()),
         excluded: c.excluded.iter().map(|x| x.account.clone()).collect(),

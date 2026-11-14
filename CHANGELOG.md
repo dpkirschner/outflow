@@ -5,6 +5,17 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.5 (2026-11-13)
+
+### Features
+
+- flow: Offer to apply a category change to past rows. After you recategorize a transaction, the toast offers "Apply to N past" for the merchant's other rows (rows set by hand keep theirs); its Undo reverses the whole change. New `POST /txn/{id}/category/past` (+ `/undo`) and `outflow fix --past` (ho-2mj.24) ([89737ce](https://github.com/dpkirschner/outflow/commit/89737ce), [418543a](https://github.com/dpkirschner/outflow/commit/418543a))
+
+### Fixes
+
+- cli: `outflow change --help` describes the split as Markets + Moved in + Earned − spent + Other (ho-cy4) ([b893e87](https://github.com/dpkirschner/outflow/commit/b893e87))
+- app: Check-in says "refunded" when refunds outrun spending, instead of a double minus ([5be3924](https://github.com/dpkirschner/outflow/commit/5be3924))
+
 ## v2026.11.4 (2026-11-13)
 
 The Holdings and Check-in hero no longer lumps everything that isn't a

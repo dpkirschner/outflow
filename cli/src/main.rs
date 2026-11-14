@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use outcome::{json_out, not_found, usage, CliResult, Fail, CONFLICT, DENIED};
 use outflow_core::{
     account_display_label, activity, balance_history, find, flow_lanes, parse_fixture,
     position_change, position_history, positions, search_transactions, spend_by_category,
@@ -9,6 +10,8 @@ use outflow_core::{
 };
 use outflow_core::{recurring, Change, StreamCadence};
 use std::process::ExitCode;
+
+mod outcome;
 
 #[cfg(feature = "client")]
 mod remote;
@@ -52,18 +55,18 @@ pub(crate) struct PeriodArgs {
 
 impl PeriodArgs {
     /// The resolved range, anchored on today's local date.
-    pub(crate) fn resolve(&self) -> Result<Option<Period>, String> {
+    pub(crate) fn resolve(&self) -> Result<Option<Period>, Fail> {
         self.resolve_at(today_local())
     }
 
-    pub(crate) fn resolve_at(&self, today: NaiveDate) -> Result<Option<Period>, String> {
+    pub(crate) fn resolve_at(&self, today: NaiveDate) -> Result<Option<Period>, Fail> {
         Period::resolve(
             self.period.as_deref(),
             self.since.as_deref(),
             self.until.as_deref(),
             today,
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| usage(e.to_string()))
     }
 }
 
@@ -72,10 +75,10 @@ pub(crate) fn history_period(
     history: bool,
     p: &PeriodArgs,
     today: NaiveDate,
-) -> Result<Option<Period>, String> {
+) -> Result<Option<Period>, Fail> {
     let period = p.resolve_at(today)?;
     if period.is_some() && !history {
-        return Err("--period/--since/--until apply to --history only".into());
+        return Err(usage("--period/--since/--until apply to --history only"));
     }
     Ok(period)
 }
@@ -136,11 +139,11 @@ pub(crate) enum HoldingsView {
     Change(Period, PositionLens),
 }
 
-pub(crate) fn holdings_view(a: &HoldingsArgs, today: NaiveDate) -> Result<HoldingsView, String> {
+pub(crate) fn holdings_view(a: &HoldingsArgs, today: NaiveDate) -> Result<HoldingsView, Fail> {
     let period = a.period.resolve_at(today)?;
     if a.history {
         if a.by.is_some() {
-            return Err("--by applies to the period view, not --history".into());
+            return Err(usage("--by applies to the period view, not --history"));
         }
         return Ok(HoldingsView::History(period));
     }
@@ -149,7 +152,7 @@ pub(crate) fn holdings_view(a: &HoldingsArgs, today: NaiveDate) -> Result<Holdin
     }
     let period = match period {
         Some(p) => p,
-        None => Period::parse("this-month", today).map_err(|e| e.to_string())?,
+        None => Period::parse("this-month", today).map_err(|e| usage(e.to_string()))?,
     };
     Ok(HoldingsView::Change(
         period,
@@ -567,7 +570,7 @@ fn epoch_bounds(period: Option<Period>) -> (Option<i64>, Option<i64>) {
     }
 }
 
-fn build_filter(period: &PeriodArgs, posted_only: bool) -> Result<TxnFilter, String> {
+fn build_filter(period: &PeriodArgs, posted_only: bool) -> Result<TxnFilter, Fail> {
     let mut f = TxnFilter::all();
     (f.since, f.until) = epoch_bounds(period.resolve()?);
     f.include_pending = !posted_only;
@@ -576,27 +579,30 @@ fn build_filter(period: &PeriodArgs, posted_only: bool) -> Result<TxnFilter, Str
 
 /// The SQLCipher key: `OUTFLOW_DB_KEY`, else `OUTFLOW_DB_KEY_FILE` (0600).
 /// Neither set = plaintext. A secret: env or a 0600 file, never argv.
-fn db_key() -> Result<Option<String>, String> {
+fn db_key() -> CliResult<Option<String>> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     if let Some(k) = env("OUTFLOW_DB_KEY") {
         return Ok(Some(k));
     }
     match env("OUTFLOW_DB_KEY_FILE") {
-        Some(p) => outflow_core::secrets::read_secret_file(&p).map(Some),
+        Some(p) => outflow_core::secrets::read_secret_file(&p)
+            .map(Some)
+            .map_err(|e| Fail::new(DENIED, e)),
         None => Ok(None),
     }
 }
 
-fn open_store(db: &str) -> Result<Store, String> {
+fn open_store(db: &str) -> CliResult<Store> {
     #[cfg(feature = "encryption")]
     if let Some(key) = db_key()? {
-        return Store::open_encrypted(db, &key).map_err(|e| format!("open encrypted db {db}: {e}"));
+        return Store::open_encrypted(db, &key)
+            .map_err(|e| format!("open encrypted db {db}: {e}").into());
     }
-    Store::open(db).map_err(|e| format!("open db {db}: {e}"))
+    Store::open(db).map_err(|e| format!("open db {db}: {e}").into())
 }
 
 /// `backup` opens the DB itself, without migrating (see `core::backup`).
-fn cmd_backup(db: &str, to: &str, json: bool) -> Result<(), String> {
+fn cmd_backup(db: &str, to: &str, json: bool) -> CliResult {
     let key = db_key()?;
     let r = outflow_core::backup::backup_db(db, to, key.as_deref())?;
     if json {
@@ -628,16 +634,19 @@ fn now_secs() -> i64 {
 /// Offline ingest of a Plaid fixture envelope (see `core::plaid::parse_fixture`)
 /// — the zero-feature, zero-credential pipeline. Live syncs are the server's
 /// job: `outflow --server URL pull`.
-fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
+fn cmd_pull(store: &Store, from_file: Option<String>, json: bool) -> CliResult {
     let Some(path) = from_file else {
-        return Err(
+        return Err(usage(
             "live sync runs on the server: use `--server URL pull`; for offline ingest use \
-             `pull --from-file examples/plaid-fixture.json`"
-                .into(),
-        );
+             `pull --from-file examples/plaid-fixture.json`",
+        ));
     };
-    let json = std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))?;
-    let fixture = parse_fixture(&json, now_secs()).map_err(|e| format!("parse: {e:?}"))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => not_found(format!("read {path}: {e}")),
+        _ => usage(format!("read {path}: {e}")),
+    })?;
+    let fixture =
+        parse_fixture(&text, now_secs()).map_err(|e| usage(format!("parse {path}: {e:?}")))?;
     store
         .upsert_accounts(&fixture.accounts)
         .map_err(|e| format!("save accounts: {e}"))?;
@@ -655,6 +664,16 @@ fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
     store
         .record_item_snapshot(&fixture.accounts, None, now_secs())
         .map_err(|e| format!("record snapshot: {e}"))?;
+    if json {
+        let (added, updated) = (r.added, r.updated);
+        println!(
+            "{}",
+            outcome::envelope(&format!(
+                "{{\"added\":{added},\"updated\":{updated},\"removed\":{deleted}}}"
+            ))
+        );
+        return Ok(());
+    }
     for a in &fixture.accounts {
         println!(
             "  {} [{}]  {}",
@@ -670,23 +689,38 @@ fn cmd_pull(store: &Store, from_file: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_categorize(store: &Store, llm: bool) -> Result<(), String> {
+fn cmd_categorize(store: &Store, llm: bool, json: bool) -> CliResult {
     let rules = store.ruleset().map_err(|e| format!("{e}"))?;
     let n = store
         .categorize_uncategorized(&rules, CategorySource::Rule)
         .map_err(|e| format!("{e}"))?;
+    let m = if llm {
+        Some(categorize_llm(store)?)
+    } else {
+        None
+    };
+    let remaining = store.uncategorized().map_err(|e| format!("{e}"))?.len();
+    if json {
+        // Server mode's shape: /categorize's {"rule","remaining"}, plus
+        // "llm" when it ran.
+        let mut out = format!("{{\"rule\":{n},\"remaining\":{remaining}");
+        if let Some(m) = m {
+            out.push_str(&format!(",\"llm\":{m}"));
+        }
+        out.push('}');
+        println!("{}", outcome::envelope(&out));
+        return Ok(());
+    }
     println!("categorized {n} by rule");
-    if llm {
-        let m = categorize_llm(store)?;
+    if let Some(m) = m {
         println!("categorized {m} by llm");
     }
-    let remaining = store.uncategorized().map_err(|e| format!("{e}"))?.len();
     println!("{remaining} still uncategorized");
     Ok(())
 }
 
 #[cfg(feature = "net")]
-fn categorize_llm(store: &Store) -> Result<usize, String> {
+fn categorize_llm(store: &Store) -> CliResult<usize> {
     use outflow_core::{normalize_payee, LlmCategorizer, MerchantSample};
     use outflow_net::AnthropicPrompter;
     use std::collections::HashMap;
@@ -711,12 +745,16 @@ fn categorize_llm(store: &Store) -> Result<usize, String> {
 
     let categories = store.categories().map_err(|e| format!("{e}"))?;
     if categories.is_empty() {
-        return Err("no categories in vocabulary; nothing to constrain the LLM to".into());
+        return Err(Fail::new(
+            CONFLICT,
+            "no categories in vocabulary; nothing to constrain the LLM to",
+        ));
     }
-    let categorizer = LlmCategorizer::new(AnthropicPrompter::from_env()?, categories);
+    let prompter = AnthropicPrompter::from_env().map_err(|e| Fail::new(DENIED, e))?;
+    let categorizer = LlmCategorizer::new(prompter, categories);
     let suggestions = categorizer
         .suggest(&samples)
-        .map_err(|e| format!("llm: {e:?}"))?;
+        .map_err(|e| Fail::new(outcome::UNREACHABLE, format!("llm: {e:?}")))?;
 
     let by_merchant: HashMap<String, String> = suggestions
         .into_iter()
@@ -737,11 +775,11 @@ fn categorize_llm(store: &Store) -> Result<usize, String> {
 }
 
 #[cfg(not(feature = "net"))]
-fn categorize_llm(_store: &Store) -> Result<usize, String> {
-    Err("--llm needs --features net".into())
+fn categorize_llm(_store: &Store) -> CliResult<usize> {
+    Err(usage("--llm needs --features net"))
 }
 
-fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(), String> {
+fn cmd_report(store: &Store, by: By, top: usize, filter: &TxnFilter) -> CliResult {
     match by {
         By::Category => {
             for r in spend_by_category(store, filter).map_err(|e| format!("{e}"))? {
@@ -804,7 +842,7 @@ fn cmd_recurring(
     ignored: bool,
     subscriptions: bool,
     json: bool,
-) -> Result<(), String> {
+) -> CliResult {
     let through = period.resolve()?.map_or_else(today_local, |p| p.last_day());
     let now = now_secs();
     let mut v = recurring(store, through, now).map_err(|e| format!("{e}"))?;
@@ -897,10 +935,26 @@ fn months_of_gap(gap_days: i64) -> i64 {
     ((gap_days as f64 / 30.44).round() as i64).max(2)
 }
 
-fn cmd_fix(store: &Store, txn_id: String, category: String, no_learn: bool) -> Result<(), String> {
+fn cmd_fix(
+    store: &Store,
+    txn_id: String,
+    category: String,
+    no_learn: bool,
+    json: bool,
+) -> CliResult {
+    if store
+        .transaction(&txn_id)
+        .map_err(|e| format!("{e}"))?
+        .is_none()
+    {
+        return Err(not_found(format!("no transaction {txn_id}")));
+    }
     let edit = store
         .set_manual_category(&txn_id, &category, !no_learn)
         .map_err(|e| format!("{e}"))?;
+    if json {
+        return json_out(&edit);
+    }
     match edit.rule_id {
         Some(id) => println!("set {txn_id} = {category}; learned rule #{id}"),
         None => println!("set {txn_id} = {category}"),
@@ -908,15 +962,7 @@ fn cmd_fix(store: &Store, txn_id: String, category: String, no_learn: bool) -> R
     Ok(())
 }
 
-fn json_out<T: serde::Serialize>(v: &T) -> Result<(), String> {
-    println!(
-        "{}",
-        serde_json::to_string(v).map_err(|e| format!("serialize: {e}"))?
-    );
-    Ok(())
-}
-
-fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> Result<(), String> {
+fn cmd_txns(store: &Store, a: &TxnsArgs, json: bool) -> CliResult {
     let mut filter = build_filter(&a.period, a.posted_only)?;
     filter.include_non_spending = a.show_excluded || a.flag.is_some_and(|f| f.to_flag().is_moved());
     let q = TxnQuery {
@@ -1032,7 +1078,7 @@ fn cmd_find(
     expiring_days: i64,
     mark: Option<FindMark>,
     json: bool,
-) -> Result<(), String> {
+) -> CliResult {
     let through = period.resolve()?.map_or(today_local(), |p| p.last_day());
     let opts = FindOptions {
         expiring_days: expiring_days.max(0),
@@ -1048,7 +1094,11 @@ fn cmd_find(
         }
         None => find(store, p, through, now, &opts),
     }
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| match e {
+        outflow_core::FindError::NoSuchFinding(_)
+        | outflow_core::FindError::NoSuchSubscription(_) => not_found(e.to_string()),
+        _ => e.to_string().into(),
+    })?;
     if json {
         return json_out(&report);
     }
@@ -1198,7 +1248,7 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-fn cmd_accounts(store: &Store, all: bool, json: bool) -> Result<(), String> {
+fn cmd_accounts(store: &Store, all: bool, json: bool) -> CliResult {
     let accounts = if all {
         store.all_accounts()
     } else {
@@ -1248,10 +1298,10 @@ fn breakdown_line(t: &outflow_core::Totals) -> String {
 }
 
 /// `change`'s range: the one given, else this month.
-pub(crate) fn change_period(p: &PeriodArgs, today: NaiveDate) -> Result<Period, String> {
+pub(crate) fn change_period(p: &PeriodArgs, today: NaiveDate) -> Result<Period, Fail> {
     match p.resolve_at(today)? {
         Some(period) => Ok(period),
-        None => Period::parse("this-month", today).map_err(|e| e.to_string()),
+        None => Period::parse("this-month", today).map_err(|e| usage(e.to_string())),
     }
 }
 
@@ -1267,11 +1317,11 @@ fn signed(cents: i64) -> String {
 }
 
 /// `checkin`'s period: the one given, else this month.
-pub(crate) fn checkin_period(p: Option<&str>, today: NaiveDate) -> Result<Period, String> {
-    Period::parse(p.unwrap_or("this-month"), today).map_err(|e| e.to_string())
+pub(crate) fn checkin_period(p: Option<&str>, today: NaiveDate) -> Result<Period, Fail> {
+    Period::parse(p.unwrap_or("this-month"), today).map_err(|e| usage(e.to_string()))
 }
 
-fn cmd_checkin_categories(store: &Store, period: Option<&str>, json: bool) -> Result<(), String> {
+fn cmd_checkin_categories(store: &Store, period: Option<&str>, json: bool) -> CliResult {
     use outflow_core::CategoryChange;
     let today = today_local();
     let p = checkin_period(period, today)?;
@@ -1311,7 +1361,7 @@ fn cmd_checkin(
     offers: Option<&std::path::Path>,
     expiring_days: i64,
     json: bool,
-) -> Result<(), String> {
+) -> CliResult {
     use outflow_core::{Check, NotCheckedReason, UnusualKind};
     let today = today_local();
     let p = checkin_period(period, today)?;
@@ -1529,7 +1579,7 @@ fn cmd_checkin(
     Ok(())
 }
 
-fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), String> {
+fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> CliResult {
     use outflow_core::{ChangeReason, GainReason};
     let p = change_period(period, today_local())?;
     let (since, until) = p.bounds();
@@ -1613,12 +1663,7 @@ fn cmd_change(store: &Store, period: &PeriodArgs, json: bool) -> Result<(), Stri
     Ok(())
 }
 
-fn cmd_balances(
-    store: &Store,
-    history: bool,
-    period: &PeriodArgs,
-    json: bool,
-) -> Result<(), String> {
+fn cmd_balances(store: &Store, history: bool, period: &PeriodArgs, json: bool) -> CliResult {
     let range = history_period(history, period, today_local())?;
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     if history {
@@ -1691,7 +1736,7 @@ fn cmd_balances(
     Ok(())
 }
 
-fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> Result<(), String> {
+fn cmd_holdings(store: &Store, a: &HoldingsArgs, json: bool) -> CliResult {
     let filter = PositionFilter {
         account: a.account.clone(),
         ticker: a.ticker.clone(),
@@ -1766,7 +1811,7 @@ fn holdings_change(
     p: Period,
     lens: PositionLens,
     json: bool,
-) -> Result<(), String> {
+) -> CliResult {
     use outflow_core::{ChangeReason, GainReason};
     let (since, until) = p.bounds();
     let snaps = store
@@ -1847,7 +1892,7 @@ fn holdings_change(
     Ok(())
 }
 
-fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> Result<(), String> {
+fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> CliResult {
     let filter = a.filter(a.period.resolve()?);
     let accounts = store.accounts().map_err(|e| format!("{e}"))?;
     let securities = store.securities().map_err(|e| format!("{e}"))?;
@@ -1875,16 +1920,24 @@ fn cmd_activity(store: &Store, a: &ActivityArgs, json: bool) -> Result<(), Strin
     Ok(())
 }
 
-fn cmd_status(store: &Store, limit: usize, json: bool) -> Result<(), String> {
+fn cmd_status(store: &Store, limit: usize, json: bool) -> CliResult {
     let log = store.sync_log(limit).map_err(|e| format!("{e}"))?;
     let up = outflow_core::upkeep(store).map_err(|e| format!("{e}"))?;
     let version = outflow_core::build::VERSION;
     if json {
-        return json_out(&serde_json::json!({
-            "version": version,
-            "upkeep": up,
-            "sync_log": log,
-        }));
+        // Field order as server mode prints it (json! would sort the keys).
+        let (v, u, l) = (
+            serde_json::to_string(&version).map_err(|e| e.to_string())?,
+            serde_json::to_string(&up).map_err(|e| e.to_string())?,
+            serde_json::to_string(&log).map_err(|e| e.to_string())?,
+        );
+        println!(
+            "{}",
+            outcome::envelope(&format!(
+                "{{\"version\":{v},\"upkeep\":{u},\"sync_log\":{l}}}"
+            ))
+        );
+        return Ok(());
     }
     println!("version: {}", version.unwrap_or("unreleased build"));
     print_upkeep(&up);
@@ -1932,14 +1985,14 @@ fn print_upkeep(up: &outflow_core::Upkeep) {
 /// Local match handling mirrors the server handlers exactly: accept flags both
 /// legs CardPayment and retires competing proposals; rejecting an accepted
 /// match restores both legs to Spending.
-fn cmd_matches(store: &Store, action: &MatchCmd, json: bool) -> Result<(), String> {
+fn cmd_matches(store: &Store, action: &MatchCmd, json: bool) -> CliResult {
     match action {
         MatchCmd::List { status } => {
             let status = match status.as_deref() {
                 None => None,
                 Some(s) => Some(
                     MatchStatus::from_str(&s.to_lowercase())
-                        .ok_or_else(|| format!("bad status {s:?}"))?,
+                        .ok_or_else(|| usage(format!("bad status {s:?}")))?,
                 ),
             };
             let ms = store.matches(status).map_err(|e| format!("{e}"))?;
@@ -1961,46 +2014,55 @@ fn cmd_matches(store: &Store, action: &MatchCmd, json: bool) -> Result<(), Strin
         }
         MatchCmd::Accept { id } => {
             if !store.accept_match(*id).map_err(|e| format!("{e}"))? {
-                return Err(format!("no match {id}"));
+                return Err(not_found(format!("no match {id}")));
+            }
+            if json {
+                return json_out(&serde_json::json!({ "id": id }));
             }
             println!("accepted #{id}: both legs excluded as card payment");
             Ok(())
         }
         MatchCmd::Reject { id } => {
             if !store.reject_match(*id).map_err(|e| format!("{e}"))? {
-                return Err(format!("no match {id}"));
+                return Err(not_found(format!("no match {id}")));
+            }
+            if json {
+                return json_out(&serde_json::json!({ "id": id }));
             }
             println!("rejected #{id}");
             Ok(())
         }
         MatchCmd::Unaccept { id } => match store.unaccept_match(*id).map_err(|e| format!("{e}"))? {
             outflow_core::Unaccept::Done => {
+                if json {
+                    return json_out(&serde_json::json!({ "id": id }));
+                }
                 println!("#{id} is back in review; both legs count as before");
                 Ok(())
             }
-            outflow_core::Unaccept::NotFound => Err(format!("no match {id}")),
-            outflow_core::Unaccept::NotAccepted(s) => {
-                Err(format!("match {id} is {}, not accepted", s.as_str()))
-            }
+            outflow_core::Unaccept::NotFound => Err(not_found(format!("no match {id}"))),
+            outflow_core::Unaccept::NotAccepted(s) => Err(Fail::new(
+                CONFLICT,
+                format!("match {id} is {}, not accepted", s.as_str()),
+            )),
         },
     }
 }
 
 #[cfg(feature = "client")]
-fn run_remote(server: &str, cmd: &Cmd) -> Result<(), String> {
+fn run_remote(server: &str, cmd: &Cmd) -> CliResult {
     let remote = remote::Remote::new(server);
     let body = remote::dispatch(&remote, cmd)?;
-    println!("{body}");
+    println!("{}", outcome::envelope(&body));
     Ok(())
 }
 
 #[cfg(not(feature = "client"))]
-fn run_remote(_server: &str, _cmd: &Cmd) -> Result<(), String> {
-    Err("--server needs --features client".into())
+fn run_remote(_server: &str, _cmd: &Cmd) -> CliResult {
+    Err(usage("--server needs --features client"))
 }
 
-fn run() -> Result<(), String> {
-    let cli = Cli::parse();
+fn run(cli: Cli) -> CliResult {
     // Server mode: every command maps to one API call; output is the server's
     // JSON (identical shapes to local --json).
     if let Some(server) = &cli.server {
@@ -2012,8 +2074,8 @@ fn run() -> Result<(), String> {
     let store = open_store(&cli.db)?;
     match cli.cmd {
         Cmd::Backup { .. } => unreachable!("handled above"),
-        Cmd::Pull { from_file } => cmd_pull(&store, from_file),
-        Cmd::Categorize { llm } => cmd_categorize(&store, llm),
+        Cmd::Pull { from_file } => cmd_pull(&store, from_file, cli.json),
+        Cmd::Categorize { llm } => cmd_categorize(&store, llm, cli.json),
         Cmd::Report {
             by,
             top,
@@ -2035,7 +2097,7 @@ fn run() -> Result<(), String> {
             txn_id,
             category,
             no_learn,
-        } => cmd_fix(&store, txn_id, category, no_learn),
+        } => cmd_fix(&store, txn_id, category, no_learn, cli.json),
         Cmd::Txns(args) => cmd_txns(&store, &args, cli.json),
         Cmd::Accounts { all } => cmd_accounts(&store, all, cli.json),
         Cmd::Balances { history, period } => cmd_balances(&store, history, &period, cli.json),
@@ -2076,7 +2138,7 @@ fn run() -> Result<(), String> {
     }
 }
 
-fn report_json(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<(), String> {
+fn report_json(store: &Store, by: By, top: usize, filter: &TxnFilter) -> CliResult {
     match by {
         By::Category => json_out(&spend_by_category(store, filter).map_err(|e| format!("{e}"))?),
         By::Merchant => json_out(&top_merchants(store, filter, top).map_err(|e| format!("{e}"))?),
@@ -2088,13 +2150,13 @@ fn report_json(store: &Store, by: By, top: usize, filter: &TxnFilter) -> Result<
 }
 
 fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            eprintln!("error: {e}");
-            ExitCode::FAILURE
-        }
-    }
+    let cli = match outcome::parse::<Cli>() {
+        Ok(cli) => cli,
+        Err(code) => return code,
+    };
+    // Server mode always speaks JSON, failures included.
+    let json = cli.json || cli.server.is_some();
+    outcome::finish(json, run(cli))
 }
 
 #[cfg(test)]
@@ -2163,7 +2225,7 @@ mod tests {
         let e = args(Some("2026-11"), Some("2026-11-01"), None)
             .resolve_at(today())
             .unwrap_err();
-        assert!(e.contains("not both"), "{e}");
+        assert!(e.message.contains("not both"), "{e}");
     }
 
     #[test]
@@ -2171,11 +2233,14 @@ mod tests {
         let e = args(Some("november"), None, None)
             .resolve_at(today())
             .unwrap_err();
-        assert!(e.contains("2026-W45") && e.contains("this-/last-"), "{e}");
+        assert!(
+            e.message.contains("2026-W45") && e.message.contains("this-/last-"),
+            "{e}"
+        );
         let e = args(None, Some("2026/11/01"), None)
             .resolve_at(today())
             .unwrap_err();
-        assert!(e.contains("YYYY-MM-DD"), "{e}");
+        assert!(e.message.contains("YYYY-MM-DD"), "{e}");
     }
 
     #[test]

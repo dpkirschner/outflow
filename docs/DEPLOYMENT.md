@@ -334,7 +334,7 @@ That hop is plain HTTP but never leaves the machine. It still requires the
 token — being on the box is not authorization.
 
 (Build the CLI with `--features client`. Every subcommand works in server
-mode and prints the same JSON shapes as local `--json`, except `pull
+mode and prints the same JSON as local `--json`, except `pull
 --from-file`, which reads a local file. The reads (`checkin`, `change`,
 `txns`, `report`, `recurring`, `accounts`, `balances`, `holdings`,
 `activity`, `find`, `matches list`, `status`) need only the RO token;

@@ -9,6 +9,7 @@
 //! it is just a bearer token with fewer rights, so read-only callers (agents,
 //! scripts) get 403 on any mutating subcommand.
 
+use crate::outcome::{self, usage, Fail};
 use crate::{history_period, By, Cmd, MatchCmd, PeriodArgs};
 use chrono::NaiveDate;
 use outflow_core::{today_local, Period};
@@ -33,7 +34,7 @@ impl Remote {
         method: &str,
         path: &str,
         body: Option<serde_json::Value>,
-    ) -> Result<String, String> {
+    ) -> Result<String, Fail> {
         let url = format!("{}{}", self.base, path);
         let mut req = ureq::request(method, &url);
         if let Some(t) = &self.token {
@@ -46,27 +47,23 @@ impl Remote {
             None => req.call(),
         };
         match result {
-            Ok(resp) => resp.into_string().map_err(|e| format!("read body: {e}")),
-            // 403 means the token is real but read-only: say so, rather than
-            // leaving a bare status for an agent to guess at (the server sends
-            // no body on this one).
-            Err(ureq::Error::Status(403, _)) => Err(format!(
-                "{url}: HTTP 403: read-only token — this command mutates and \
-                 needs the full OUTFLOW_API_TOKEN"
-            )),
+            Ok(resp) => resp
+                .into_string()
+                .map_err(|e| format!("read body: {e}").into()),
             Err(ureq::Error::Status(code, resp)) => {
-                let detail = resp.into_string().unwrap_or_default();
-                Err(format!("{url}: HTTP {code}: {detail}"))
+                let body = resp.into_string().unwrap_or_default();
+                Err(status_fail(&url, code, &body))
             }
-            Err(e) => Err(format!("{url}: {e}")),
+            // ureq's transport error already names the URL.
+            Err(e) => Err(Fail::new(outcome::UNREACHABLE, e.to_string())),
         }
     }
 
-    fn get(&self, path: &str) -> Result<String, String> {
+    fn get(&self, path: &str) -> Result<String, Fail> {
         self.call("GET", path, None)
     }
 
-    fn post(&self, path: &str, body: Option<serde_json::Value>) -> Result<String, String> {
+    fn post(&self, path: &str, body: Option<serde_json::Value>) -> Result<String, Fail> {
         self.call("POST", path, body)
     }
 }
@@ -85,24 +82,62 @@ fn enc(s: &str) -> String {
     out
 }
 
+/// An HTTP error status as a CLI failure. The message is the server's
+/// `{"error": ...}` text when it sent one. 403 is the read-only token on a
+/// write (the server sends no body), so it says so: a guard, not a bad
+/// credential.
+fn status_fail(url: &str, status: u16, body: &str) -> Fail {
+    if status == 403 {
+        return Fail::new(
+            outcome::REFUSED,
+            format!(
+                "{url}: HTTP 403: read-only token — this command mutates and \
+                 needs the full OUTFLOW_API_TOKEN"
+            ),
+        );
+    }
+    let detail = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v["error"].as_str().map(str::to_string))
+        .unwrap_or_else(|| body.trim().to_string());
+    let detail = match (status, detail.is_empty()) {
+        (401, true) => "bad or missing OUTFLOW_API_TOKEN".to_string(),
+        _ => detail,
+    };
+    let code = match status {
+        400 | 422 => outcome::USAGE,
+        401 => outcome::DENIED,
+        404 => outcome::NOT_FOUND,
+        409 => outcome::CONFLICT,
+        429 | 502 | 503 | 504 => outcome::UNREACHABLE,
+        _ => outcome::INTERNAL,
+    };
+    Fail::new(code, format!("{url}: HTTP {status}: {detail}"))
+}
+
 /// Dispatch a subcommand to the server; returns the response body to print.
-pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
+pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, Fail> {
     if let Some(path) = read_path(cmd, today_local())? {
         return remote.get(&path);
     }
     match cmd {
-        Cmd::Backup { .. } => Err("backup reads the DB file directly; drop --server".into()),
+        Cmd::Backup { .. } => Err(usage("backup reads the DB file directly; drop --server")),
         Cmd::Pull { from_file } => {
             if from_file.is_some() {
-                return Err("--from-file reads a LOCAL file; drop --server for it".into());
+                return Err(usage(
+                    "--from-file reads a LOCAL file; drop --server for it",
+                ));
             }
             remote.post("/pull", None)
         }
         Cmd::Categorize { llm } => {
             let rule = remote.post("/categorize", None)?;
             if *llm {
+                // One object, as local `categorize --llm --json` prints:
+                // {"rule":N,"remaining":N,"llm":N}.
                 let n = remote.post("/categorize_llm", None)?;
-                Ok(format!("{rule}\n{{\"llm\":{n}}}"))
+                let head = rule.trim().trim_end_matches('}');
+                Ok(format!("{head},\"llm\":{}}}", n.trim()))
             } else {
                 Ok(rule)
             }
@@ -178,9 +213,18 @@ pub fn dispatch(remote: &Remote, cmd: &Cmd) -> Result<String, String> {
                 Some(s) => remote.get(&format!("/matches?status={}", enc(s))),
                 None => remote.get("/matches"),
             },
-            MatchCmd::Accept { id } => remote.post(&format!("/matches/{id}/accept"), None),
-            MatchCmd::Reject { id } => remote.post(&format!("/matches/{id}/reject"), None),
-            MatchCmd::Unaccept { id } => remote.post(&format!("/matches/{id}/unaccept"), None),
+            MatchCmd::Accept { id } => {
+                remote.post(&format!("/matches/{id}/accept"), None)?;
+                Ok(format!("{{\"id\":{id}}}"))
+            }
+            MatchCmd::Reject { id } => {
+                remote.post(&format!("/matches/{id}/reject"), None)?;
+                Ok(format!("{{\"id\":{id}}}"))
+            }
+            MatchCmd::Unaccept { id } => {
+                remote.post(&format!("/matches/{id}/unaccept"), None)?;
+                Ok(format!("{{\"id\":{id}}}"))
+            }
         },
     }
 }
@@ -198,7 +242,7 @@ fn find_path(
     period: &PeriodArgs,
     expiring_days: i64,
     today: NaiveDate,
-) -> Result<String, String> {
+) -> Result<String, Fail> {
     let mut q = Vec::new();
     period_q(period.resolve_at(today)?, &mut q);
     q.push(format!("expiring_days={expiring_days}"));
@@ -218,7 +262,7 @@ fn with_query(path: &str, q: &[String]) -> String {
 /// `holdings`, `activity`, `txns`); `None` for every other command. The
 /// period goes over the wire in its own spelling (`Period::to_query`), so the
 /// server resolves the same local-time days the CLI would.
-fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
+fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, Fail> {
     let path = match cmd {
         Cmd::Report {
             by,
@@ -388,6 +432,28 @@ fn read_path(cmd: &Cmd, today: NaiveDate) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::outcome;
+
+    #[test]
+    fn http_statuses_map_to_exit_codes() {
+        let code = |st, body| super::status_fail("u", st, body).code;
+        assert_eq!(code(400, r#"{"error":"bad period"}"#), outcome::USAGE);
+        assert_eq!(code(401, ""), outcome::DENIED);
+        assert_eq!(code(403, ""), outcome::REFUSED);
+        assert_eq!(code(404, ""), outcome::NOT_FOUND);
+        assert_eq!(code(409, ""), outcome::CONFLICT);
+        assert_eq!(code(503, ""), outcome::UNREACHABLE);
+        assert_eq!(code(500, ""), outcome::INTERNAL);
+        let f = super::status_fail("u", 404, r#"{"error":"no match 9"}"#);
+        assert_eq!(f.message, "u: HTTP 404: no match 9");
+    }
+
+    #[test]
+    fn bad_periods_are_usage_errors() {
+        let e = path(&["report", "--period", "2026-13"]).unwrap_err();
+        assert_eq!(e.code, outcome::USAGE);
+    }
+
     use super::*;
     use crate::Cli;
     use clap::Parser;
@@ -397,7 +463,7 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 11, 7).unwrap()
     }
 
-    fn path(args: &[&str]) -> Result<Option<String>, String> {
+    fn path(args: &[&str]) -> Result<Option<String>, Fail> {
         let mut argv = vec!["outflow"];
         argv.extend_from_slice(args);
         let cli = Cli::try_parse_from(argv).expect("args parse");
@@ -575,9 +641,9 @@ mod tests {
     #[test]
     fn bad_periods_fail_before_any_request() {
         let e = path(&["report", "--period", "2026-13"]).unwrap_err();
-        assert!(e.contains("bad period"), "{e}");
+        assert!(e.message.contains("bad period"), "{e}");
         let e = path(&["txns", "--period", "2026-11", "--since", "2026-11-01"]).unwrap_err();
-        assert!(e.contains("not both"), "{e}");
+        assert!(e.message.contains("not both"), "{e}");
     }
 
     #[test]

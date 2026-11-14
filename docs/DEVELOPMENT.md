@@ -74,11 +74,41 @@ account whose balance its positions don't cover: `security_id`
 `cash:uninvested`, `is_cash: true`, so all-cash accounts (an HSA with no
 positions) still appear. History (`--history`) has no such row.
 
-Global: `--db`/`OUTFLOW_DB`, `--json` (machine-readable; same serde shapes as
-the HTTP API), `--server URL`/`OUTFLOW_SERVER` (needs `--features client`;
-every command becomes one API call and prints the server's JSON verbatim;
-bearer auth via `OUTFLOW_API_TOKEN`). With `--features encryption`, the DB
-key comes from `OUTFLOW_DB_KEY`, else `OUTFLOW_DB_KEY_FILE` (0600).
+Global: `--db`/`OUTFLOW_DB`, `--json` (machine-readable, below),
+`--server URL`/`OUTFLOW_SERVER` (needs `--features client`; every command
+becomes one API call; bearer auth via `OUTFLOW_API_TOKEN`; always JSON).
+Global flags go before or after the subcommand. With `--features
+encryption`, the DB key comes from `OUTFLOW_DB_KEY`, else
+`OUTFLOW_DB_KEY_FILE` (0600).
+
+### JSON output and exit codes
+
+The CLI follows the conventions agent wrappers share, so a caller can branch
+on the exit code alone. With `--json` (or `--server`) it prints exactly one
+JSON object on stdout:
+
+- **Success:** `{"ok":true, ...}`. An object payload's fields sit at the top
+  level beside `ok`, in the API's serde shape. A list goes under `items`
+  (`outflow accounts --json` → `{"ok":true,"items":[...]}`). Writes return
+  what the API returns: `fix` its `CategoryEdit`, `categorize`
+  `{rule, remaining, llm?}`, `matches accept|reject|unaccept` `{id}`.
+- **Failure:** `{"ok":false,"error":{"code":N,"message":"..."}}`, where
+  `code` is the exit code.
+
+Without `--json`, output is text and errors go to stderr as `error: ...`.
+Local and `--server` output are the same, so consumers don't care which mode
+ran. The HTTP API itself stays bare (no envelope).
+
+| Exit | Meaning | e.g. |
+|---|---|---|
+| 0 | done | |
+| 1 | internal: a bug, or an error it can't classify | DB error |
+| 2 | usage: bad arguments, or input it won't take | bad `--period`, unknown flag, a malformed `--from-file` |
+| 3 | not found | `matches accept 99`, `fix` on an unknown txn, unknown Finding key |
+| 4 | conflict: already done, or the state changed | `matches unaccept` on a match that isn't accepted |
+| 5 | unreachable: a service is down, slow or rate-limited | server unreachable, HTTP 502/503/504/429, the LLM call |
+| 6 | denied: credentials refused or unreadable | HTTP 401, unreadable `OUTFLOW_DB_KEY_FILE`, no `ANTHROPIC_API_KEY` |
+| 7 | refused: a guard said no | HTTP 403: the read-only token on a write |
 
 Agent usage over the tailnet:
 

@@ -390,8 +390,10 @@ those capsules.
 ### Check-in figures
 - Three figures open on the page (no card), split by Hairlines like the
   Flow headline pair but at 24px: Net worth change, Earned − spent, Saved.
-  Each has one Text Dim line of parts (Markets · Added, in · out, what
-  stayed as cash) and one "usually" line with the usual in Text and 600;
+  Each has one Text Dim line of parts (for the change: Markets · Moved in ·
+  Earned − spent · Other, Moved in only when not zero, each label kept on one
+  line with its amount; for Earned − spent: in · out; for Saved: what stayed
+  as cash) and one "usually" line with the usual in Text and 600;
   while the period is in progress it reads "usually −$54.66 by Nov 8" (the
   earlier periods cut to the same day). A week shows Spent in place of
   Earned − spent, and Saved has no usual line. One Text Faint footnote says
@@ -492,15 +494,15 @@ those capsules.
 
 ### Change equation (Holdings)
 - The Holdings focal moment, open on the page like Flow's headline pair:
-  "Net worth change = Markets + Added" as three figures (34px for the
-  change, 24px for the parts, tabular) joined by Text Dim operators (each drawn with the
-  term after it, so a narrow screen wraps "= Markets" and "+ Added" whole), the
-  change's percent beside it in Text Dim. Under it, the start and end in
-  words, the definitions behind a closed `<details>` ("What Markets and
-  Added mean · show", dotted Text Dim underline, the state spelled out
-  rather than a caret), and a note when Markets can't
-  cover every investment account (it names them and says their whole
-  change is in Added). Below 480px the change takes its own line.
+  "Net worth change = Markets + Moved in + Earned − spent + Other" as
+  figures (34px for the change, 24px for the parts, tabular) joined by Text
+  Dim operators (each drawn with the term after it, so a narrow screen wraps
+  "= Markets" and "+ Other" whole); Moved in shows only when not zero. The
+  change's percent sits beside it in Text Dim. Under it, the start and end
+  in words, the definitions behind a closed `<details>` ("What the parts
+  mean"), and a note when Markets can't cover every investment account (it
+  names them and says their whole change is in Other). Below 480px the
+  change takes its own line.
 
 ### Breakdown sum (Holdings)
 - Stat tiles joined by their signs: Cash + Invested − Credit owed − Loans

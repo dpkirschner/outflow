@@ -45,7 +45,8 @@ names).
   inline corrections, with an optional LLM pass for merchants rules can't place.
 - **Holdings** — net worth across cash, investment, credit and loan accounts
   as one signed breakdown, and its change over a month or range split into
-  Markets (gain net of contributions) and Added, from per-sync snapshots.
+  Markets (gain net of contributions), Moved in, Earned − spent and Other,
+  from per-sync snapshots.
   With Plaid Investments: every position (quantity, price, cost basis,
   period and unrealized gain, combined across accounts on request), idle
   cash, and an archive of investment transactions, all readable from the

@@ -231,7 +231,7 @@ export const api = {
   balances: () => get<BalancesView>("/balances"),
   balanceHistory: (since?: number) =>
     get<DayTotals[]>(since ? `/balances/history?since=${since}` : "/balances/history"),
-  // Net worth change over a range, split Markets + Added (core::stock).
+  // Net worth change over a range, split Markets + Moved in + Earned − spent + Other (core::stock).
   netWorthChange: (r: StockRange) => get<NetWorthChange>(`/net-worth/change${rangeQuery(r)}`),
   // Gain over a range per position; `position` combines a ticker across accounts.
   holdingsChange: (r: StockRange, by: "account" | "position") =>

@@ -11,7 +11,7 @@
 //! - **A. Values come from balance snapshots**, the source net worth and the
 //!   breakdown use, so every figure sums. Positions only test measurability.
 //! - **B. No positions = cash.** An investment account holding nothing but
-//!   cash has no market: its whole change goes to Added (`GainReason::Cash`).
+//!   cash has no market: none of its change is Markets (`GainReason::Cash`).
 //! - **C. Measurable** only when every non-cash position's quantity change
 //!   between the start and end holdings is explained by activity rows, within
 //!   `QTY_TOLERANCE`. Otherwise `GainReason::ContributionsUnknown` — never an
@@ -58,7 +58,7 @@ pub enum ChangeReason {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "snake_case")]
 pub enum GainReason {
-    /// No positions: cash has no market; the change is all Added.
+    /// No positions: cash has no market, so none of its change is Markets.
     Cash,
     /// Positions moved in ways the activity doesn't explain, or a share
     /// transfer has no recorded price.

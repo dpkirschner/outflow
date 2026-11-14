@@ -431,7 +431,7 @@ export function Holdings({
   );
 }
 
-// ── Hero: Change = Markets + Earned − spent + Other, in words ──────────────
+// ── Hero: Change = Markets + Moved in + Earned − spent + Other, in words ───
 function Hero({
   c,
   phrase,

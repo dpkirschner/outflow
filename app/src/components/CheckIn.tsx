@@ -531,6 +531,16 @@ function versusWords(
         {swing}
       </>
     );
+  // After "refunds came to $X more than you spent", "less than usual" would
+  // seem to be about the refunds: name the spending.
+  if (v.figure === "spent" && v.cents < 0)
+    return (
+      <>
+        , {amount} {v.diff_cents > 0 ? "over" : "under"} your usual spending
+        {when}
+        {swing}
+      </>
+    );
   return (
     <>
       , {amount} {v.diff_cents > 0 ? "more" : "less"} than usual{when}
@@ -584,7 +594,14 @@ function Answer({ c, phrase }: { c: CheckInData; phrase: string }) {
     );
   }
   clauses.push(
-    v?.figure === "spent" ? (
+    v?.figure === "spent" && f.out_cents < 0 ? (
+      // Refunds outran spending: "spent −$50" would read as nonsense.
+      <>
+        refunds came to <b>{unsignedCents(f.out_cents)}</b> more than you
+        spent
+        {versusWords(v, by, unit)}
+      </>
+    ) : v?.figure === "spent" ? (
       // A week: paydays make earned − spent swing, so spending is the read.
       <>
         you{ve} spent <b>{unsignedCents(f.out_cents)}</b>
@@ -849,7 +866,18 @@ function Figures({
             </dd>
             <dd className="ci-sub">
               <span className="ci-nowrap">{signedCents(f.in_cents)}</span> in ·{" "}
-              <span className="ci-nowrap">{signedCents(-f.out_cents)}</span> out
+              {f.out_cents < 0 ? (
+                // Net refunds: "+$50 out" reads backwards.
+                <>
+                  <span className="ci-nowrap">{unsignedCents(f.out_cents)}</span>{" "}
+                  refunded
+                </>
+              ) : (
+                <>
+                  <span className="ci-nowrap">{signedCents(-f.out_cents)}</span>{" "}
+                  out
+                </>
+              )}
             </dd>
             <dd>
               <UsualLine

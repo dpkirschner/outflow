@@ -1023,6 +1023,7 @@ fn upkeep() -> outflow_core::Upkeep {
 fn category_edit() -> outflow_core::CategoryEdit {
     outflow_core::CategoryEdit {
         rule_id: Some(12),
+        past: 14,
         undo: outflow_core::CategoryUndo {
             category: "Coffee".into(),
             prev_category: Some("Dining".into()),
@@ -1031,6 +1032,20 @@ fn category_edit() -> outflow_core::CategoryEdit {
                 id: 12,
                 prev_category: None,
             }),
+        },
+    }
+}
+
+fn past_edit() -> outflow_core::PastEdit {
+    outflow_core::PastEdit {
+        changed: 1,
+        undo: outflow_core::PastUndo {
+            category: "Coffee".into(),
+            rows: vec![outflow_core::CategoryPrior {
+                txn_id: "txn-demo-002".into(),
+                category: Some("Dining".into()),
+                source: Some(CategorySource::Plaid),
+            }],
         },
     }
 }
@@ -1124,6 +1139,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("ResetPreview", j(reset_preview())),
         ("CategorizeResult", j(categorize_result())),
         ("CategoryEdit", j(category_edit())),
+        ("PastEdit", j(past_edit())),
         ("GroupEdit", j(group_edit())),
         // find_routes.rs
         ("FindReport", j(find_report())),

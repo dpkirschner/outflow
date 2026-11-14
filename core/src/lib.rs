@@ -43,10 +43,10 @@ pub use find::{
 };
 pub use llm::{LlmCategorizer, LlmError, MerchantSample, Prompter, Suggestion};
 pub use model::{
-    account_display_label, Account, AccountKind, BalanceSnapshot, CategoryEdit, CategorySource,
-    CategoryUndo, FlagPrior, FlagRuleUndo, GroupEdit, GroupUndo, Holding, HoldingSnapshot,
-    InvestmentTxn, MatchConfidence, MatchStatus, PlaidItem, RuleUndo, Security, SyncEntry,
-    Transaction, TxnFlag, TxnMatch,
+    account_display_label, Account, AccountKind, BalanceSnapshot, CategoryEdit, CategoryPrior,
+    CategorySource, CategoryUndo, FlagPrior, FlagRuleUndo, GroupEdit, GroupUndo, Holding,
+    HoldingSnapshot, InvestmentTxn, MatchConfidence, MatchStatus, PastEdit, PastUndo, PlaidItem,
+    RuleUndo, Security, SyncEntry, Transaction, TxnFlag, TxnMatch,
 };
 pub use money::{Money, MoneyParseError};
 pub use period::{parse_day, today_local, Period, PeriodError, PeriodKind};

@@ -430,8 +430,41 @@ pub struct CategoryEdit {
     /// The exact rule on the merchant when `learn` (new or re-pointed);
     /// None without `learn` or with an empty merchant.
     pub rule_id: Option<i64>,
+    /// The merchant's other rows `POST /txn/{txn_id}/category/past` would
+    /// recategorize now (not set by hand, not already this category).
+    /// 0 without `learn`.
+    #[serde(default)]
+    pub past: usize,
     /// Send back to `POST /txn/{txn_id}/category/undo` as is.
     pub undo: CategoryUndo,
+}
+
+/// What `Store::recategorize_past` did: how many of the merchant's other
+/// rows it recategorized, and the token that reverses exactly this.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PastEdit {
+    pub changed: usize,
+    /// Send back to `POST /txn/{txn_id}/category/past/undo` as is.
+    pub undo: PastUndo,
+}
+
+/// The state one past recategorize replaced. Undo restores each row only
+/// while it still has the edit's category from the rule.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct PastUndo {
+    pub category: String,
+    pub rows: Vec<CategoryPrior>,
+}
+
+/// A row's category and source before a past recategorize.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct CategoryPrior {
+    pub txn_id: String,
+    pub category: Option<String>,
+    pub source: Option<CategorySource>,
 }
 
 /// The state one category edit replaced. Undo restores it only while the

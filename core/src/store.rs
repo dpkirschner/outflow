@@ -1167,8 +1167,94 @@ impl Store {
                 }
             }
         }
+        let past = match (&existing, rule_id) {
+            (Some(t), Some(_)) => self.past_rows(t, category)?.len(),
+            _ => 0,
+        };
         tx.commit()?;
-        Ok(CategoryEdit { rule_id, undo })
+        Ok(CategoryEdit {
+            rule_id,
+            past,
+            undo,
+        })
+    }
+
+    /// The merchant's other visible rows (same normalized merchant, so the
+    /// ones its exact rule matches) a past recategorize to `category` would
+    /// change: not set by hand, not already `category`.
+    fn past_rows(&self, t: &Transaction, category: &str) -> rusqlite::Result<Vec<Transaction>> {
+        let pattern = normalize_payee(t.merchant());
+        if pattern.is_empty() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .all_transactions()?
+            .into_iter()
+            .filter(|u| {
+                u.id != t.id
+                    && u.category_source != Some(CategorySource::Manual)
+                    && u.category.as_deref() != Some(category)
+                    && normalize_payee(u.merchant()) == pattern
+            })
+            .collect())
+    }
+
+    /// Give the merchant's other rows `category` now, as its rule would have
+    /// had they been uncategorized (source `Rule`). Rows set by hand keep
+    /// theirs. Every row changed is recorded for `undo_recategorize_past`.
+    /// One transaction. None = no such row.
+    pub fn recategorize_past(
+        &self,
+        txn_id: &str,
+        category: &str,
+    ) -> rusqlite::Result<Option<PastEdit>> {
+        let Some(t) = self.transaction(txn_id)? else {
+            return Ok(None);
+        };
+        let tx = self.conn.unchecked_transaction()?;
+        let mut rows = Vec::new();
+        for u in self.past_rows(&t, category)? {
+            tx.execute(
+                "UPDATE transactions SET category = ?1, category_source = ?2 WHERE id = ?3",
+                params![category, CategorySource::Rule.as_str(), u.id],
+            )?;
+            rows.push(CategoryPrior {
+                txn_id: u.id,
+                category: u.category,
+                source: u.category_source,
+            });
+        }
+        tx.commit()?;
+        Ok(Some(PastEdit {
+            changed: rows.len(),
+            undo: PastUndo {
+                category: category.to_string(),
+                rows,
+            },
+        }))
+    }
+
+    /// Reverse one `recategorize_past`: each row gets its previous category
+    /// and source back if it still has the edit's category from the rule.
+    /// Returns the rows restored. One transaction.
+    pub fn undo_recategorize_past(&self, undo: &PastUndo) -> rusqlite::Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let mut n = 0;
+        for r in &undo.rows {
+            n += tx.execute(
+                "UPDATE transactions SET category = ?1, category_source = ?2
+                 WHERE id = ?3 AND category = ?4 AND category_source = ?5",
+                params![
+                    r.category,
+                    r.category.as_ref().and(r.source.map(|s| s.as_str())),
+                    r.txn_id,
+                    undo.category,
+                    CategorySource::Rule.as_str()
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
     }
 
     /// Put a moved row in a Moved group (Invest, Save, LoanPaydown or
@@ -4090,6 +4176,76 @@ mod categorize_tests {
         assert_eq!(same.rule_id, first.rule_id);
         s.undo_manual_category("2", &same.undo).unwrap();
         assert_eq!(s.rules().unwrap().len(), 1);
+    }
+
+    fn with_cat(id: &str, merchant: &str, c: &str, src: CategorySource) -> Transaction {
+        let mut x = t(id, merchant);
+        x.category = Some(c.into());
+        x.category_source = Some(src);
+        x
+    }
+
+    #[test]
+    fn past_rows_follow_on_request_and_undo_whole() {
+        let s = Store::open_in_memory().unwrap();
+        s.upsert_transactions(&[
+            with_cat("1", "SQ *BLUE BOTTLE 4471", "Dining", CategorySource::Plaid),
+            with_cat("2", "SQ *BLUE BOTTLE 9982", "Dining", CategorySource::Plaid),
+            with_cat(
+                "3",
+                "SQ *BLUE BOTTLE 1111",
+                "Treats",
+                CategorySource::Manual,
+            ),
+            t("4", "SQ *BLUE BOTTLE 5555"),
+            with_cat("5", "SAMPLE PARKING 0042", "Dining", CategorySource::Plaid),
+            with_cat("6", "SQ *BLUE BOTTLE 2222", "Coffee", CategorySource::Rule),
+        ])
+        .unwrap();
+
+        // The offer counts the merchant's other rows that would change: not
+        // the one set by hand (3), not one already Coffee (6), no other
+        // merchant (5).
+        let e = s.set_manual_category("1", "Coffee", true).unwrap();
+        assert_eq!(e.past, 2);
+        assert_eq!(
+            s.set_manual_category("5", "Parking", false).unwrap().past,
+            0,
+            "no rule learned, nothing offered"
+        );
+
+        let p = s.recategorize_past("1", "Coffee").unwrap().unwrap();
+        assert_eq!(p.changed, 2);
+        assert_eq!(
+            cat(&s, "2"),
+            (Some("Coffee".into()), Some(CategorySource::Rule))
+        );
+        assert_eq!(
+            cat(&s, "4"),
+            (Some("Coffee".into()), Some(CategorySource::Rule))
+        );
+        assert_eq!(
+            cat(&s, "3"),
+            (Some("Treats".into()), Some(CategorySource::Manual))
+        );
+        assert_eq!(s.recategorize_past("nope", "Coffee").unwrap(), None);
+
+        // A row changed by hand since keeps its new category on undo.
+        s.set_manual_category("4", "Snacks", false).unwrap();
+        assert_eq!(s.undo_recategorize_past(&p.undo).unwrap(), 1);
+        assert_eq!(
+            cat(&s, "2"),
+            (Some("Dining".into()), Some(CategorySource::Plaid))
+        );
+        assert_eq!(
+            cat(&s, "4"),
+            (Some("Snacks".into()), Some(CategorySource::Manual))
+        );
+        // The picked row itself is the category edit's to undo, not this.
+        assert_eq!(
+            cat(&s, "1"),
+            (Some("Coffee".into()), Some(CategorySource::Manual))
+        );
     }
 }
 

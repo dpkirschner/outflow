@@ -134,6 +134,12 @@ export type CategoryEdit = {
    */
   rule_id: number | null,
   /**
+   * The merchant's other rows `POST /txn/{txn_id}/category/past` would
+   * recategorize now (not set by hand, not already this category).
+   * 0 without `learn`.
+   */
+  past: number,
+  /**
    * Send back to `POST /txn/{txn_id}/category/undo` as is.
    */
   undo: CategoryUndo,
@@ -170,6 +176,36 @@ export type RuleUndo = {
    * re-pointed the merchant's existing rule, undo puts this back.
    */
   prev_category: string | null,
+};
+
+/**
+ * What `Store::recategorize_past` did: how many of the merchant's other
+ * rows it recategorized, and the token that reverses exactly this.
+ */
+export type PastEdit = {
+  changed: number,
+  /**
+   * Send back to `POST /txn/{txn_id}/category/past/undo` as is.
+   */
+  undo: PastUndo,
+};
+
+/**
+ * The state one past recategorize replaced. Undo restores each row only
+ * while it still has the edit's category from the rule.
+ */
+export type PastUndo = {
+  category: string,
+  rows: Array<CategoryPrior>,
+};
+
+/**
+ * A row's category and source before a past recategorize.
+ */
+export type CategoryPrior = {
+  txn_id: string,
+  category: string | null,
+  source: CategorySource | null,
 };
 
 /**

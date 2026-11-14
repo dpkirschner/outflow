@@ -24,6 +24,7 @@ import type {
   SeriesMonth,
   TxnRow,
   CategoryUndo,
+  PastUndo,
   GroupEdit,
   TxnFlag,
   TxnPage,
@@ -1191,18 +1192,30 @@ function TxnTable({
     }
   };
 
+  const reloadAll = () => Promise.all([load(), onFiguresChanged()]);
+
   const setTxnCategory = async (t: TxnRow, cat: string) => {
     try {
       const edit = await api.setCategory(t.id, cat, true);
+      const n = edit.past;
       notify({
         kind: "ok",
         text: edit.undo.rule
           ? `${t.display_name} → ${cat}; future ${t.display_name} charges will be too.`
           : `${t.display_name} → ${cat}.`,
+        // The merchant's other rows that would change (rows set by hand
+        // keep theirs), offered rather than done.
+        offer:
+          n > 0
+            ? {
+                label: `Apply to ${n} past`,
+                run: () => void applyPast(t, cat, edit.undo),
+              }
+            : undefined,
         // Undo puts back the old category and the rule as it was.
         action: { label: "Undo", run: () => void undoCategory(t, edit.undo) },
       });
-      await Promise.all([load(), onFiguresChanged()]);
+      await reloadAll();
     } catch (err) {
       notify({ kind: "err", text: errMessage(err) });
     }
@@ -1215,10 +1228,37 @@ function TxnTable({
         kind: "ok",
         text: `${t.display_name} is back to ${undo.prev_category ?? "not yet categorized"}.`,
       });
-      await Promise.all([load(), onFiguresChanged()]);
+      await reloadAll();
     } catch (err) {
       notify({ kind: "err", text: `Couldn't undo: ${errMessage(err)}` });
     }
+  };
+
+  const applyPast = async (t: TxnRow, cat: string, edit: CategoryUndo) => {
+    try {
+      const past = await api.recategorizePast(t.id, cat);
+      const n = past.changed;
+      notify({
+        kind: "ok",
+        text: `${n} past ${t.display_name} ${n === 1 ? "transaction" : "transactions"} → ${cat} too.`,
+        // Undo puts back the whole edit: the past rows, then the row and rule.
+        action: { label: "Undo", run: () => void undoPast(t, past.undo, edit) },
+      });
+      await reloadAll();
+    } catch (err) {
+      notify({ kind: "err", text: errMessage(err) });
+    }
+  };
+
+  const undoPast = async (t: TxnRow, past: PastUndo, edit: CategoryUndo) => {
+    try {
+      await api.undoRecategorizePast(t.id, past);
+      await api.undoCategory(t.id, edit);
+      notify({ kind: "ok", text: `${t.display_name} and its past transactions are back as they were.` });
+    } catch (err) {
+      notify({ kind: "err", text: `Couldn't undo: ${errMessage(err)}` });
+    }
+    await reloadAll();
   };
 
   const startEdit = (t: TxnRow) => {

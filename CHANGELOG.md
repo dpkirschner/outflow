@@ -5,6 +5,28 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.8 (2026-11-15)
+
+The embedded chart, tuned for a wall tablet read from across the room
+after a design review at iPad size.
+
+### Fixes
+
+- chart: no data now shows a dash instead of a made-up zero, and
+  "Average month" counts only months from where your history begins
+  (ho-r01) ([228315c](https://github.com/dpkirschner/outflow/commit/228315c))
+- chart: Income and Transfers are refused as a `category`, naming the
+  parameter (ho-r01) ([228315c](https://github.com/dpkirschner/outflow/commit/228315c))
+- embed: the change figure says what it is measured from ("since Apr 1")
+  (ho-r01) ([228315c](https://github.com/dpkirschner/outflow/commit/228315c))
+- embed: 3-5 round y-axis ticks, a label under a highlighted day, and
+  date labels on the 1st of the month (ho-r01) ([4f1213d](https://github.com/dpkirschner/outflow/commit/4f1213d))
+- embed: bars and the zero line reach 3:1 contrast in both themes; the
+  colours are now tokens (ho-r01) ([ca5f499](https://github.com/dpkirschner/outflow/commit/ca5f499))
+- embed: refetches every 15 minutes and when the page is shown again
+  (ho-r01) ([76e33fe](https://github.com/dpkirschner/outflow/commit/76e33fe))
+- Short amount labels drop a trailing ".0" everywhere (1k, not 1.0k).
+
 ## v2026.11.7 (2026-11-14)
 
 ### Features

@@ -15,6 +15,7 @@ import type { ChartPoint, ChartView } from "../types";
 const THEMES = ["auto", "light", "dark"] as const;
 type Theme = (typeof THEMES)[number];
 
+const REFRESH_MS = 15 * 60 * 1000;
 const LIGHT = "(prefers-color-scheme: light)";
 
 /** Whether the device asks for light, following it as it changes. */
@@ -52,13 +53,29 @@ export function Embed() {
       setError("No such embed view. Use /embed/chart.");
       return;
     }
+    // A wall screen stays up for days: refetch on a timer and whenever the
+    // page comes back into view. Once a chart is up, a failed refetch keeps
+    // it (the next one will try again) rather than blanking the screen.
     let live = true;
-    api
-      .chart(query)
-      .then((v) => live && setView(v))
-      .catch((e) => live && setError(errMessage(e)));
+    let shown = false;
+    const load = () =>
+      api
+        .chart(query)
+        .then((v) => {
+          if (!live) return;
+          shown = true;
+          setView(v);
+          setError(null);
+        })
+        .catch((e) => live && !shown && setError(errMessage(e)));
+    load();
+    const timer = window.setInterval(load, REFRESH_MS);
+    const onVisible = () => document.visibilityState === "visible" && load();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       live = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [query, theme]);
 

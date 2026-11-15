@@ -149,6 +149,10 @@ pub struct ChartRequest {
     highlight: Option<Span>,
 }
 
+/// Categories that never land in Flow's Out lane, so a spending chart of
+/// them would only ever show $0.
+const NOT_SPENDING: [&str; 2] = ["Income", "Transfers"];
+
 const PARAMS: [&str; 6] = ["metric", "category", "range", "from", "to", "highlight"];
 
 /// Checks the query pairs against the allow-list. `today` anchors the
@@ -181,7 +185,15 @@ pub fn parse_params(
         (ChartMetric::Category, None | Some(&"")) => {
             return Err(ParamError::new("category", "required with metric=category"))
         }
-        (ChartMetric::Category, Some(c)) => Some(c.to_string()),
+        (ChartMetric::Category, Some(c)) => {
+            if let Some(n) = NOT_SPENDING.iter().find(|n| n.eq_ignore_ascii_case(c)) {
+                return Err(ParamError::new(
+                    "category",
+                    format!("{n} isn't spending; use a spending category"),
+                ));
+            }
+            Some(c.to_string())
+        }
         (_, Some(_)) => return Err(ParamError::new("category", "only with metric=category")),
         (_, None) => None,
     };
@@ -307,14 +319,19 @@ pub struct ChartPoint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct ChartHeadline {
+    /// What the figure is: "Average month", "Oct 2, 2026", "End of Sep 2026".
     pub label: String,
-    #[cfg_attr(feature = "ts", ts(type = "number"))]
-    pub cents: i64,
-    /// Balances: the change over the highlighted range, or over the whole
-    /// range without a highlight. `null` for spending and a one-day
-    /// highlight.
+    /// `null` when there is no data to show (a day before the first
+    /// snapshot, a range before history began): shown as a dash, never $0.
+    #[cfg_attr(feature = "ts", ts(type = "number | null"))]
+    pub cents: Option<i64>,
+    /// Balances: the change over the highlighted days, or over the whole
+    /// range without a highlight. `null` for spending and whenever fewer
+    /// than two days carry a value.
     #[cfg_attr(feature = "ts", ts(type = "number | null"))]
     pub change_cents: Option<i64>,
+    /// The change's baseline, e.g. "since Apr 1"; set with `change_cents`.
+    pub change_label: Option<String>,
 }
 
 /// `GET /api/chart`: what the embed view draws.
@@ -327,8 +344,10 @@ pub struct ChartView {
     pub title: String,
     /// "Last 6 months", "Year to date", "Mar 2026 – Oct 2026", …
     pub range_label: String,
-    /// Oldest first. Months with no spending are $0 bars; balance days run
-    /// from the first snapshot in the range.
+    /// Oldest first. Bars start at the later of the range's first month and
+    /// the first month with any transaction (history before that is
+    /// unknown, not $0); a month with no spending after that is a $0 bar.
+    /// Balance days run from the first snapshot in the range.
     pub points: Vec<ChartPoint>,
     /// The key of the month still in progress, when it is the last bar.
     pub partial_key: Option<String>,
@@ -356,6 +375,16 @@ fn filter(req: &ChartRequest) -> TxnFilter {
 
 fn monthly(store: &Store, req: &ChartRequest, today: NaiveDate) -> Result<ChartView, ChartError> {
     let f = filter(req);
+    // Where history begins: the first month with any transaction.
+    let history_from = flow_lanes(
+        store,
+        &TxnFilter {
+            until: f.until,
+            ..TxnFilter::all()
+        },
+    )?
+    .first()
+    .and_then(|m| NaiveDate::from_ymd_opt(m.year as i32, m.month, 1));
     let (title, by): (String, BTreeMap<(i64, u32), i64>) = match req.metric {
         ChartMetric::Category => {
             let asked = req.category.as_deref().unwrap_or_default();
@@ -386,14 +415,13 @@ fn monthly(store: &Store, req: &ChartRequest, today: NaiveDate) -> Result<ChartV
     };
 
     let last = first_of_month(req.until);
-    let first = match req.since {
-        Some(d) => first_of_month(d),
-        None => by
-            .keys()
-            .next()
-            .and_then(|&(y, m)| NaiveDate::from_ymd_opt(y as i32, m, 1))
-            .unwrap_or(last)
-            .min(last),
+    // No transactions at all: no bars. Otherwise start where both the range
+    // and history have begun (past `last` means the range ends before
+    // history starts: no bars either).
+    let first = match (history_from, req.since) {
+        (None, _) => last + Months::new(1),
+        (Some(h), Some(d)) => h.max(first_of_month(d)),
+        (Some(h), None) => h,
     };
     let hl = req
         .highlight
@@ -421,14 +449,16 @@ fn monthly(store: &Store, req: &ChartRequest, today: NaiveDate) -> Result<ChartV
             } else {
                 format!("{} – {}", s.from.format("%b %Y"), s.to.format("%b %Y"))
             };
+            let lit: Vec<i64> = points
+                .iter()
+                .filter(|p| p.highlighted)
+                .map(|p| p.cents)
+                .collect();
             ChartHeadline {
                 label,
-                cents: points
-                    .iter()
-                    .filter(|p| p.highlighted)
-                    .map(|p| p.cents)
-                    .sum(),
+                cents: (!lit.is_empty()).then(|| lit.iter().sum()),
                 change_cents: None,
+                change_label: None,
             }
         }
         None => {
@@ -437,18 +467,19 @@ fn monthly(store: &Store, req: &ChartRequest, today: NaiveDate) -> Result<ChartV
                 .filter(|p| Some(&p.key) != partial_key.as_ref())
                 .map(|p| p.cents)
                 .collect();
-            if done.is_empty() {
-                ChartHeadline {
-                    label: "So far this month".into(),
-                    cents: points.last().map_or(0, |p| p.cents),
-                    change_cents: None,
-                }
-            } else {
-                ChartHeadline {
-                    label: "Average month".into(),
-                    cents: done.iter().sum::<i64>() / done.len() as i64,
-                    change_cents: None,
-                }
+            let (label, cents) = match (done.is_empty(), points.last()) {
+                (false, _) => (
+                    "Average month",
+                    Some(done.iter().sum::<i64>() / done.len() as i64),
+                ),
+                (true, Some(p)) => ("So far this month", Some(p.cents)),
+                (true, None) => ("No spending yet", None),
+            };
+            ChartHeadline {
+                label: label.into(),
+                cents,
+                change_cents: None,
+                change_label: None,
             }
         }
     };
@@ -492,16 +523,16 @@ fn daily(store: &Store, req: &ChartRequest) -> Result<ChartView, ChartError> {
         })
         .collect();
 
-    let day_label = |d: NaiveDate| d.format("%b %-d, %Y").to_string();
     let headline = match req.highlight {
         Some(s) if s.from == s.to && !s.from_month => ChartHeadline {
             label: day_label(s.from),
-            cents: points.iter().find(|p| p.highlighted).map_or(0, |p| p.cents),
+            cents: points.iter().find(|p| p.highlighted).map(|p| p.cents),
             change_cents: None,
+            change_label: None,
         },
         Some(s) => {
             let lit: Vec<&ChartPoint> = points.iter().filter(|p| p.highlighted).collect();
-            let label = match (
+            let fallback = match (
                 s.from_month && s.to_month,
                 first_of_month(s.from) == first_of_month(s.to),
             ) {
@@ -509,26 +540,33 @@ fn daily(store: &Store, req: &ChartRequest) -> Result<ChartView, ChartError> {
                 (true, false) => format!("{} – {}", s.from.format("%b %Y"), s.to.format("%b %Y")),
                 _ => format!("{} – {}", day_label(s.from), day_label(s.to)),
             };
+            // The figure is the last lit day: "End of Sep 2026" when that is
+            // the end of a month-spelled span, else that day's date.
+            let label = match lit.last().map(|p| day_of(&p.key)) {
+                None => fallback,
+                Some(d) if s.to_month && d == s.to => format!("End of {}", d.format("%b %Y")),
+                Some(d) => day_label(d),
+            };
+            let (change_cents, change_label) = change(&lit);
             ChartHeadline {
                 label,
-                cents: lit.last().map_or(0, |p| p.cents),
-                change_cents: match (lit.first(), lit.last()) {
-                    (Some(a), Some(b)) => Some(b.cents - a.cents),
-                    _ => None,
-                },
+                cents: lit.last().map(|p| p.cents),
+                change_cents,
+                change_label,
             }
         }
-        None => ChartHeadline {
-            label: points
-                .last()
-                .and_then(|p| NaiveDate::parse_from_str(&p.key, "%Y-%m-%d").ok())
-                .map_or_else(|| "No balances yet".into(), day_label),
-            cents: points.last().map_or(0, |p| p.cents),
-            change_cents: match (points.first(), points.last()) {
-                (Some(a), Some(b)) => Some(b.cents - a.cents),
-                _ => None,
-            },
-        },
+        None => {
+            let all: Vec<&ChartPoint> = points.iter().collect();
+            let (change_cents, change_label) = change(&all);
+            ChartHeadline {
+                label: points
+                    .last()
+                    .map_or_else(|| "No balances yet".into(), |p| day_label(day_of(&p.key))),
+                cents: points.last().map(|p| p.cents),
+                change_cents,
+                change_label,
+            }
+        }
     };
 
     Ok(ChartView {
@@ -540,6 +578,33 @@ fn daily(store: &Store, req: &ChartRequest) -> Result<ChartView, ChartError> {
         partial_key: None,
         headline,
     })
+}
+
+fn day_label(d: NaiveDate) -> String {
+    d.format("%b %-d, %Y").to_string()
+}
+
+/// A point's `YYYY-MM-DD` key as a date (keys come from `history`).
+fn day_of(key: &str) -> NaiveDate {
+    NaiveDate::parse_from_str(key, "%Y-%m-%d").expect("balance keys are dates")
+}
+
+/// First to last, with its baseline ("since Apr 1"; the year too when it
+/// differs from the last day's). Nothing for fewer than two days: one
+/// day's change is always zero and says nothing.
+fn change(pts: &[&ChartPoint]) -> (Option<i64>, Option<String>) {
+    match (pts.first(), pts.last()) {
+        (Some(a), Some(b)) if pts.len() > 1 => {
+            let (from, to) = (day_of(&a.key), day_of(&b.key));
+            let since = if from.year() == to.year() {
+                from.format("since %b %-d")
+            } else {
+                from.format("since %b %-d, %Y")
+            };
+            (Some(b.cents - a.cents), Some(since.to_string()))
+        }
+        _ => (None, None),
+    }
 }
 
 #[cfg(test)]
@@ -607,6 +672,9 @@ mod tests {
             "highlight"
         );
         assert_eq!(err_param("metric=spending&highlight=Oct"), "highlight");
+        // Never in Flow's Out lane, so the chart could only show $0.
+        assert_eq!(err_param("metric=category&category=Income"), "category");
+        assert_eq!(err_param("metric=category&category=transfers"), "category");
     }
 
     #[test]
@@ -694,16 +762,15 @@ mod tests {
     }
 
     #[test]
-    fn spending_fills_months_and_averages_complete_ones() {
+    fn spending_starts_with_history_and_averages_complete_months() {
         let s = seed();
         let v = chart(&s, &parse("metric=spending&range=6m").unwrap(), today()).unwrap();
         assert_eq!(v.title, "Spending");
         assert_eq!(v.step, ChartStep::Month);
+        // Jun and Jul come before the first transaction: no bars, not $0.
         assert_eq!(
             cents(&v),
             [
-                ("2026-06", 0, false),
-                ("2026-07", 0, false),
                 ("2026-08", 100_00, false),
                 ("2026-09", 180_00, false),
                 ("2026-10", 90_00, false),
@@ -711,9 +778,58 @@ mod tests {
             ]
         );
         assert_eq!(v.partial_key.as_deref(), Some("2026-11"));
-        // Five complete months: (0 + 0 + 100 + 180 + 90) / 5.
+        // Three complete months: (100 + 180 + 90) / 3.
         assert_eq!(v.headline.label, "Average month");
-        assert_eq!(v.headline.cents, 74_00);
+        assert_eq!(v.headline.cents, Some(123_33));
+    }
+
+    #[test]
+    fn the_average_does_not_depend_on_how_far_back_the_range_reaches() {
+        let s = seed();
+        let avg = |q: &str| {
+            let v = chart(&s, &parse(q).unwrap(), today()).unwrap();
+            (v.points.first().unwrap().key.clone(), v.headline.cents)
+        };
+        let want = ("2026-08".to_string(), Some(123_33));
+        assert_eq!(avg("metric=spending&range=12m"), want);
+        assert_eq!(avg("metric=spending&range=all"), want);
+        assert_eq!(avg("metric=spending&from=2023-01"), want);
+    }
+
+    #[test]
+    fn a_month_with_no_spending_after_history_began_is_a_zero_bar() {
+        let s = seed();
+        let req = parse("metric=category&category=Demo Dining&range=all").unwrap();
+        let v = chart(&s, &req, today()).unwrap();
+        // History began in Aug (groceries), so Aug is a real $0 for dining.
+        assert_eq!(
+            cents(&v),
+            [
+                ("2026-08", 0, false),
+                ("2026-09", 60_00, false),
+                ("2026-10", 0, false),
+                ("2026-11", 0, false),
+            ]
+        );
+        assert_eq!(v.headline.cents, Some(20_00));
+    }
+
+    #[test]
+    fn a_range_before_history_has_no_bars_and_no_figure() {
+        let s = seed();
+        let v = chart(
+            &s,
+            &parse("metric=spending&from=2020-01&to=2020-12").unwrap(),
+            today(),
+        )
+        .unwrap();
+        assert!(v.points.is_empty());
+        assert_eq!(v.headline.cents, None);
+
+        let empty = Store::open_in_memory().unwrap();
+        let v = chart(&empty, &parse("metric=spending").unwrap(), today()).unwrap();
+        assert!(v.points.is_empty());
+        assert_eq!(v.headline.cents, None);
     }
 
     #[test]
@@ -740,7 +856,7 @@ mod tests {
             ]
         );
         assert_eq!(v.headline.label, "Sep 2026 – Oct 2026");
-        assert_eq!(v.headline.cents, 210_00);
+        assert_eq!(v.headline.cents, Some(210_00));
     }
 
     #[test]
@@ -760,7 +876,7 @@ mod tests {
         let v = chart(&s, &req, today()).unwrap();
         assert_eq!(v.partial_key, None);
         assert_eq!(v.headline.label, "Sep 2026");
-        assert_eq!(v.headline.cents, 180_00);
+        assert_eq!(v.headline.cents, Some(180_00));
     }
 
     fn with_balances() -> Store {
@@ -788,8 +904,9 @@ mod tests {
         assert_eq!(v.points.first().unwrap().key, "2026-10-01");
         assert_eq!(v.points.first().unwrap().cents, 1_000_00);
         assert_eq!(v.points.last().unwrap().key, "2026-10-30");
-        assert_eq!(v.headline.cents, 1_200_00);
+        assert_eq!(v.headline.cents, Some(1_200_00));
         assert_eq!(v.headline.change_cents, Some(200_00));
+        assert_eq!(v.headline.change_label.as_deref(), Some("since Oct 1"));
         assert_eq!(v.headline.label, "Oct 30, 2026");
     }
 
@@ -800,12 +917,37 @@ mod tests {
         let v = chart(&s, &req, today()).unwrap();
         assert_eq!(v.points.iter().filter(|p| p.highlighted).count(), 1);
         assert_eq!(v.headline.label, "Oct 2, 2026");
-        assert_eq!(v.headline.cents, 1_500_00);
+        assert_eq!(v.headline.cents, Some(1_500_00));
         assert_eq!(v.headline.change_cents, None);
+
+        let req = parse("metric=net_worth&range=3m&highlight=2026-09").unwrap();
+        let v = chart(&s, &req, today()).unwrap();
+        assert_eq!(v.headline.label, "End of Sep 2026");
+        assert_eq!(v.headline.cents, Some(1_000_00));
+        // Sep has values only from the 28th, and the baseline says so.
+        assert_eq!(v.headline.change_cents, Some(0));
+        assert_eq!(v.headline.change_label.as_deref(), Some("since Sep 28"));
 
         let req = parse("metric=net_worth&range=3m&highlight=2026-10").unwrap();
         let v = chart(&s, &req, today()).unwrap();
-        assert_eq!(v.headline.label, "Oct 2026");
         assert_eq!(v.headline.change_cents, Some(200_00));
+        assert_eq!(v.headline.change_label.as_deref(), Some("since Oct 1"));
+    }
+
+    #[test]
+    fn no_balance_is_a_missing_figure_not_zero() {
+        let s = with_balances();
+        // Before the first snapshot (Sep 28).
+        let req = parse("metric=net_worth&range=3m&highlight=2026-09-03").unwrap();
+        let v = chart(&s, &req, today()).unwrap();
+        assert_eq!(v.headline.label, "Sep 3, 2026");
+        assert_eq!(v.headline.cents, None);
+
+        let req = parse("metric=cash&from=2020-01&to=2020-12").unwrap();
+        let v = chart(&s, &req, today()).unwrap();
+        assert!(v.points.is_empty());
+        assert_eq!(v.headline.label, "No balances yet");
+        assert_eq!(v.headline.cents, None);
+        assert_eq!(v.headline.change_cents, None);
     }
 }

@@ -9,7 +9,7 @@
 // screen reader.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { errMessage, formatCents, formatCentsShort, signedCents } from "../format";
+import { errMessage, formatCents, formatCentsShort, signedCents, unsignedCents } from "../format";
 import type { ChartPoint, ChartView } from "../types";
 
 const THEMES = ["auto", "light", "dark"] as const;
@@ -65,9 +65,15 @@ export function Embed() {
   );
 }
 
+/** The big figure: a dash when there is no data, never a made-up $0. */
+function figure(view: ChartView): string {
+  const c = view.headline.cents;
+  if (c === null) return "\u2014";
+  return view.step === "day" ? unsignedCents(c, true) : formatCents(Math.abs(c));
+}
+
 function Loaded({ view }: { view: ChartView }) {
   const { headline } = view;
-  const isBalance = view.step === "day";
   return (
     <>
       <header className="em-head">
@@ -75,13 +81,15 @@ function Loaded({ view }: { view: ChartView }) {
           {view.title}
           <span className="em-range"> · {view.range_label}</span>
         </h1>
-        <p className="em-figure">
-          {isBalance ? formatCents(headline.cents) : formatCents(Math.abs(headline.cents))}
-        </p>
+        <p className="em-figure">{figure(view)}</p>
         <p className="em-sub">
           {headline.label}
           {headline.change_cents !== null && (
-            <span className="em-change"> · {signedCents(headline.change_cents)}</span>
+            <>
+              {" · "}
+              <span className="em-change">{signedCents(headline.change_cents)}</span>
+              {headline.change_label && ` ${headline.change_label}`}
+            </>
           )}
         </p>
       </header>

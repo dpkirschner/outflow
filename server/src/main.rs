@@ -25,6 +25,7 @@ use axum::Router;
 use outflow_core::Store;
 use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use state::{AppState, Config};
 
@@ -130,7 +131,13 @@ async fn spa_index(State(state): State<AppState>) -> Response {
 
 /// The whole HTTP surface: /api behind the bearer layer, built assets, and
 /// the SPA shell for every other path.
+///
+/// Every response carries `Content-Security-Policy: frame-ancestors 'self'
+/// ...`, so only the app and the configured origins can frame it.
 fn build_app(state: AppState) -> Router {
+    let csp =
+        header::HeaderValue::from_str(&state::frame_ancestors_csp(&state.cfg.frame_ancestors))
+            .expect("validated origins form a valid header");
     let api = routes::api_router()
         .merge(plaid_routes::router())
         .merge(match_routes::router())
@@ -158,6 +165,10 @@ fn build_app(state: AppState) -> Router {
             ServeDir::new(format!("{}/assets", state.cfg.web_dir)),
         )
         .fallback(spa_index)
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CONTENT_SECURITY_POLICY,
+            csp,
+        ))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }
@@ -249,6 +260,7 @@ mod tests {
             api_token_ro: ro.map(Into::into),
             sync_interval_secs: 21_600,
             perks_path: None,
+            frame_ancestors: Vec::new(),
         };
         AppState {
             store: Arc::new(Mutex::new(store)),
@@ -389,6 +401,38 @@ mod tests {
             StatusCode::NOT_FOUND
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Every response — SPA shell, API (even a 401 or a 404) — says who may
+    // frame the app: 'self' plus the configured origins, nothing else.
+    #[tokio::test]
+    async fn every_response_carries_frame_ancestors() {
+        let csp = |res: &Response| {
+            res.headers()[header::CONTENT_SECURITY_POLICY]
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+        let get = |app: Router, path: &'static str| async move {
+            app.oneshot(HttpRequest::get(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        };
+
+        let app = build_app(test_state(None, None, "/nonexistent"));
+        for path in ["/", "/api/no-such-route"] {
+            assert_eq!(csp(&get(app.clone(), path).await), "frame-ancestors 'self'");
+        }
+
+        let mut state = test_state(Some(FULL), None, "/nonexistent");
+        Arc::get_mut(&mut state.cfg).unwrap().frame_ancestors =
+            vec!["https://avatar.example.net".into()];
+        let res = get(build_app(state), "/api/accounts").await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            csp(&res),
+            "frame-ancestors 'self' https://avatar.example.net"
+        );
     }
 
     #[test]

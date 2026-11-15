@@ -1182,6 +1182,7 @@ mod tests {
             api_token_ro: None,
             sync_interval_secs: 21_600,
             perks_path: None,
+            frame_ancestors: Vec::new(),
         };
         let state = AppState {
             store: Arc::new(Mutex::new(store)),
@@ -1258,6 +1259,7 @@ mod tests {
             api_token_ro: None,
             sync_interval_secs: 21_600,
             perks_path: None,
+            frame_ancestors: Vec::new(),
         };
         let state = AppState {
             store: Arc::new(Mutex::new(store)),

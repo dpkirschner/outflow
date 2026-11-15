@@ -181,6 +181,7 @@ files. See DEPLOYMENT.md for the full recipe.
 | Card offers | `OUTFLOW_PERKS` | a card-offers TOML or a directory of them, one per card, each optionally with the card's `[earn]` table (see `examples/amex-offers-4242.toml`); not a secret. Unset → `/api/find` has no offer or card choice Findings and says so in `notes`; `/api/checkin` reads it too, for new Findings, and skips those Findings when it is unset or unreadable |
 | API auth | `OUTFLOW_API_TOKEN` or `OUTFLOW_API_TOKEN_FILE` (0600) | full access; setting it flips `/api/*` to deny-by-default. The SPA prompts once and keeps it in localStorage. Use `_FILE` under launchd — the plist is world-readable |
 | API auth (read-only) | `OUTFLOW_API_TOKEN_RO` or `OUTFLOW_API_TOKEN_RO_FILE` (0600) | `GET /api/*` only, 403 on mutations — for agents/scripts in CLI `--server` mode |
+| Framing | `OUTFLOW_FRAME_ANCESTORS` (space-separated origins, e.g. `https://<host>.<tailnet>.ts.net:8443`) | every response sends `Content-Security-Policy: frame-ancestors 'self'` plus these, so only the app and the listed origins (the agent-avatar screen) can frame it. Each entry must be `http(s)://host[:port]`; anything else stops the server at boot. Not a secret, but keep the private origin out of the repo |
 | DB key (encryption builds) | `OUTFLOW_DB_KEY` / `OUTFLOW_DB_KEY_FILE` (0600) | env or 0600 file only — no keychain path |
 | LLM | `ANTHROPIC_API_KEY`, `OUTFLOW_LLM_URL`, `OUTFLOW_LLM_MODEL` | `net::anthropic` |
 

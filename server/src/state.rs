@@ -28,6 +28,10 @@ pub struct Config {
     /// Card-offers TOML file, or a directory of them (`OUTFLOW_PERKS`). Not a
     /// secret. `None` = `/api/find` has no offer Findings, and says so.
     pub perks_path: Option<String>,
+    /// Origins besides the app's own that may frame it
+    /// (`OUTFLOW_FRAME_ANCESTORS`, space-separated), e.g. the agent-avatar
+    /// screen. Empty = only `'self'`. Validated at startup.
+    pub frame_ancestors: Vec<String>,
 }
 
 impl Config {
@@ -75,8 +79,59 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(21_600), // 6h
             perks_path: env("OUTFLOW_PERKS"),
+            // A bad entry is fatal: it would either widen who may frame the
+            // app or corrupt the header. Fail at boot, not in a browser.
+            frame_ancestors: match parse_frame_ancestors(
+                &env("OUTFLOW_FRAME_ANCESTORS").unwrap_or_default(),
+            ) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("outflow-server: OUTFLOW_FRAME_ANCESTORS: {e}");
+                    std::process::exit(1);
+                }
+            },
         }
     }
+}
+
+/// Split `OUTFLOW_FRAME_ANCESTORS` into origins, each exactly
+/// `http(s)://host[:port]` (one trailing `/` tolerated and dropped). No
+/// wildcards, paths, quotes or `;`: the value goes straight into a CSP header.
+pub fn parse_frame_ancestors(raw: &str) -> Result<Vec<String>, String> {
+    raw.split_whitespace()
+        .map(|entry| {
+            let origin = entry.strip_suffix('/').unwrap_or(entry);
+            let bad = || format!("{entry:?} is not an origin like https://host[:port]");
+            let rest = origin
+                .strip_prefix("https://")
+                .or_else(|| origin.strip_prefix("http://"))
+                .ok_or_else(bad)?;
+            let (host, port) = match rest.rsplit_once(':') {
+                Some((h, p)) => (h, Some(p)),
+                None => (rest, None),
+            };
+            let host_ok = !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+            let port_ok = port.is_none_or(|p| {
+                !p.is_empty() && p.len() <= 5 && p.chars().all(|c| c.is_ascii_digit())
+            });
+            if host_ok && port_ok {
+                Ok(origin.to_string())
+            } else {
+                Err(bad())
+            }
+        })
+        .collect()
+}
+
+/// The CSP value: the app itself plus the configured origins.
+pub fn frame_ancestors_csp(origins: &[String]) -> String {
+    std::iter::once("frame-ancestors 'self'".to_string())
+        .chain(origins.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[derive(Clone)]
@@ -135,4 +190,45 @@ where
     .await
     .map_err(|e| ApiError::internal(format!("blocking task: {e}")))?
     .map_err(ApiError::internal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_ancestors_accepts_origins() {
+        assert_eq!(parse_frame_ancestors("").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            parse_frame_ancestors(" https://a.example.net/  http://localhost:5173 ").unwrap(),
+            vec!["https://a.example.net", "http://localhost:5173"]
+        );
+    }
+
+    #[test]
+    fn frame_ancestors_rejects_non_origins() {
+        for bad in [
+            "*",
+            "a.example",
+            "https://",
+            "https://*.example",
+            "https://a.example/path",
+            "https://a.example;script-src",
+            "'none'",
+            "https://a.example:",
+            "https://a.example:80x",
+            "ftp://a.example",
+        ] {
+            assert!(parse_frame_ancestors(bad).is_err(), "{bad} accepted");
+        }
+    }
+
+    #[test]
+    fn csp_always_starts_with_self() {
+        assert_eq!(frame_ancestors_csp(&[]), "frame-ancestors 'self'");
+        assert_eq!(
+            frame_ancestors_csp(&["https://a.example".into()]),
+            "frame-ancestors 'self' https://a.example"
+        );
+    }
 }

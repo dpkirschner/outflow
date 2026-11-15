@@ -474,6 +474,68 @@ export type FlowMonth = {
 };
 
 /**
+ * What the chart plots.
+ */
+export type ChartMetric = "spending" | "category" | "net_worth" | "cash" | "invested";
+
+/**
+ * One point per month (bars) or per day (a line).
+ */
+export type ChartStep = "month" | "day";
+
+/**
+ * One bar (`YYYY-MM`) or one day on the line (`YYYY-MM-DD`).
+ */
+export type ChartPoint = {
+  key: string,
+  /**
+   * Spending: positive = money spent. Balances: signed, as `/balances`.
+   */
+  cents: number,
+  highlighted: boolean,
+};
+
+/**
+ * The one big figure.
+ */
+export type ChartHeadline = {
+  label: string,
+  cents: number,
+  /**
+   * Balances: the change over the highlighted range, or over the whole
+   * range without a highlight. `null` for spending and a one-day
+   * highlight.
+   */
+  change_cents: number | null,
+};
+
+/**
+ * `GET /api/chart`: what the embed view draws.
+ */
+export type ChartView = {
+  metric: ChartMetric,
+  step: ChartStep,
+  /**
+   * "Spending", the category's name, "Net worth", "Cash", "Invested".
+   */
+  title: string,
+  /**
+   * "Last 6 months", "Year to date", "Mar 2026 – Oct 2026", …
+   */
+  range_label: string,
+  /**
+   * Oldest first. Months with no spending are $0 bars; balance days run
+   * from the first snapshot in the range.
+   */
+  points: Array<ChartPoint>,
+  /**
+   * The key of the month still in progress, when it is the last bar.
+   */
+  partial_key: string | null,
+  headline: ChartHeadline,
+};
+
+/**
  * One period's check-in.
  */
 export type CheckIn = {

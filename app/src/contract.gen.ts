@@ -13,6 +13,7 @@ import type {
   CategorizeResult,
   CategoryEdit,
   CategorySpend,
+  ChartView,
   CheckIn,
   DayTotals,
   ExchangeResult,
@@ -171,6 +172,36 @@ export const seriesMonth: SeriesMonth = {
   "year": 2026,
   "month": 10,
   "cents": -48250
+};
+
+export const chartView: ChartView = {
+  "metric": "spending",
+  "step": "month",
+  "title": "Spending",
+  "range_label": "Last 3 months",
+  "points": [
+    {
+      "key": "2026-09",
+      "cents": 210000,
+      "highlighted": false
+    },
+    {
+      "key": "2026-10",
+      "cents": 245000,
+      "highlighted": true
+    },
+    {
+      "key": "2026-11",
+      "cents": 80000,
+      "highlighted": false
+    }
+  ],
+  "partial_key": "2026-11",
+  "headline": {
+    "label": "Oct 2026",
+    "cents": 245000,
+    "change_cents": null
+  }
 };
 
 export const checkIn: CheckIn = {

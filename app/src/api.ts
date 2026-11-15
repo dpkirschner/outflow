@@ -5,6 +5,7 @@
 import type {
   Account,
   CategoriesVsUsual,
+  ChartView,
   CheckIn,
   InSource,
   BalancesView,
@@ -226,6 +227,9 @@ function filterQuery(filter?: Filter, extra?: Record<string, string>): string {
 }
 
 export const api = {
+  // One chart for the embed view; the query string goes through as given and
+  // the server checks it against its allow-list (core::chart).
+  chart: (query: string) => get<ChartView>(`/chart?${query}`),
   // Visible accounts; `includeHidden` adds hidden ones (Connections only).
   accounts: (includeHidden = false) =>
     get<Account[]>(includeHidden ? "/accounts?include_hidden=true" : "/accounts"),

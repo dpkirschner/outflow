@@ -187,6 +187,11 @@ the product is for, and its deliberate limits, are in
   the recurring list.
 - **Settings**: upkeep. Bank connections, card-payment match review,
   categorize, reset.
+- **Embed chart**: one chart with no app around it (`/embed/chart`),
+  for another app to frame: spending, a category, or a balance over a
+  range, with an optional **highlight** (a month, a day or a span drawn
+  in full ink, the rest grey). Picked only by allow-listed parameters
+  (API.md "Embed views").
 
 ## Plumbing terms
 

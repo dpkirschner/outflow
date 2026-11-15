@@ -3,6 +3,7 @@ pub mod backup;
 pub mod balances;
 pub mod build;
 pub mod categorize;
+pub mod chart;
 pub mod checkin;
 pub mod earn;
 pub mod find;
@@ -30,6 +31,10 @@ pub use balances::{
 };
 pub use build::{build_info, BuildInfo};
 pub use categorize::{Categorizer, CategoryRule, MatchType, RuleSet};
+pub use chart::{
+    chart, parse_params as parse_chart_params, ChartError, ChartHeadline, ChartMetric, ChartPoint,
+    ChartRequest, ChartStep, ChartView, ParamError,
+};
 pub use checkin::{
     categories_vs_usual, checkin, CategoriesVsUsual, CategoryChange, CategoryVsUsual, Check,
     CheckIn, FlowSummary, NetWorthSummary, NotChecked, NotCheckedReason, Unusual, UnusualKind,

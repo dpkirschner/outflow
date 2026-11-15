@@ -538,6 +538,23 @@ async fn flow_series(
     .map(Json)
 }
 
+/// One chart for the embed view (`core::chart`): a strict parameter
+/// allow-list, so an unknown or repeated name is a `400` naming it.
+async fn chart(
+    State(state): State<AppState>,
+    Query(pairs): Query<Vec<(String, String)>>,
+) -> ApiResult<outflow_core::ChartView> {
+    let today = today_local();
+    let req = outflow_core::parse_chart_params(&pairs, today).map_err(ApiError::bad_request)?;
+    with_store(&state, move |s| Ok(outflow_core::chart(s, &req, today)))
+        .await?
+        .map_err(|e| match e {
+            outflow_core::ChartError::Param(e) => ApiError::bad_request(e),
+            outflow_core::ChartError::Store(e) => ApiError::internal(e),
+        })
+        .map(Json)
+}
+
 async fn categorize(State(state): State<AppState>) -> ApiResult<CategorizeResult> {
     with_store(&state, |s| {
         let rules = s.ruleset().map_err(|e| e.to_string())?;
@@ -1104,6 +1121,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/flow", get(flow))
         .route("/flow/in-sources", get(flow_in_sources))
         .route("/flow/series", get(flow_series))
+        .route("/chart", get(chart))
         .route("/checkin", get(checkin))
         .route("/checkin/categories", get(checkin_categories))
         .route("/recurring", get(recurring))
@@ -2309,5 +2327,27 @@ mod tests {
         assert_eq!(ids(v), ["b", "c"]);
         let (_, v) = get_json(app, "/activity?since=2026-09-30&until=2026-10-01").await;
         assert_eq!(ids(v), ["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn chart_names_the_bad_param() {
+        let app = || app_with_txns(&[txn("t1", -1500, "Demo Cafe")]);
+        let (st, body) = get_json(app(), "/chart?metric=spending&url=https://example.com").await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(
+            body["error"].as_str().unwrap().starts_with("url:"),
+            "{body}"
+        );
+        let (st, body) = get_json(app(), "/chart?metric=category&category=Nope").await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
+        assert!(
+            body["error"].as_str().unwrap().starts_with("category:"),
+            "{body}"
+        );
+        let (st, body) = get_json(app(), "/chart?metric=spending&range=all").await;
+        assert_eq!(st, StatusCode::OK, "{body}");
+        assert_eq!(body["title"], "Spending");
+        assert_eq!(body["step"], "month");
+        assert!(body["points"].as_array().is_some_and(|p| !p.is_empty()));
     }
 }

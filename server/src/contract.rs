@@ -159,6 +159,32 @@ fn in_source() -> outflow_core::InSource {
     }
 }
 
+fn chart_view() -> outflow_core::ChartView {
+    use outflow_core::{ChartHeadline, ChartMetric, ChartPoint, ChartStep, ChartView};
+    let point = |key: &str, cents: i64, highlighted: bool| ChartPoint {
+        key: key.into(),
+        cents,
+        highlighted,
+    };
+    ChartView {
+        metric: ChartMetric::Spending,
+        step: ChartStep::Month,
+        title: "Spending".into(),
+        range_label: "Last 3 months".into(),
+        points: vec![
+            point("2026-09", 210_000, false),
+            point("2026-10", 245_000, true),
+            point("2026-11", 80_000, false),
+        ],
+        partial_key: Some("2026-11".into()),
+        headline: ChartHeadline {
+            label: "Oct 2026".into(),
+            cents: 245_000,
+            change_cents: None,
+        },
+    }
+}
+
 fn series_month() -> outflow_core::SeriesMonth {
     outflow_core::SeriesMonth {
         year: 2026,
@@ -1117,6 +1143,7 @@ fn entries() -> Vec<(&'static str, String)> {
         ("FlowMonth", j(flow_month())),
         ("InSource", j(in_source())),
         ("SeriesMonth", j(series_month())),
+        ("ChartView", j(chart_view())),
         ("CheckIn", j(checkin())),
         ("CategoriesVsUsual", j(categories_vs_usual())),
         ("RecurringView", j(recurring_view())),

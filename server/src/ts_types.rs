@@ -97,6 +97,14 @@ fn render() -> String {
             ]
         );
     }
+    {
+        use outflow_core::chart::*;
+        decls!(
+            &cfg,
+            out,
+            [ChartMetric, ChartStep, ChartPoint, ChartHeadline, ChartView]
+        );
+    }
 
     // --- core::checkin ---
     {

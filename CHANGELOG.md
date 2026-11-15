@@ -5,6 +5,16 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.6 (2026-11-14)
+
+### Features
+
+- server: Only Outflow itself, plus the origins listed in the new `OUTFLOW_FRAME_ANCESTORS` setting, can show it in a frame. Every response sends `Content-Security-Policy: frame-ancestors 'self' ...`; a malformed origin stops the server at boot (ho-mho) ([cac1196](https://github.com/dpkirschner/outflow/commit/cac1196))
+
+### Docs
+
+- Trim CLAUDE.md to what every session needs (ho-80r) ([5903fa1](https://github.com/dpkirschner/outflow/commit/5903fa1))
+
 ## v2026.11.5 (2026-11-13)
 
 ### Features

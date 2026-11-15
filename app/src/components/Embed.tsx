@@ -9,7 +9,7 @@
 // screen reader.
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { errMessage, formatCents, formatCentsShort, signedCents, unsignedCents } from "../format";
+import { errMessage, formatCents, signedCents, unsignedCents } from "../format";
 import type { ChartPoint, ChartView } from "../types";
 
 const THEMES = ["auto", "light", "dark"] as const;
@@ -120,15 +120,35 @@ function useSize<T extends HTMLElement>() {
   return [ref, size] as const;
 }
 
-/** Three round ticks from `lo` to `hi` (cents), zero included when in range. */
+/**
+ * Three to five round ticks (cents) covering `lo`..`hi`: the first at or
+ * below `lo`, the last at or above `hi`, so the axis ends on a labelled
+ * tick. The smallest 1/2/2.5/5 step that needs at most five.
+ */
 function ticks(lo: number, hi: number): number[] {
-  const span = hi - lo || Math.abs(hi) || 100_00;
-  const raw = span / 3;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) ?? raw;
-  const out: number[] = [];
-  for (let t = Math.ceil(lo / step) * step; t <= hi + 1e-6; t += step) out.push(t);
-  return out;
+  if (hi === lo) {
+    const d = Math.abs(hi) * 0.1 || 100_00;
+    hi += d;
+    lo = lo === 0 ? 0 : lo - d;
+  }
+  let mag = Math.max(100, 10 ** Math.floor(Math.log10((hi - lo) / 5))); // $1 at least
+  for (;;) {
+    for (const m of [1, 2, 2.5, 5]) {
+      const step = m * mag;
+      const a = Math.floor(lo / step);
+      const b = Math.ceil(hi / step);
+      if (b - a <= 4) return Array.from({ length: b - a + 1 }, (_, k) => Math.round((a + k) * step));
+    }
+    mag *= 10;
+  }
+}
+
+/** A tick label exact to its step: $0, $750, $1k, $1.25k, $2.5M, −$500. */
+function tickLabel(cents: number): string {
+  const abs = Math.abs(cents) / 100;
+  const [div, unit] = abs >= 1e6 ? [1e6, "M"] : abs >= 1e3 ? [1e3, "k"] : [1, ""];
+  const v = Number((abs / div).toFixed(2));
+  return `${cents < 0 ? "\u2212" : ""}$${v}${unit}`;
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -171,7 +191,7 @@ function Grid({ ys, y, w }: { ys: number[]; y: (c: number) => number; w: number 
             y2={y(t)}
           />
           <text className="em-tick" x={M.left - 12} y={y(t)} dy="0.35em" textAnchor="end">
-            {formatCentsShort(t)}
+            {tickLabel(t)}
           </text>
         </g>
       ))}
@@ -184,8 +204,8 @@ function Bars({ view, w, h }: { view: ChartView; w: number; h: number }) {
   const hi = Math.max(0, ...pts.map((p) => p.cents));
   const lo = Math.min(0, ...pts.map((p) => p.cents));
   const ys = ticks(lo, hi);
-  const top = Math.max(hi, ys[ys.length - 1]);
-  const bottom = Math.min(lo, ys[0]);
+  const top = ys[ys.length - 1];
+  const bottom = ys[0];
   const plotH = h - M.top - M.bottom;
   const y = (c: number) => M.top + ((top - c) / (top - bottom || 1)) * plotH;
   const band = (w - M.left - M.right) / pts.length;
@@ -249,12 +269,13 @@ function roundedBar(x: number, y: number, bw: number, bh: number, r: number, up:
 function Line({ view, w, h }: { view: ChartView; w: number; h: number }) {
   const pts = view.points;
   const vals = pts.map((p) => p.cents);
-  let lo = Math.min(...vals);
-  let hi = Math.max(...vals);
-  const pad = (hi - lo) * 0.08 || Math.abs(hi) * 0.05 || 100_00;
-  lo -= pad;
-  hi += pad;
-  const ys = ticks(lo, hi).filter((t) => t >= lo && t <= hi);
+  const vlo = Math.min(...vals);
+  const vhi = Math.max(...vals);
+  // A little air so the line never rides the frame, then out to round ticks.
+  const pad = (vhi - vlo) * 0.04;
+  const ys = ticks(vlo - pad, vhi + pad);
+  const lo = ys[0];
+  const hi = ys[ys.length - 1];
   const plotH = h - M.top - M.bottom;
   const y = (c: number) => M.top + ((hi - c) / (hi - lo)) * plotH;
   const plotW = w - M.left - M.right;
@@ -265,11 +286,7 @@ function Line({ view, w, h }: { view: ChartView; w: number; h: number }) {
   const indexed = pts.map((p, i) => [p, i] as [ChartPoint, number]);
   const lit = indexed.filter(([p]) => p.highlighted);
   const one = lit.length === 1;
-  // About five date labels, evenly spaced, the last one on the last day.
-  const n = Math.min(5, pts.length);
-  const labelAt = new Set(
-    Array.from({ length: n }, (_, k) => Math.round((k * (pts.length - 1)) / Math.max(1, n - 1))),
-  );
+  const labels = dateLabels(pts, x, one ? lit[0][1] : null);
   const last = indexed[indexed.length - 1];
 
   return (
@@ -299,19 +316,62 @@ function Line({ view, w, h }: { view: ChartView; w: number; h: number }) {
         </>
       )}
       {!lit.length && <circle className="em-dot" cx={x(last[1])} cy={y(last[0].cents)} r={5} />}
-      {[...labelAt].map((i) => (
-        <text
-          key={i}
-          className="em-tick"
-          x={x(i)}
-          y={h - M.bottom + 26}
-          textAnchor={i === 0 ? "start" : i === pts.length - 1 ? "end" : "middle"}
-        >
-          {dayOf(pts[i].key)}
-        </text>
-      ))}
+      {labels.map((l) => {
+        const at = x(l.i);
+        const anchor =
+          at - M.left < LABEL_HALF ? "start" : w - M.right - at < LABEL_HALF ? "end" : "middle";
+        return (
+          <text
+            key={l.i}
+            className={`em-tick${l.lit ? " lit" : ""}`}
+            x={at}
+            y={h - M.bottom + 26}
+            textAnchor={anchor}
+          >
+            {l.text}
+          </text>
+        );
+      })}
     </g>
   );
+}
+
+// Half a date label's width, about: closer to the plot's edge than this,
+// a label is anchored at its end instead of centred so it stays inside.
+const LABEL_HALF = 36;
+// Labels closer than this to the lit day's label make way for it.
+const LABEL_GAP = 88;
+
+/**
+ * The line's date labels: month starts ("Oct"), at most five, counted back
+ * from the latest; under two months, about five evenly spaced days. The
+ * lit day, when there is one, gets its own bold label and its neighbours
+ * make room.
+ */
+function dateLabels(
+  pts: ChartPoint[],
+  x: (i: number) => number,
+  litAt: number | null,
+): { i: number; text: string; lit: boolean }[] {
+  const starts = pts.flatMap((p, i) => (p.key.endsWith("-01") ? [i] : []));
+  let out: { i: number; text: string; lit: boolean }[];
+  if (starts.length >= 2) {
+    const every = Math.ceil(starts.length / 5);
+    out = starts
+      .filter((_, k) => (starts.length - 1 - k) % every === 0)
+      .map((i) => ({ i, text: monthOf(pts[i].key), lit: false }));
+  } else {
+    const n = Math.min(5, pts.length);
+    const at = new Set(
+      Array.from({ length: n }, (_, k) => Math.round((k * (pts.length - 1)) / Math.max(1, n - 1))),
+    );
+    out = [...at].map((i) => ({ i, text: dayOf(pts[i].key), lit: false }));
+  }
+  if (litAt === null) return out;
+  return [
+    ...out.filter((l) => Math.abs(x(l.i) - x(litAt)) >= LABEL_GAP),
+    { i: litAt, text: dayOf(pts[litAt].key), lit: true },
+  ];
 }
 
 function ChartTable({ view }: { view: ChartView }) {

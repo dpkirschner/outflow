@@ -5,6 +5,12 @@ from 0 each month). Each section is drafted from commit subjects by
 git-cliff (`cliff.toml`) through `scripts/release.py`; big releases open
 with a short summary. See `docs/RELEASING.md`.
 
+## v2026.11.7 (2026-11-14)
+
+### Features
+
+- A chrome-less chart page, `/embed/chart`, that another app (the agent-avatar screen) can frame: spending or one category per month, or net worth, cash or invested per day, over a preset or explicit range, with an optional highlighted month, day or span. It reads the new `GET /api/chart`, whose parameters are a strict allow-list: anything unknown or malformed is a `400` naming the parameter. Light, dark or follow the device. Contract in `docs/API.md` "Embed views" (ho-qdy) ([f9372e8](https://github.com/dpkirschner/outflow/commit/f9372e8))
+
 ## v2026.11.6 (2026-11-14)
 
 ### Features

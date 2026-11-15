@@ -499,14 +499,25 @@ export type ChartPoint = {
  * The one big figure.
  */
 export type ChartHeadline = {
-  label: string,
-  cents: number,
   /**
-   * Balances: the change over the highlighted range, or over the whole
-   * range without a highlight. `null` for spending and a one-day
-   * highlight.
+   * What the figure is: "Average month", "Oct 2, 2026", "End of Sep 2026".
+   */
+  label: string,
+  /**
+   * `null` when there is no data to show (a day before the first
+   * snapshot, a range before history began): shown as a dash, never $0.
+   */
+  cents: number | null,
+  /**
+   * Balances: the change over the highlighted days, or over the whole
+   * range without a highlight. `null` for spending and whenever fewer
+   * than two days carry a value.
    */
   change_cents: number | null,
+  /**
+   * The change's baseline, e.g. "since Apr 1"; set with `change_cents`.
+   */
+  change_label: string | null,
 };
 
 /**
@@ -524,8 +535,10 @@ export type ChartView = {
    */
   range_label: string,
   /**
-   * Oldest first. Months with no spending are $0 bars; balance days run
-   * from the first snapshot in the range.
+   * Oldest first. Bars start at the later of the range's first month and
+   * the first month with any transaction (history before that is
+   * unknown, not $0); a month with no spending after that is a $0 bar.
+   * Balance days run from the first snapshot in the range.
    */
   points: Array<ChartPoint>,
   /**

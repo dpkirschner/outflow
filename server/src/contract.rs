@@ -179,8 +179,9 @@ fn chart_view() -> outflow_core::ChartView {
         partial_key: Some("2026-11".into()),
         headline: ChartHeadline {
             label: "Oct 2026".into(),
-            cents: 245_000,
+            cents: Some(245_000),
             change_cents: None,
+            change_label: None,
         },
     }
 }

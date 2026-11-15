@@ -24,13 +24,13 @@ export function unsignedCents(cents: number, minus = false): string {
   return minus && cents < 0 ? `\u2212${body}` : body;
 }
 
-/// Compact form for axis ticks and chart labels: $1.2k, $980, $3.4M.
+/// Compact form for axis ticks and chart labels: $1.2k, $1k, $980, $3.4M.
 export function formatCentsShort(cents: number): string {
   const neg = cents < 0;
   const abs = Math.abs(cents) / 100;
   let s: string;
-  if (abs >= 1_000_000) s = `${(abs / 1_000_000).toFixed(1)}M`;
-  else if (abs >= 1_000) s = `${(abs / 1_000).toFixed(1)}k`;
+  if (abs >= 1_000_000) s = `${(abs / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  else if (abs >= 1_000) s = `${(abs / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
   else s = abs.toFixed(0);
   return `${neg ? "-" : ""}$${s}`;
 }

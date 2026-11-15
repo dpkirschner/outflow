@@ -200,7 +200,8 @@ export const chartView: ChartView = {
   "headline": {
     "label": "Oct 2026",
     "cents": 245000,
-    "change_cents": null
+    "change_cents": null,
+    "change_label": null
   }
 };
 

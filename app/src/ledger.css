@@ -39,6 +39,19 @@
   --lg-kind-invest-edge: #4a3a1f;
   --lg-kind-invest-hover-edge: #7a6230;
   --lg-kind-invest-wash: #241d0f;
+  /* Chart marks (the embed, /embed/chart): every mark holds 3:1 on the
+     page, dim included; the highlight is full ink (--lg-text). */
+  --lg-mark: #717f92; /* 4.7:1 on --lg-bg */
+  --lg-mark-dim: #55637a; /* 3.2:1 */
+  --lg-mark-band: rgba(230, 237, 243, 0.07);
+  /* The embed's light variant: same roles, light paper. */
+  --lg-light-bg: #f6f7f9;
+  --lg-light-text: #111821;
+  --lg-light-dim: #4f5b6a; /* 6.4:1 */
+  --lg-light-divider: #e1e5ea;
+  --lg-light-mark: #6b7789; /* 4.2:1 */
+  --lg-light-mark-dim: #848fa0; /* 3.05:1 */
+  --lg-light-mark-band: rgba(17, 24, 33, 0.06);
 
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
@@ -3559,19 +3572,21 @@ button.fl-lane-figure {
 
 /* ── Embed (em-): the chart view another app frames (/embed/chart) ──────────
    No shell, one chart filling the frame, type sized for a desk's distance.
-   Its own tokens because it has a light variant: dark mirrors --lg-*, light
-   follows prefers-color-scheme unless theme= pins one. Grey marks; the
-   highlight is full ink, not a hue (Meaning-Only: teal stays interactive). */
+   Its own --em-* roles because it has a light variant: dark reads the --lg-*
+   tokens, light the --lg-light-* ones. The page resolves theme=auto to
+   light or dark from prefers-color-scheme, so there is one light block.
+   Grey marks at 3:1 or more; the highlight is full ink, not a hue
+   (Meaning-Only: teal stays interactive). The zero line is Text Dim so it
+   holds 3:1 too; grid lines are faint on purpose. */
 .em {
   --em-bg: var(--lg-bg);
   --em-text: var(--lg-text);
   --em-dim: var(--lg-dim);
   --em-grid: var(--lg-divider);
-  --em-base: var(--lg-line);
-  --em-mark: #5b6b80;
-  --em-mark-dim: #2a3647;
+  --em-mark: var(--lg-mark);
+  --em-mark-dim: var(--lg-mark-dim);
   --em-mark-lit: var(--lg-text);
-  --em-band: rgba(230, 237, 243, 0.07);
+  --em-band: var(--lg-mark-band);
   color-scheme: dark;
   position: fixed;
   inset: 0;
@@ -3584,30 +3599,15 @@ button.fl-lane-figure {
   overflow: hidden;
 }
 .em[data-theme="light"] {
-  --em-bg: #f6f7f9;
-  --em-text: #111821;
-  --em-dim: #4f5b6a;
-  --em-grid: #e1e5ea;
-  --em-base: #b9c1cc;
-  --em-mark: #8794a5;
-  --em-mark-dim: #d3d9e1;
-  --em-mark-lit: #111821;
-  --em-band: rgba(17, 24, 33, 0.06);
+  --em-bg: var(--lg-light-bg);
+  --em-text: var(--lg-light-text);
+  --em-dim: var(--lg-light-dim);
+  --em-grid: var(--lg-light-divider);
+  --em-mark: var(--lg-light-mark);
+  --em-mark-dim: var(--lg-light-mark-dim);
+  --em-mark-lit: var(--lg-light-text);
+  --em-band: var(--lg-light-mark-band);
   color-scheme: light;
-}
-@media (prefers-color-scheme: light) {
-  .em[data-theme="auto"] {
-    --em-bg: #f6f7f9;
-    --em-text: #111821;
-    --em-dim: #4f5b6a;
-    --em-grid: #e1e5ea;
-    --em-base: #b9c1cc;
-    --em-mark: #8794a5;
-    --em-mark-dim: #d3d9e1;
-    --em-mark-lit: #111821;
-    --em-band: rgba(17, 24, 33, 0.06);
-    color-scheme: light;
-  }
 }
 .em-head {
   display: flex;
@@ -3653,7 +3653,7 @@ button.fl-lane-figure {
   stroke-width: 1;
 }
 .em-base {
-  stroke: var(--em-base);
+  stroke: var(--em-dim);
   stroke-width: 1;
 }
 .em-tick {

@@ -15,6 +15,20 @@ import type { ChartPoint, ChartView } from "../types";
 const THEMES = ["auto", "light", "dark"] as const;
 type Theme = (typeof THEMES)[number];
 
+const LIGHT = "(prefers-color-scheme: light)";
+
+/** Whether the device asks for light, following it as it changes. */
+function usePrefersLight(): boolean {
+  const [light, setLight] = useState(() => window.matchMedia(LIGHT).matches);
+  useEffect(() => {
+    const m = window.matchMedia(LIGHT);
+    const on = () => setLight(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  return light;
+}
+
 export function Embed() {
   const params = new URLSearchParams(window.location.search);
   const themeParam = params.get("theme") ?? "auto";
@@ -23,6 +37,9 @@ export function Embed() {
   const theme: Theme | null = (THEMES as readonly string[]).includes(themeParam)
     ? (themeParam as Theme)
     : null;
+  // `auto` resolves here, so the stylesheet has one light block.
+  const prefersLight = usePrefersLight();
+  const resolved = theme === "light" || theme === "dark" ? theme : prefersLight ? "light" : "dark";
 
   const [view, setView] = useState<ChartView | null>(null);
   const [error, setError] = useState<string | null>(
@@ -50,7 +67,7 @@ export function Embed() {
   }, [view]);
 
   return (
-    <main className="em" data-theme={theme ?? "auto"}>
+    <main className="em" data-theme={resolved}>
       {error ? (
         <div className="em-error" role="alert">
           <p className="em-kicker">Can't show this chart</p>

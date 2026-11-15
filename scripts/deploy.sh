@@ -282,6 +282,9 @@ accounts /accounts?include_hidden=true
 items /plaid/items
 accepted /matches?status=accepted
 proposed /matches?status=proposed
+chart_spending /chart?metric=spending
+chart_spending_all /chart?metric=spending&range=all
+chart_net_worth /chart?metric=net_worth
 EOF
   code=$(api_get version /version)
   if [ "$code" = 200 ]; then
